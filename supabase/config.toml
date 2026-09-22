@@ -1,0 +1,50 @@
+project_id = "wyoidjjalbycimqpqzao"
+
+[functions.google-oauth-callback]
+verify_jwt = false
+
+[functions.create-user]
+verify_jwt = false
+
+[functions.admin-update-user]
+verify_jwt = false
+
+[functions.admin-set-user-active]
+verify_jwt = false
+
+[functions.bulk-import-members]
+verify_jwt = false
+
+[functions.bulk-upsert-members-full]
+verify_jwt = false
+
+[functions.reset-and-invite]
+verify_jwt = false
+
+[functions.seed-demo-members]
+verify_jwt = false
+
+[functions.seed-mentors]
+verify_jwt = false
+
+[functions.google-oauth-start]
+verify_jwt = false
+
+[functions.google-calendar-sync]
+verify_jwt = false
+
+[functions.organize-zoom-report]
+verify_jwt = false
+
+[functions.send-push]
+verify_jwt = false
+
+[functions.admin-delete-user]
+verify_jwt = false
+
+[functions.admin-merge-profiles]
+verify_jwt = false
+
+[functions.bulk-generate-access]
+verify_jwt = false
+

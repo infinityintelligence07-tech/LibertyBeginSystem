@@ -1,0 +1,1 @@
+ALTER TABLE public.booking_reports ADD COLUMN tool_link text;

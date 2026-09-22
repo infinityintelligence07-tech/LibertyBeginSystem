@@ -1,0 +1,1 @@
+ALTER TABLE public.session_tasks ADD COLUMN IF NOT EXISTS result_notes text;

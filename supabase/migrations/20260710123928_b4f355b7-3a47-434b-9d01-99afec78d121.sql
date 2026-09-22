@@ -1,0 +1,2 @@
+ALTER TABLE public.student_tools DROP CONSTRAINT student_tools_file_type_check;
+ALTER TABLE public.student_tools ADD CONSTRAINT student_tools_file_type_check CHECK (file_type = ANY (ARRAY['image'::text, 'pdf'::text, 'link'::text]));

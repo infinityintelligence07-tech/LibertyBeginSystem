@@ -1,0 +1,1 @@
+REVOKE ALL ON FUNCTION public.notify_nps_request_on_report() FROM PUBLIC, anon, authenticated;

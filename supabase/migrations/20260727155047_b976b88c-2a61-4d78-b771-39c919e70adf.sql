@@ -1,0 +1,1 @@
+UPDATE public.tool_templates SET name = 'Mapeamento do Negócio' WHERE slug = 'diagnostico-begin';

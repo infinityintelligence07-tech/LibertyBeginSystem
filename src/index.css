@@ -1,0 +1,306 @@
+@import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --background: 40 11% 3%;
+    --foreground: 40 25% 91%;
+
+    --card: 40 7% 8%;
+    --card-foreground: 40 25% 91%;
+
+    --popover: 40 7% 6%;
+    --popover-foreground: 40 25% 91%;
+
+    --primary: 214 12% 63%;
+    --primary-foreground: 40 11% 3%;
+
+    --secondary: 40 7% 10%;
+    --secondary-foreground: 40 25% 91%;
+
+    --muted: 40 4% 14%;
+    --muted-foreground: 38 8% 64%;
+
+    --accent: 40 7% 12%;
+    --accent-foreground: 40 25% 91%;
+
+    --destructive: 6 60% 58%;
+    --destructive-foreground: 40 25% 95%;
+
+    --border: 214 12% 63% / 0.09;
+    --input: 214 12% 63% / 0.12;
+    --stroke-subtle: 214 12% 63% / 0.10;
+    --stroke-focus: 214 12% 63% / 0.22;
+    --ring: 214 12% 63%;
+
+    --radius: 0.75rem;
+
+    /* Begin custom tokens */
+    --bg-obsidian: 40 11% 3%;
+    --bg-surface: 40 7% 6%;
+    --bg-surface-2: 40 5% 10%;
+    --bg-card: 40 7% 8%;
+
+    --silver: 214 12% 63%;
+    --silver-light: 214 14% 81%;
+    --silver-dark: 210 7% 47%;
+
+    --status-green: 152 46% 50%;
+    --status-yellow: 38 78% 60%;
+    --status-red: 6 65% 60%;
+    --status-blue: 214 62% 62%;
+
+    /* Acentos por pilar (trilha das ferramentas) */
+    --pillar-1: 199 78% 58%;
+    --pillar-2: 265 62% 66%;
+    --pillar-3: 330 62% 62%;
+    --pillar-4: 38 82% 60%;
+    --pillar-5: 152 52% 50%;
+    --pillar-6: 190 62% 52%;
+    --pillar-7: 14 74% 62%;
+
+
+    --sidebar-background: 40 11% 4%;
+    --sidebar-foreground: 40 25% 91%;
+    --sidebar-primary: 214 12% 63%;
+    --sidebar-primary-foreground: 40 11% 3%;
+    --sidebar-accent: 214 12% 63% / 0.08;
+    --sidebar-accent-foreground: 40 25% 91%;
+    --sidebar-border: 214 12% 63% / 0.10;
+    --sidebar-ring: 214 12% 63%;
+  }
+
+  /* Liberty premium theme: gold accents over obsidian */
+  .theme-liberty {
+    --primary: 45 65% 52%;
+    --primary-foreground: 40 11% 3%;
+    --accent: 45 60% 18%;
+    --accent-foreground: 45 80% 88%;
+    --border: 45 65% 52% / 0.08;
+    --input: 45 65% 52% / 0.10;
+    --stroke-subtle: 45 65% 52% / 0.08;
+    --stroke-focus: 45 65% 52% / 0.14;
+    --ring: 45 65% 52%;
+    --silver: 45 65% 52%;
+    --silver-light: 45 75% 72%;
+    --silver-dark: 45 55% 42%;
+    --sidebar-primary: 45 65% 52%;
+    --sidebar-primary-foreground: 40 11% 3%;
+    --sidebar-accent: 45 65% 52% / 0.10;
+    --sidebar-border: 45 65% 52% / 0.08;
+    --sidebar-ring: 45 65% 52%;
+  }
+
+  /* Light mode — cool near-white with slight blue tint, Begin graphite buttons */
+  .light {
+    --background: 210 22% 97%;
+    --foreground: 220 18% 12%;
+
+    --card: 0 0% 100%;
+    --card-foreground: 220 18% 12%;
+    --popover: 0 0% 100%;
+    --popover-foreground: 220 18% 12%;
+
+    --primary: 220 16% 20%;
+    --primary-foreground: 210 25% 98%;
+
+    --secondary: 210 18% 93%;
+    --secondary-foreground: 220 18% 16%;
+
+    --muted: 210 18% 94%;
+    --muted-foreground: 218 10% 38%;
+
+    --accent: 220 16% 20% / 0.08;
+    --accent-foreground: 220 16% 20%;
+
+    --destructive: 6 72% 46%;
+    --destructive-foreground: 0 0% 100%;
+
+    --border: 220 16% 20% / 0.10;
+    --input: 220 16% 20% / 0.14;
+    --stroke-subtle: 220 16% 20% / 0.08;
+    --stroke-focus: 220 16% 30% / 0.40;
+    --ring: 220 16% 30%;
+
+    --bg-obsidian: 210 22% 97%;
+    --bg-surface: 0 0% 100%;
+    --bg-surface-2: 210 18% 94%;
+    --bg-card: 0 0% 100%;
+
+    --silver: 214 12% 40%;
+    --silver-light: 214 14% 55%;
+    --silver-dark: 220 16% 22%;
+
+    --status-green: 147 55% 34%;
+    --status-yellow: 35 85% 42%;
+    --status-red: 8 72% 46%;
+    --status-blue: 214 68% 42%;
+
+    --pillar-1: 205 72% 40%;
+    --pillar-2: 265 52% 48%;
+    --pillar-3: 332 58% 44%;
+    --pillar-4: 32 82% 40%;
+    --pillar-5: 152 52% 32%;
+    --pillar-6: 192 62% 34%;
+    --pillar-7: 12 68% 46%;
+
+
+    --sidebar-background: 210 20% 95%;
+    --sidebar-foreground: 220 18% 14%;
+    --sidebar-primary: 220 16% 20%;
+    --sidebar-primary-foreground: 210 25% 98%;
+    --sidebar-accent: 220 16% 20% / 0.08;
+    --sidebar-accent-foreground: 220 16% 20%;
+    --sidebar-border: 220 16% 20% / 0.10;
+    --sidebar-ring: 220 16% 30%;
+  }
+
+  /* Liberty premium in light mode — same Begin identity (no gold in light mode) */
+  .light .theme-liberty,
+  .light.theme-liberty {
+    --background: 210 22% 97%;
+    --sidebar-background: 210 20% 95%;
+    --card: 0 0% 100%;
+    --bg-surface: 0 0% 100%;
+    --bg-surface-2: 210 18% 94%;
+    --bg-card: 0 0% 100%;
+
+    --primary: 220 16% 20%;
+    --primary-foreground: 210 25% 98%;
+    --accent: 220 16% 20% / 0.08;
+    --accent-foreground: 220 16% 20%;
+    --border: 220 16% 20% / 0.10;
+    --input: 220 16% 20% / 0.14;
+    --stroke-subtle: 220 16% 20% / 0.08;
+    --stroke-focus: 220 16% 30% / 0.40;
+    --ring: 220 16% 30%;
+
+    --silver: 214 12% 40%;
+    --silver-light: 214 14% 55%;
+    --silver-dark: 220 16% 22%;
+
+    --sidebar-primary: 220 16% 20%;
+    --sidebar-primary-foreground: 210 25% 98%;
+    --sidebar-accent: 220 16% 20% / 0.08;
+    --sidebar-accent-foreground: 220 16% 20%;
+    --sidebar-border: 220 16% 20% / 0.10;
+    --sidebar-ring: 220 16% 30%;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+
+  body {
+    @apply bg-background text-foreground antialiased;
+    font-family: 'Plus Jakarta Sans', sans-serif;
+  }
+
+  h1, h2, h3 {
+    font-family: 'Plus Jakarta Sans', sans-serif;
+    @apply font-semibold tracking-tight;
+  }
+}
+
+@layer components {
+  .silver-gradient-text {
+    background: linear-gradient(180deg, hsl(var(--foreground)) 0%, hsl(var(--silver)) 100%);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+  }
+
+  .glass-card {
+    @apply bg-card border border-border rounded-xl overflow-hidden;
+    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  }
+
+  :root .glass-card {
+    background-image: linear-gradient(135deg, hsl(var(--primary) / 0.025) 0%, transparent 55%);
+  }
+
+  .dark .glass-card {
+    background-image: none;
+  }
+
+  .glass-card:hover {
+    border-color: hsl(var(--stroke-focus));
+    box-shadow: 0 8px 32px hsl(var(--foreground) / 0.06);
+    transform: translateY(-2px);
+  }
+
+  .btn-silver {
+    @apply bg-primary text-primary-foreground font-semibold rounded-lg px-6 py-3 transition-all;
+  }
+
+  .btn-silver:hover {
+    background-color: hsl(214 14% 81%);
+    box-shadow: 0 0 20px hsl(214 12% 63% / 0.15);
+  }
+
+  .input-begin {
+    @apply bg-card border border-input rounded-lg px-4 py-3 text-foreground placeholder:text-muted-foreground transition-colors focus:outline-none focus:border-primary;
+  }
+
+  .status-badge {
+    @apply inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-medium tracking-wide uppercase;
+  }
+
+  .pillar-negocios { @apply bg-status-blue/10 text-status-blue; }
+  .pillar-emocional { @apply bg-status-red/10 text-status-red; }
+  .pillar-mentalidade { @apply bg-status-yellow/10 text-status-yellow; }
+  .pillar-espiritual { @apply bg-status-green/10 text-status-green; }
+}
+
+@layer utilities {
+  :where([class~="border"], [class*=" border-"], [class^="border-"]):not(.border-transparent):not(.border-t-transparent):not(.border-r-transparent):not(.border-b-transparent):not(.border-l-transparent):not(.border-0):not(.border-none) {
+    border-color: hsl(var(--stroke-subtle)) !important;
+  }
+
+  :where(.border-2, .border-t-2, .border-r-2, .border-b-2, .border-l-2, .border-\[1\.5px\], .border-\[2px\]) {
+    border-width: 1px !important;
+  }
+
+  :where([class*="hover:border-"]:hover, [class*="focus:border-"]:focus, [class*="focus-visible:border-"]:focus-visible) {
+    border-color: hsl(var(--stroke-focus)) !important;
+  }
+
+  :where(.ring-2, [class*="ring-primary"], [class*="ring-ring"], .focus-visible\:ring-2:focus-visible) {
+    --tw-ring-color: hsl(var(--stroke-focus)) !important;
+    --tw-ring-offset-width: 0px !important;
+  }
+
+  :where(.divide-y > :not([hidden]) ~ :not([hidden]), .divide-x > :not([hidden]) ~ :not([hidden])) {
+    border-color: hsl(var(--stroke-subtle)) !important;
+  }
+}
+
+@layer utilities {
+  .tabular-nums {
+    font-variant-numeric: tabular-nums;
+  }
+  .scrollbar-hide::-webkit-scrollbar {
+    display: none;
+  }
+  .scrollbar-hide {
+    -ms-overflow-style: none;
+    scrollbar-width: none;
+  }
+}
+
+/* Custom scrollbar */
+::-webkit-scrollbar {
+  width: 4px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: hsl(214 12% 63% / 0.4);
+  border-radius: 2px;
+}

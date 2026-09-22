@@ -1,0 +1,1 @@
+REVOKE EXECUTE ON FUNCTION public.get_ranking_board() FROM anon;

@@ -1,0 +1,1 @@
+REVOKE EXECUTE ON FUNCTION public.dispatch_booking_reminders() FROM PUBLIC, anon, authenticated;

@@ -1,0 +1,1 @@
+REVOKE ALL ON FUNCTION public.clear_pending_notifications_on_status_change() FROM PUBLIC, anon, authenticated;

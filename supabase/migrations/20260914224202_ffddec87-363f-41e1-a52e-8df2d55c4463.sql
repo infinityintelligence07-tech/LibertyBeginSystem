@@ -1,0 +1,1 @@
+UPDATE public.sessions SET name = 'Tecnologia', description = COALESCE(description, 'Sessão de tecnologia aplicada ao negócio') WHERE id = '6dd0f9c0-c6f5-48ca-a27e-a744daca37af' AND name = 'SWOT Inovações';

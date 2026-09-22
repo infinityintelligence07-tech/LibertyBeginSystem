@@ -1,0 +1,1 @@
+DROP INDEX IF EXISTS public.bookings_unique_liberty_session_active;
