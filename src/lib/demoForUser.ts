@@ -57,7 +57,7 @@ export interface DemoReportRow {
 const fakeMentorIds = ["demo-mentor-1", "demo-mentor-2"];
 const fakeMemberIds = ["demo-m-1", "demo-m-2", "demo-m-3", "demo-m-4"];
 
-const CDN = "https://wyoidjjalbycimqpqzao.supabase.co/storage/v1/object/public/session-covers";
+const CDN = `${import.meta.env.VITE_SUPABASE_URL}/storage/v1/object/public/session-covers`;
 
 /** Catálogo REAL da jornada Begin (ids, nomes, capas e ordem do banco). */
 export const demoSessionsCatalog = [
