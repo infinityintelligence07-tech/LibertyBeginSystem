@@ -1,4 +1,4 @@
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect } from "react";
 import { AppLayout } from "@/components/AppLayout";
 import { Calendar, Clock, CheckCircle2, ChevronLeft, ChevronRight, FileText, AlertCircle, Target, XCircle } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -25,6 +25,7 @@ import { ptBR } from "date-fns/locale";
 import { shortName } from "@/lib/formatName";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { TaskChecklist } from "@/components/TaskChecklist";
+import { UserAvatar } from "@/components/UserAvatar";
 import { useDemoData } from "@/contexts/DemoDataContext";
 import {
   demoBookingsForMentor, demoTasksForBookings, demoReportsForBookings,
@@ -58,7 +59,13 @@ const MentorSessoesPage = () => {
   const queryClient = useQueryClient();
   const [searchParams, setSearchParams] = useSearchParams();
   const { demoEnabled } = useDemoData();
-  const [currentMonth, setCurrentMonth] = useState(new Date());
+  const tabParam = searchParams.get("tab") as TabKey | null;
+  const activeTab: TabKey = tabParam && TAB_KEYS.includes(tabParam) ? tabParam : "upcoming";
+  const monthParam = searchParams.get("month");
+  const [currentMonth, setCurrentMonth] = useState(() => {
+    if (monthParam && /^\d{4}-\d{2}$/.test(monthParam)) return parseISO(`${monthParam}-01`);
+    return new Date();
+  });
   const [detailBookingId, setDetailBookingId] = useState<string | null>(null);
   const [notRealizedTarget, setNotRealizedTarget] = useState<string | null>(null);
   // Recusar / desmarcar pedem motivo em um BottomSheet (substitui window.prompt/confirm)
@@ -67,9 +74,11 @@ const MentorSessoesPage = () => {
   const [actingId, setActingId] = useState<string | null>(null);
   const { actingId: closingId, markCompleted, markNotRealized } = useMentorBookingActions();
 
-  // A aba vem direto da URL (sem estado duplicado)
-  const tabParam = searchParams.get("tab") as TabKey | null;
-  const activeTab: TabKey = tabParam && TAB_KEYS.includes(tabParam) ? tabParam : "upcoming";
+  useEffect(() => {
+    if (monthParam && /^\d{4}-\d{2}$/.test(monthParam)) {
+      setCurrentMonth(parseISO(`${monthParam}-01`));
+    }
+  }, [monthParam]);
 
   // Se o admin aprovar/recusar primeiro, a lista do mentor atualiza sozinha
   useBookingsRealtime(["mentor-bookings", "mentor-action-banner", "notifications-bell"], "mentor-sessoes");
@@ -118,7 +127,7 @@ const MentorSessoesPage = () => {
     queryKey: ["liberty-profiles", libertyIds],
     queryFn: async () => {
       if (libertyIds.length === 0) return [];
-      const { data, error } = await supabase.from("profiles").select("id, full_name").in("id", libertyIds);
+      const { data, error } = await supabase.from("profiles").select("id, full_name, avatar_url").in("id", libertyIds);
       if (error) throw error;
       return data || [];
     },
@@ -177,6 +186,9 @@ const MentorSessoesPage = () => {
 
   const reportBookingIds = useMemo(() => new Set(reports.map((r) => r.booking_id)), [reports]);
   const libertyMap = Object.fromEntries(libertyProfiles.map((p) => [p.id, p.full_name]));
+  const libertyAvatarMap = Object.fromEntries(
+    libertyProfiles.map((p) => [p.id, (p as { avatar_url?: string | null }).avatar_url ?? null]),
+  );
   const sessionMap = Object.fromEntries(sessions.map((s) => [s.id, s.name]));
   const sessionCoverMap = Object.fromEntries(sessions.map((s) => [s.id, s.cover_image_url]));
 
@@ -188,7 +200,10 @@ const MentorSessoesPage = () => {
 
   const filtered = useMemo(() => {
     if (activeTab === "upcoming") return monthBookings.filter(isFutureScheduledBooking);
-    if (activeTab === "pending") return monthBookings.filter((b) => getEffectiveBookingStatus(b) === "pending_approval");
+    if (activeTab === "pending") return monthBookings.filter((b) => {
+      const s = getEffectiveBookingStatus(b);
+      return s === "pending_approval" || s === "pending_confirmation";
+    });
     if (activeTab === "completed") return sortByScheduledDateDesc(monthBookings.filter(isRealizedSessionBooking));
     if (activeTab === "not_realized") return monthBookings.filter((b) => getEffectiveBookingStatus(b) === "not_realized");
     if (activeTab === "cancelled") return monthBookings.filter((b) => getEffectiveBookingStatus(b) === "cancelled");
@@ -197,7 +212,10 @@ const MentorSessoesPage = () => {
 
   const completedCount = monthBookings.filter(isRealizedSessionBooking).length;
   const scheduledCount = monthBookings.filter(isFutureScheduledBooking).length;
-  const pendingCount = monthBookings.filter((b) => getEffectiveBookingStatus(b) === "pending_approval").length;
+  const pendingCount = monthBookings.filter((b) => {
+    const s = getEffectiveBookingStatus(b);
+    return s === "pending_approval" || s === "pending_confirmation";
+  }).length;
   const notRealizedCount = monthBookings.filter((b) => getEffectiveBookingStatus(b) === "not_realized").length;
   const cancelledCount = monthBookings.filter((b) => getEffectiveBookingStatus(b) === "cancelled").length;
 
@@ -336,7 +354,16 @@ const MentorSessoesPage = () => {
                       last
                       leading={<DateBlock date={booking.scheduled_date} />}
                       title={sessionMap[booking.session_id] || "Sessão"}
-                      subtitle={`${memberNameOf(booking)} · ${timeRange(booking)}`}
+                      subtitle={
+                        <span className="inline-flex items-center gap-2 min-w-0">
+                          <UserAvatar
+                            name={memberNameOf(booking)}
+                            avatarUrl={booking.liberty_id ? libertyAvatarMap[booking.liberty_id] : null}
+                            size={22}
+                          />
+                          <span className="truncate">{memberNameOf(booking)} · {timeRange(booking)}</span>
+                        </span>
+                      }
                       trailing={<StatusPill status={effectiveStatus} />}
                       onPress={() => setDetailBookingId(booking.id)}
                       aria-label={`Detalhes da sessão ${sessionMap[booking.session_id] || ""} com ${memberNameOf(booking)}`}
@@ -419,7 +446,7 @@ const MentorSessoesPage = () => {
           const hasReport = reportBookingIds.has(detailBooking.id);
           const effectiveStatus = getEffectiveBookingStatus(detailBooking, { hasReport });
           const pendingAction = getMentorPendingAction(detailBooking, hasReport);
-          const canCancel = effectiveStatus === "scheduled";
+          const canCancel = effectiveStatus === "scheduled" || effectiveStatus === "pending_confirmation";
           const bTasks = allTasks.filter((t) => t.booking_id === detailBooking.id);
           const busy = actingId === detailBooking.id || closingId === detailBooking.id;
           const cover = sessionCoverMap[detailBooking.session_id];
@@ -429,6 +456,12 @@ const MentorSessoesPage = () => {
                 <img src={cover} alt="" className="w-full aspect-[3/1] object-cover rounded-[var(--ds-radius-md)]" />
               )}
               <div className="flex items-center gap-2 flex-wrap text-sm text-muted-foreground">
+                <UserAvatar
+                  name={memberNameOf(detailBooking)}
+                  avatarUrl={detailBooking.liberty_id ? libertyAvatarMap[detailBooking.liberty_id] : null}
+                  size={36}
+                />
+                <span className="text-sm font-medium text-foreground">{memberNameOf(detailBooking)}</span>
                 <StatusPill status={effectiveStatus} size="md" />
                 <span className="inline-flex items-center gap-1"><Clock className="h-3.5 w-3.5" aria-hidden /> {timeRange(detailBooking)}</span>
               </div>

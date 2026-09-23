@@ -10,7 +10,6 @@ import { UserAvatar } from "@/components/UserAvatar";
 import {
   Callout,
   Chip,
-  DateBlock,
   EmptyState,
   ErrorState,
   IconButton,
@@ -264,6 +263,13 @@ const MentorDashboardPage = () => {
       ),
     [allVisible, reportSet],
   );
+  const toConfirm = useMemo(
+    () =>
+      sortByScheduledDateDesc(
+        allVisible.filter((b) => getEffectiveBookingStatus(b) === "pending_confirmation"),
+      ),
+    [allVisible],
+  );
 
   // Mapeamento do Negócio (3h) = dobro do valor da sessão; mesma regra do admin (flag, duração ou nome)
   const feeOf = (b: { session_id: string }) => {
@@ -417,6 +423,7 @@ const MentorDashboardPage = () => {
         {/* Saudação + filtro de mês (ordem familiar ao time) */}
         <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3">
           <PageHeader
+            size="large"
             eyebrow="Mentoria"
             title={`${greeting}, ${firstName}`}
             description={
@@ -453,10 +460,11 @@ const MentorDashboardPage = () => {
 
         {!bookingsLoading && (
           <SectionCard className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-            <Stat
-              size="sm"
-              icon={DollarSign}
-              label={viewMode === "month" ? "Faturamento no mês" : "Faturamento geral"}
+              <Stat
+                size="sm"
+                icon={DollarSign}
+                tone="success"
+                label={viewMode === "month" ? "Faturamento no mês" : "Faturamento geral"}
               value={money(viewMode === "overview" ? totalEarnedAllTime : earnedThisPeriod)}
             />
             <Stat
@@ -475,20 +483,22 @@ const MentorDashboardPage = () => {
 
         {!bookingsLoading && pendingReports.length > 0 && (
           <Callout
-            tone="warning"
-            icon={AlertTriangle}
+            tone="info"
+            icon={FileText}
             title={
               pendingReports.length === 1
-                ? "Você tem 1 sessão sem relatório"
-                : `Você tem ${pendingReports.length} sessões sem relatório`
+                ? "1 relatório em aberto"
+                : `${pendingReports.length} relatórios em aberto`
             }
           >
             <ul className="space-y-2 mt-1">
               {pendingReports.slice(0, 8).map((b) => {
                 const memberName = shortName((b.liberty_id ? libertyName(b.liberty_id) : b.guest_name) || "Membro");
+                const memberAvatar = b.liberty_id ? libertyProfileMap[b.liberty_id]?.avatar_url : null;
                 return (
                   <li key={b.id} className="flex items-center justify-between gap-3">
-                    <div className="min-w-0">
+                    <div className="min-w-0 flex items-center gap-2">
+                      <UserAvatar name={memberName} avatarUrl={memberAvatar} size={28} />
                       <p className="text-sm text-foreground truncate">{memberName}</p>
                       <p className="text-xs text-muted-foreground truncate">
                         {sessionName(b.session_id)} · {format(parseISO(b.scheduled_date), "dd MMM", { locale: ptBR })}
@@ -496,6 +506,43 @@ const MentorDashboardPage = () => {
                     </div>
                     <Button size="sm" variant="outline" onClick={() => navigate(`/mentor/sessoes/${b.id}/relatorio`)}>
                       <FileText /> Preencher
+                    </Button>
+                  </li>
+                );
+              })}
+            </ul>
+          </Callout>
+        )}
+
+        {!bookingsLoading && toConfirm.length > 0 && (
+          <Callout
+            tone="info"
+            icon={Calendar}
+            title={
+              toConfirm.length === 1
+                ? "1 sessão passou e ainda não foi fechada"
+                : `${toConfirm.length} sessões passaram e ainda não foram fechadas`
+            }
+          >
+            <p className="mb-2">
+              Elas não contam como realizadas para você nem para o aluno. Abra cada uma e marque como realizada ou não realizada.
+            </p>
+            <ul className="space-y-2">
+              {toConfirm.slice(0, 8).map((b) => {
+                const memberName = shortName((b.liberty_id ? libertyName(b.liberty_id) : b.guest_name) || "Membro");
+                const memberAvatar = b.liberty_id ? libertyProfileMap[b.liberty_id]?.avatar_url : null;
+                const month = b.scheduled_date.slice(0, 7);
+                return (
+                  <li key={b.id} className="flex items-center justify-between gap-3">
+                    <div className="min-w-0 flex items-center gap-2">
+                      <UserAvatar name={memberName} avatarUrl={memberAvatar} size={28} />
+                      <p className="text-sm text-foreground truncate">{memberName}</p>
+                      <p className="text-xs text-muted-foreground truncate">
+                        {sessionName(b.session_id)} · {format(parseISO(b.scheduled_date), "dd MMM", { locale: ptBR })}
+                      </p>
+                    </div>
+                    <Button size="sm" variant="outline" onClick={() => navigate(`/mentor/sessoes?tab=pending&month=${month}`)}>
+                      Fechar
                     </Button>
                   </li>
                 );
@@ -528,13 +575,14 @@ const MentorDashboardPage = () => {
             <SectionCard padding="none">
               {upcoming.map((b, idx) => {
                 const memberName = libertyName(b.liberty_id) || b.guest_name || "Membro";
+                const memberAvatar = b.liberty_id ? libertyProfileMap[b.liberty_id]?.avatar_url : null;
                 return (
                   <ListRow
                     key={b.id}
                     last={idx === upcoming.length - 1}
-                    leading={<DateBlock date={b.scheduled_date} />}
+                    leading={<UserAvatar name={memberName} avatarUrl={memberAvatar} size={40} />}
                     title={shortName(memberName)}
-                    subtitle={`${sessionName(b.session_id)} · ${b.start_time?.slice(0, 5) ?? "--:--"}${b.end_time ? ` – ${b.end_time.slice(0, 5)}` : ""}`}
+                    subtitle={`${sessionName(b.session_id)} · ${format(parseISO(b.scheduled_date), "dd MMM", { locale: ptBR })} · ${b.start_time?.slice(0, 5) ?? "--:--"}${b.end_time ? ` – ${b.end_time.slice(0, 5)}` : ""}`}
                     chevron={false}
                     trailing={
                       <>
@@ -569,13 +617,14 @@ const MentorDashboardPage = () => {
                 const effectiveStatus = getEffectiveBookingStatus(b, { hasReport });
                 const pendingAction = getMentorPendingAction(b, hasReport);
                 const memberName = libertyName(b.liberty_id) || b.guest_name || "Membro";
+                const memberAvatar = b.liberty_id ? libertyProfileMap[b.liberty_id]?.avatar_url : null;
                 const isLast = idx === realized.length - 1;
 
                 return (
                   <div key={b.id} className={cn(!isLast && "border-b border-border")}>
                     <ListRow
                       last
-                      leading={<UserAvatar name={memberName} size={40} />}
+                      leading={<UserAvatar name={memberName} avatarUrl={memberAvatar} size={40} />}
                       title={shortName(memberName)}
                       subtitle={`${sessionName(b.session_id)} · ${format(parseISO(b.scheduled_date), "dd MMM", { locale: ptBR })}`}
                       chevron={false}

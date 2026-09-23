@@ -2,11 +2,10 @@
  * Status efetivo de um agendamento (regra única da plataforma).
  *
  * - `scheduled`            → agendada, ainda vai acontecer
- * - `awaiting_report`      → já passou (ou mentor marcou `completed`) e ainda falta o relatório.
- *                            Conta como realizada na jornada (comportamento operacional histórico).
- * - `completed`            → realizada (com relatório, ou sem exigir relatório: mapeamento/retroativa)
- * - `pending_confirmation` → reservado; não é mais atribuído automaticamente a sessões passadas
- *                            (voltamos à regra anterior para não zerar jornadas dos mentores).
+ * - `pending_confirmation` → passou do horário depois de 01/08/2026 e o mentor ainda não marcou como realizada.
+ *                            NÃO conta como realizada e NÃO pede relatório.
+ * - `awaiting_report`      → status bruto `completed` e ainda falta o relatório (só sessões a partir de 01/08/2026).
+ * - `completed`            → realizada (com relatório, ou sem exigir: mapeamento, retroativa ou anterior a 01/08/2026)
  * - `cancelled` / `not_realized` / `pending_approval` → status bruto do banco
  */
 export type EffectiveBookingStatus =
@@ -120,16 +119,15 @@ export const getEffectiveBookingStatus = (
     return "completed";
   }
   if (rawStatus === "pending_approval") return "pending_approval";
-  // scheduled / rescheduled no passado: comportamento operacional histórico da plataforma.
-  // Conta como realizada (ou "realizada · sem relatório") para não zerar jornadas e listas
-  // de alunos que os mentores já acompanhavam. O fechamento explícito ("A confirmar")
-  // continua disponível via ações do mentor quando o status bruto ainda é scheduled.
+  // scheduled / rescheduled que já passaram:
+  // - antes de 01/08/2026 (pré-migração): conta como realizada, sem relatório
+  // - a partir daí: NÃO é realizada e NÃO pede relatório enquanto o mentor não marcar `completed`
+  //   (desmarcada / não realizada nunca pode aparecer como feita para o aluno)
   if ((rawStatus === "scheduled" || rawStatus === "rescheduled") && isBookingPast(booking, now)) {
+    // Pré-migração, retroativa ou sem relatório exigido (ex.: mapeamento): realizada, sem pendência.
     if (!requiresReport(booking)) return "completed";
-    if (options.hasReport === false) return "awaiting_report";
-    if (options.hasReport === true) return "completed";
-    // Sem informação de relatório: trata como aguardando relatório (como antes da auditoria).
-    return "awaiting_report";
+    // Depois de 01/08/2026: não conta como realizada nem como "sem relatório" até o mentor marcar `completed`.
+    return "pending_confirmation";
   }
 
   if (rawStatus === "rescheduled") return "scheduled";
@@ -212,11 +210,7 @@ export const isAwaitingReport = (
   now = new Date(),
 ) => {
   if (hasReport) return false;
-  if (!requiresReport(booking)) return false;
-
-  const s = getEffectiveBookingStatus(booking, { now });
-  if (s === "cancelled" || s === "not_realized" || s === "pending_approval") return false;
-  return isBookingPast(booking, now);
+  return getEffectiveBookingStatus(booking, { hasReport, now }) === "awaiting_report";
 };
 
 /** Dias decorridos desde o fim da sessão (0 se ainda não passou). */

@@ -6,8 +6,9 @@ import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/hooks/useAuth";
 import { toast } from "sonner";
 import { shortName } from "@/lib/formatName";
+import { cn } from "@/lib/utils";
 import { DIAGNOSTICO_BEGIN_PILLARS, overallScore } from "@/lib/diagnosticoBegin";
-import { Radar as RadarIcon, Plus, Search, ChevronRight, Loader2, Wrench, Trash2 } from "lucide-react";
+import { Radar as RadarIcon, Plus, Search, ChevronRight, ChevronDown, Loader2, Wrench, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { UserAvatar } from "@/components/UserAvatar";
 import {
@@ -47,6 +48,7 @@ const MentorFerramentasPage = ({ role = "mentor" }: { role?: "mentor" | "admin" 
   const [search, setSearch] = useState("");
   const [toDelete, setToDelete] = useState<any>(null);
   const [statusFilter, setStatusFilter] = useState<"all" | "completed" | "in_progress">("all");
+  const [openMemberId, setOpenMemberId] = useState<string | null>(null);
 
 
   const { data: templates = [] } = useQuery({
@@ -99,7 +101,7 @@ const MentorFerramentasPage = ({ role = "mentor" }: { role?: "mentor" | "admin" 
 
   // Agrupa as aplicações por aluno para evitar a lista corrida gigante.
   const grouped = useMemo(() => {
-    const map = new Map<string, { memberId: string; name: string; company: string | null; items: any[] }>();
+    const map = new Map<string, { memberId: string; name: string; company: string | null; avatarUrl: string | null; items: any[] }>();
     filtered
       .filter((a: any) =>
         statusFilter === "all"
@@ -116,6 +118,7 @@ const MentorFerramentasPage = ({ role = "mentor" }: { role?: "mentor" | "admin" 
             memberId: key,
             name: m?.full_name || "Membro",
             company: m?.company_name || null,
+            avatarUrl: m?.avatar_url || null,
             items: [],
           });
         }
@@ -242,8 +245,8 @@ const MentorFerramentasPage = ({ role = "mentor" }: { role?: "mentor" | "admin" 
             title="Aplicações"
             description={
               totalApplications > 0
-                ? `${totalApplications} ${totalApplications === 1 ? "aplicação" : "aplicações"} em ${grouped.length} ${grouped.length === 1 ? "aluno" : "alunos"}`
-                : undefined
+                ? `${totalApplications} ${totalApplications === 1 ? "aplicação" : "aplicações"} em ${grouped.length} ${grouped.length === 1 ? "aluno" : "alunos"}. Toque no aluno para abrir.`
+                : "Cada ferramenta guarda as aplicações por aluno. A lista abre só quando você toca no nome."
             }
           />
           <div className="flex flex-col sm:flex-row sm:items-center gap-3">
@@ -294,20 +297,36 @@ const MentorFerramentasPage = ({ role = "mentor" }: { role?: "mentor" | "admin" 
               }
             />
           ) : (
-            <div className="space-y-4">
-              {grouped.map((g) => (
+            <div className="space-y-3">
+              {grouped.map((g) => {
+                const open = openMemberId === g.memberId;
+                return (
                 <SectionCard key={g.memberId} padding="none" as="article">
-                  <header className="flex items-center gap-3 px-4 sm:px-5 py-3 border-b border-border">
-                    <UserAvatar name={g.name} size={36} />
-                    <div className="min-w-0 flex-1">
+                  <header className="flex items-center gap-3 px-4 sm:px-5 py-3">
+                    <UserAvatar name={g.name} avatarUrl={g.avatarUrl} size={36} />
+                    <button
+                      type="button"
+                      className="min-w-0 flex-1 text-left"
+                      onClick={() => setOpenMemberId(open ? null : g.memberId)}
+                      aria-expanded={open}
+                    >
                       <p className="text-sm font-semibold text-foreground truncate">{shortName(g.name)}</p>
                       {g.company && <p className="text-xs text-muted-foreground truncate">{g.company}</p>}
-                    </div>
+                    </button>
                     <StatusPill tone="neutral" withDot={false}>
                       {g.items.length} {g.items.length === 1 ? "aplicação" : "aplicações"}
                     </StatusPill>
+                    <IconButton
+                      aria-label={open ? "Recolher aplicações" : "Ver aplicações"}
+                      size="sm"
+                      variant="ghost"
+                      onClick={() => setOpenMemberId(open ? null : g.memberId)}
+                    >
+                      <ChevronDown className={cn("h-4 w-4 transition-transform", open && "rotate-180")} />
+                    </IconButton>
                   </header>
-                  <ul>
+                  {open && (
+                  <ul className="border-t border-border">
                     {g.items.map((a: any, idx: number) => {
                       const done = a.status === "completed";
                       const total = overallScore(a.scores || {});
@@ -345,8 +364,10 @@ const MentorFerramentasPage = ({ role = "mentor" }: { role?: "mentor" | "admin" 
                       );
                     })}
                   </ul>
+                  )}
                 </SectionCard>
-              ))}
+                );
+              })}
             </div>
           )}
         </section>

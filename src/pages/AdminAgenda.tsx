@@ -126,6 +126,7 @@ const formatDuration = (durationMinutes?: number | null) => {
 interface MentorInfo {
   id: string;
   full_name: string;
+  avatar_url?: string | null;
 }
 
 interface BookingRow {
@@ -146,12 +147,12 @@ interface BookingRow {
   observations: string | null;
   cancellation_reason: string | null;
   availability_id: string | null;
-  liberty: { full_name: string; member_tier?: "begin" | "liberty" | null } | null;
+  liberty: { full_name: string; avatar_url?: string | null; member_tier?: "begin" | "liberty" | null } | null;
   sessions: { name: string; duration_minutes?: number | null; is_kickoff?: boolean | null } | null;
 }
 
 const BOOKING_SELECT =
-  "*, liberty:profiles!bookings_liberty_id_fkey(full_name, member_tier), sessions(name, duration_minutes, is_kickoff)";
+  "*, liberty:profiles!bookings_liberty_id_fkey(full_name, avatar_url, member_tier), sessions(name, duration_minutes, is_kickoff)";
 
 /* ───── Constants ───── */
 // 9 distinct hues, one per mentor (cycles only if >9 mentors)
@@ -292,7 +293,7 @@ const AdminAgendaPage = () => {
       if (mentorUserIds.length === 0) return [] as MentorInfo[];
       const { data, error } = await supabase
         .from("profiles")
-        .select("id, full_name")
+        .select("id, full_name, avatar_url")
         .in("user_id", mentorUserIds)
         .order("full_name");
       if (error) throw error;
@@ -590,7 +591,7 @@ const AdminAgendaPage = () => {
     queryFn: async () => {
       const { data, error } = await supabase
         .from("profiles")
-        .select("id, full_name")
+        .select("id, full_name, avatar_url")
         .in("member_tier", ["liberty", "begin"])
         .eq("is_active", true)
         .order("full_name");
@@ -1645,7 +1646,7 @@ const AdminAgendaPage = () => {
         {selectedBooking && selectedEffective && (
           <div className="space-y-4">
             <div className="flex items-center gap-3">
-              <UserAvatar name={selectedBooking.liberty?.full_name || selectedBooking.guest_name || "?"} size={40} />
+              <UserAvatar name={selectedBooking.liberty?.full_name || selectedBooking.guest_name || "?"} avatarUrl={selectedBooking.liberty?.avatar_url} size={40} />
               <div className="min-w-0">
                 <p className="text-sm font-medium text-foreground truncate">{participantName(selectedBooking)}</p>
                 <p className="text-xs text-muted-foreground">
@@ -1747,7 +1748,7 @@ const AdminAgendaPage = () => {
                       last={i === allMentors.length - 1}
                       onPress={isCurrent ? undefined : () => handleMentorSwap(m.id)}
                       active={isCurrent}
-                      leading={<UserAvatar name={m.full_name} size={32} />}
+                      leading={<UserAvatar name={m.full_name} avatarUrl={(m as { avatar_url?: string | null }).avatar_url ?? null} size={32} />}
                       title={shortName(m.full_name)}
                       trailing={isCurrent ? <StatusPill tone="neutral" size="sm" withDot={false}>Atual</StatusPill> : undefined}
                       chevron={!isCurrent}
@@ -1934,7 +1935,7 @@ const AdminAgendaPage = () => {
                         key={m.id}
                         last={i === filteredMembers.length - 1}
                         onPress={() => { setManualLiberty(m.id); setLibertySearch(shortName(m.full_name)); }}
-                        leading={<UserAvatar name={m.full_name} size={28} />}
+                        leading={<UserAvatar name={m.full_name} avatarUrl={m.avatar_url} size={28} />}
                         title={shortName(m.full_name)}
                         className="min-h-[44px]"
                       />

@@ -520,7 +520,7 @@ const AgendaOverviewPage = () => {
 
   // Filtered list shown on the side panel: a specific day or "all upcoming"
   const visibleSlots = useMemo(() => {
-    if (!selectedDate) return allSlots;
+    if (!selectedDate) return allSlots.slice(0, 6);
     const ds = format(selectedDate, "yyyy-MM-dd");
     return allSlots.filter((s) => s.dateStr === ds);
   }, [allSlots, selectedDate]);
@@ -779,7 +779,7 @@ const AgendaOverviewPage = () => {
               )}
               {selectedDate && (
                 <Button variant="link" size="sm" className="ml-auto h-auto p-0" onClick={() => setSelectedDate(null)}>
-                  Ver todos os dias
+                  Ver os próximos
                 </Button>
               )}
             </div>
@@ -800,7 +800,7 @@ const AgendaOverviewPage = () => {
                   <span className="first-letter:uppercase inline-block">
                     {selectedDate
                       ? format(selectedDate, "EEEE, dd 'de' MMMM", { locale: ptBR })
-                      : `${visibleSlots.length} disponíve${visibleSlots.length !== 1 ? "is" : "l"}`}
+                      : "Toque num dia do calendário. Aqui ficam só os próximos horários."}
                   </span>
                 }
                 className="min-w-0"
