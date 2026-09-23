@@ -74,7 +74,7 @@ export const InstallPromptBanner = () => {
     if (deferred) {
       await deferred.prompt();
       const { outcome } = await deferred.userChoice;
-      if (outcome === "accepted") toast.success("App instalado!");
+      if (outcome === "accepted") toast.success("App instalado");
       setDeferred(null);
       setVisible(false);
       return;
@@ -98,7 +98,7 @@ export const InstallPromptBanner = () => {
         className="fixed inset-x-0 z-40 px-4 pointer-events-none bottom-[calc(env(safe-area-inset-bottom,0px)_+_4.5rem)] lg:bottom-6 lg:left-60"
       >
         <SectionCard padding="compact" className="max-w-md mx-auto pointer-events-auto shadow-ds-2 flex items-center gap-3">
-          <Smartphone className="h-5 w-5 text-primary shrink-0" aria-hidden />
+          <Smartphone className="h-5 w-5 text-muted-foreground shrink-0" aria-hidden />
           <div className="flex-1 min-w-0">
             <p className="text-sm font-semibold text-foreground leading-tight">Instalar Liberty Begin</p>
             <p className="text-xs text-muted-foreground leading-tight mt-0.5">Acesso rápido pelo ícone, como um app.</p>

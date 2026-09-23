@@ -68,22 +68,22 @@ export const TestimonialsCard = () => {
       <div className="flex items-start justify-between gap-3 flex-wrap">
         <div className="min-w-0">
           <p className="ds-kicker flex items-center gap-1.5">
-            <Star className="h-3.5 w-3.5 text-primary" aria-hidden /> Meus depoimentos
+            <Star className="h-3.5 w-3.5 text-muted-foreground" aria-hidden /> Meus depoimentos
           </p>
-          <h3 className="text-[17px] font-semibold text-foreground mt-1 tracking-[var(--ds-tracking-title-sm)]">Conte seus resultados</h3>
+          <h3 className="text-[17px] font-semibold text-foreground mt-1 tracking-[var(--ds-tracking-title-sm)]">Registre seus resultados</h3>
           <p className="text-xs text-muted-foreground mt-0.5">
-            Cada depoimento vale <strong className="text-primary font-semibold">+20 pts</strong> no ranking. Total: <span className="tabular-nums">{totalPoints}</span> pts.
+            Cada depoimento vale <strong className="text-foreground font-semibold">+20 pts</strong> no ranking. Total: <span className="tabular-nums">{totalPoints}</span> pts.
           </p>
         </div>
         {!open && (
-          <Button size="sm" variant="secondary" onClick={() => setOpen(true)}>
-            <Plus className="h-3.5 w-3.5" /> Novo depoimento
+          <Button size="sm" variant="outline" onClick={() => setOpen(true)}>
+            <Plus className="h-4 w-4" aria-hidden /> Novo depoimento
           </Button>
         )}
       </div>
 
       {open && (
-        <SectionCard tone="brand" padding="compact" className="space-y-3">
+        <div className="space-y-3 border-t border-border pt-4">
           <TextField
             label="Título"
             value={headline}
@@ -124,7 +124,7 @@ export const TestimonialsCard = () => {
               {saving && <Loader2 className="h-4 w-4 animate-spin" />} Salvar depoimento
             </Button>
           </div>
-        </SectionCard>
+        </div>
       )}
 
       {testimonials.length === 0 && !open ? (
@@ -135,9 +135,9 @@ export const TestimonialsCard = () => {
           description="Registre suas conquistas para subir no ranking."
         />
       ) : (
-        <div className="space-y-2">
+        <div className="divide-y divide-border border-t border-border">
           {testimonials.map((t: any) => (
-            <div key={t.id} className="rounded-ds border border-border bg-card p-3 space-y-1">
+            <div key={t.id} className="py-3 space-y-1">
               <div className="flex items-start justify-between gap-2">
                 <p className="text-sm font-semibold text-foreground min-w-0">{t.headline}</p>
                 <IconButton
@@ -150,7 +150,7 @@ export const TestimonialsCard = () => {
                 </IconButton>
               </div>
               <p className="text-xs text-muted-foreground leading-relaxed line-clamp-3">{t.content}</p>
-              {t.result_metric && <p className="text-xs text-primary font-semibold">Resultado: {t.result_metric}</p>}
+              {t.result_metric && <p className="text-xs text-foreground font-medium">Resultado: {t.result_metric}</p>}
               <StatusPill tone={t.is_public ? "success" : "neutral"} withDot={false}>
                 {t.is_public ? "Público" : "Privado"}
               </StatusPill>

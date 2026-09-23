@@ -10,7 +10,7 @@ interface LibertyMarkProps {
 
 /**
  * Official Liberty mark — the gold lion icon.
- * Replaces every ✨ sparkle that was previously used as the Liberty signifier.
+ * Replaces the sparkle symbol that was previously used as the Liberty signifier.
  */
 export const LibertyMark = ({ className, size = 14, withLabel = false }: LibertyMarkProps) => {
   return (

@@ -60,8 +60,8 @@ export const WeekTasksBento = ({ tasks, sessionNameByBooking }: Props) => {
   const visibleUnscheduled = showAllUnscheduled ? unscheduled : unscheduled.slice(0, 4);
 
   const StatusIcon = ({ t, className = "h-4 w-4" }: { t: Task; className?: string }) => {
-    if (t.is_completed) return <CheckCircle2 className={cn(className, "text-status-green")} aria-hidden />;
-    if (t.in_progress) return <PlayCircle className={cn(className, "text-status-blue")} aria-hidden />;
+    if (t.is_completed) return <CheckCircle2 className={cn(className, "text-muted-foreground")} aria-hidden />;
+    if (t.in_progress) return <PlayCircle className={cn(className, "text-muted-foreground")} aria-hidden />;
     return <CircleDot className={cn(className, "text-muted-foreground")} aria-hidden />;
   };
 
@@ -84,7 +84,7 @@ export const WeekTasksBento = ({ tasks, sessionNameByBooking }: Props) => {
           as="h3"
           title={
             <span className="inline-flex items-center gap-2">
-              <ListTodo className="h-4 w-4 text-primary" aria-hidden />
+              <ListTodo className="h-4 w-4 text-muted-foreground" aria-hidden />
               Tarefas da semana
             </span>
           }
@@ -99,24 +99,22 @@ export const WeekTasksBento = ({ tasks, sessionNameByBooking }: Props) => {
         />
 
         {focus ? (
-          <SectionCard
-            as="button"
-            interactive
-            tone="brand"
-            padding="compact"
+          <button
+            type="button"
             onClick={() => setPlanTaskId(focus.id)}
             aria-label={`Planejar tarefa: ${focus.description}`}
+            className="w-full text-left rounded-ds transition-colors duration-ds-1 ease-ds hover:bg-accent/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 ring-offset-background"
           >
             <div className="flex items-start gap-3">
               <StatusIcon t={focus} className="h-5 w-5 mt-0.5 shrink-0" />
               <div className="flex-1 min-w-0">
-                <p className="ds-kicker text-primary mb-1">
+                <p className="ds-kicker mb-1">
                   {focusDate && isToday(focusDate) ? "Foco de hoje" : "Próxima tarefa"}
                 </p>
                 <p className="text-[15px] text-foreground font-medium leading-snug">{focus.description}</p>
                 <div className="flex flex-wrap items-center gap-2 mt-2">
                   {focusDate && (
-                    <StatusPill tone="brand" withDot={false}>
+                    <StatusPill tone="neutral" withDot={false}>
                       {isToday(focusDate) ? "Hoje" : format(focusDate, "EEE, dd MMM", { locale: ptBR })}
                     </StatusPill>
                   )}
@@ -132,7 +130,7 @@ export const WeekTasksBento = ({ tasks, sessionNameByBooking }: Props) => {
               </div>
               <ChevronRight className="h-4 w-4 text-muted-foreground mt-1 shrink-0" aria-hidden />
             </div>
-          </SectionCard>
+          </button>
         ) : (
           <EmptyState
             compact
@@ -180,20 +178,20 @@ export const WeekTasksBento = ({ tasks, sessionNameByBooking }: Props) => {
                   "rounded-ds min-h-[56px] p-2 text-center transition-colors duration-ds-1 ease-ds border",
                   "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 ring-offset-background",
                   highlight
-                    ? "bg-primary/10 border-primary/25"
+                    ? "border-border bg-card"
                     : count > 0
                     ? "bg-muted/40 hover:bg-muted border-transparent"
                     : "border-transparent",
                   count === 0 ? "cursor-default" : "cursor-pointer",
                 )}
               >
-                <p className={cn("text-[11px] font-medium", highlight ? "text-primary" : "text-muted-foreground")}>
+                <p className={cn("text-[11px] font-medium", highlight ? "text-foreground" : "text-muted-foreground")}>
                   {format(d, "EEE", { locale: ptBR }).replace(".", "")}
                 </p>
-                <p className={cn("text-sm tabular-nums mt-0.5", highlight ? "text-primary font-semibold" : "text-foreground")}>
+                <p className={cn("text-sm tabular-nums mt-0.5", highlight ? "text-foreground font-semibold" : "text-foreground")}>
                   {format(d, "dd")}
                 </p>
-                <p className={cn("text-[11px] mt-0.5 tabular-nums", highlight ? "text-primary font-semibold" : count > 0 ? "text-foreground font-semibold" : "text-muted-foreground/40")}>
+                <p className={cn("text-[11px] mt-0.5 tabular-nums", count > 0 ? "text-foreground font-semibold" : "text-muted-foreground/40")}>
                   {count > 0 ? count : "·"}
                 </p>
               </button>

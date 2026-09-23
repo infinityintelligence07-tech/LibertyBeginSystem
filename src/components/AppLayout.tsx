@@ -194,7 +194,7 @@ export const AppLayout = ({ children, role = "liberty" }: LayoutProps) => {
               key={item.path}
               to={item.path}
               className={sidebarLinkClass}
-              activeClassName="bg-primary/15 text-foreground"
+              activeClassName="bg-accent text-foreground"
               inactiveClassName="text-muted-foreground hover:text-foreground hover:bg-accent"
             >
               <item.icon className="h-[18px] w-[18px] shrink-0" aria-hidden />
@@ -253,7 +253,7 @@ export const AppLayout = ({ children, role = "liberty" }: LayoutProps) => {
                 activeClassName="text-primary"
                 inactiveClassName="text-muted-foreground hover:text-foreground"
               >
-                <item.icon className="h-5 w-5" aria-hidden />
+                <item.icon className="h-[18px] w-[18px]" aria-hidden />
                 <span className="truncate max-w-full">{item.short ?? item.label}</span>
               </NavLink>
             </li>
@@ -267,7 +267,7 @@ export const AppLayout = ({ children, role = "liberty" }: LayoutProps) => {
                 aria-expanded={moreOpen}
                 className={cn(bottomLinkClass, moreActive ? "text-primary" : "text-muted-foreground hover:text-foreground")}
               >
-                <MoreHorizontal className="h-5 w-5" aria-hidden />
+                <MoreHorizontal className="h-[18px] w-[18px]" aria-hidden />
                 <span>Mais</span>
               </button>
             </li>
@@ -281,7 +281,7 @@ export const AppLayout = ({ children, role = "liberty" }: LayoutProps) => {
             {moreItems.map((item, i) => (
               <ListRow
                 key={item.path}
-                leading={<item.icon className="h-5 w-5 text-muted-foreground" aria-hidden />}
+                leading={<item.icon className="h-[18px] w-[18px] text-muted-foreground" aria-hidden />}
                 title={item.label}
                 onPress={() => goTo(item.path)}
                 active={isPathActive(location.pathname, item.path)}

@@ -1,11 +1,9 @@
 import { useMemo, useState } from "react";
-import { motion } from "framer-motion";
 import { AppLayout } from "@/components/AppLayout";
 import { ChevronDown, ChevronUp, BookOpen, Target, Gift, Lock, LockOpen, Check, Star, Trophy, ExternalLink } from "lucide-react";
 import { Link } from "react-router-dom";
 import { format, parseISO } from "date-fns";
 import { ptBR } from "date-fns/locale";
-import { staggerContainer, fadeUpItem } from "@/lib/animations";
 import { useAuth } from "@/hooks/useAuth";
 import { supabase } from "@/integrations/supabase/client";
 import { useQuery } from "@tanstack/react-query";
@@ -183,8 +181,8 @@ const JourneyPage = () => {
   return (
     <AppLayout role="liberty">
       <PageContainer>
-      <motion.div variants={staggerContainer} initial="hidden" animate="show" className="space-y-8">
-        <motion.div variants={fadeUpItem}>
+      <div className="space-y-8">
+        <div>
           <PageHeader
             size="large"
             eyebrow="Liberty Begin"
@@ -198,27 +196,27 @@ const JourneyPage = () => {
               ) : undefined
             }
           />
-        </motion.div>
+        </div>
 
         {isError && (
-          <motion.div variants={fadeUpItem}>
+          <div>
             <ErrorState
               compact
               title="Não foi possível carregar sua jornada"
               description="Verifique sua conexão e tente novamente."
               onRetry={() => void refetch()}
             />
-          </motion.div>
+          </div>
         )}
 
         {isLoading ? (
-          <motion.div variants={fadeUpItem}>
+          <div>
             <LoadingState variant="page" />
-          </motion.div>
+          </div>
         ) : (
         <>
         {/* Visão geral do progresso */}
-        <motion.div variants={fadeUpItem}>
+        <div>
           <SectionCard>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
               <div className="space-y-3">
@@ -227,9 +225,8 @@ const JourneyPage = () => {
                   label="Sessões realizadas"
                   value={`${completedCount}/${totalSessions}`}
                   hint={`${Math.round(progress)}%`}
-                  tone="success"
                 />
-                <ProgressBar value={completedCount} max={totalSessions} tone="success" label="Sessões realizadas" />
+                <ProgressBar value={completedCount} max={totalSessions} label="Sessões realizadas" />
               </div>
               <div className="space-y-3">
                 <Stat
@@ -237,9 +234,8 @@ const JourneyPage = () => {
                   label="Tarefas concluídas"
                   value={`${completedTasks}/${totalTasks}`}
                   hint={`${Math.round(taskProgress)}%`}
-                  tone="info"
                 />
-                <ProgressBar value={completedTasks} max={Math.max(totalTasks, 1)} tone="info" label="Tarefas concluídas" />
+                <ProgressBar value={completedTasks} max={Math.max(totalTasks, 1)} label="Tarefas concluídas" />
               </div>
             </div>
 
@@ -256,7 +252,6 @@ const JourneyPage = () => {
                       className={cn(
                         "inline-flex h-3.5 w-3.5 items-center justify-center rounded-full border",
                         dotClassFor(st),
-                        s.is_kickoff && "ring-2 ring-primary/30 ring-offset-1 ring-offset-card",
                       )}
                       title={label}
                       aria-label={label}
@@ -271,7 +266,7 @@ const JourneyPage = () => {
                   aria-label={giftUnlocked ? "Presente desbloqueado: Sessão Próximo Nível" : "Presente bloqueado: conclua a jornada"}
                   className={cn(
                     "inline-flex h-3.5 w-3.5 items-center justify-center rounded-full border",
-                    giftUnlocked ? "border-primary bg-primary/20 text-primary" : "border-dashed border-border text-muted-foreground",
+                    giftUnlocked ? "border-foreground text-foreground" : "border-dashed border-border text-muted-foreground",
                   )}
                 >
                   {giftUnlocked ? <LockOpen className="h-2.5 w-2.5" aria-hidden /> : <Lock className="h-2 w-2" aria-hidden />}
@@ -296,7 +291,7 @@ const JourneyPage = () => {
               </div>
             </div>
           </SectionCard>
-        </motion.div>
+        </div>
 
         {/* Onde estou e qual é o próximo passo */}
         {(() => {
@@ -307,16 +302,15 @@ const JourneyPage = () => {
           const pendingApproval = visibleBookings.filter((b) => getEffectiveBookingStatus(b) === "pending_approval");
 
           return (
-            <motion.div variants={fadeUpItem} className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
               <SectionCard padding="compact">
                 <Stat
                   label="Já realizadas"
                   value={completedCount}
                   hint={`de ${totalSessions}`}
-                  tone="success"
                 />
                 {pendingConfirmationCount > 0 && (
-                  <p className="text-xs text-status-orange mt-2" title={PENDING_CONFIRMATION_HINT}>
+                  <p className="text-xs text-muted-foreground mt-2" title={PENDING_CONFIRMATION_HINT}>
                     + {pendingConfirmationCount} a confirmar pelo mentor
                   </p>
                 )}
@@ -353,20 +347,20 @@ const JourneyPage = () => {
                 </p>
               </SectionCard>
               <SectionCard padding="compact" className="flex flex-col">
-                <Stat label="Disponíveis para agendar" value={availableCount} tone="brand" />
+                <Stat label="Disponíveis para agendar" value={availableCount} />
                 {availableCount > 0 && (
                   <Button asChild variant="outline" size="sm" className="mt-3 w-full">
                     <Link to="/agenda/agendar">Agendar próxima sessão</Link>
                   </Button>
                 )}
               </SectionCard>
-            </motion.div>
+            </div>
           );
         })()}
 
 
         {/* Linha do tempo — Realizado × Projetado */}
-        <motion.div variants={fadeUpItem}>
+        <div>
           <MemberTimeline
             profile={demoEnabled ? demoProfileFill(profile) : profile}
             bookings={visibleBookings}
@@ -377,11 +371,11 @@ const JourneyPage = () => {
             journeySessionIds={progressData.journeySessionIds}
             hideReportButton
           />
-        </motion.div>
+        </div>
 
-        <motion.div variants={fadeUpItem}>
+        <div>
           <TestimonialsCard />
-        </motion.div>
+        </div>
 
 
 
@@ -391,11 +385,11 @@ const JourneyPage = () => {
           const withResults = effectiveTasks.filter((t) => t.result_value);
           if (withResults.length === 0) return null;
           return (
-            <motion.section variants={fadeUpItem} aria-labelledby="journey-results-title" className="space-y-3">
+            <section aria-labelledby="journey-results-title" className="space-y-3">
               <SectionHeader
                 title={
                   <span id="journey-results-title" className="inline-flex items-center gap-2">
-                    <Trophy className="h-4 w-4 text-status-yellow" aria-hidden />
+                    <Trophy className="h-4 w-4 text-muted-foreground" aria-hidden />
                     Seus resultados
                   </span>
                 }
@@ -424,13 +418,13 @@ const JourneyPage = () => {
                   );
                 })}
               </SectionCard>
-            </motion.section>
+            </section>
           );
         })()}
 
 
         {/* Trilha das sessões (cronológica) */}
-        <motion.section variants={fadeUpItem} aria-labelledby="journey-trail-title" className="space-y-3">
+        <section aria-labelledby="journey-trail-title" className="space-y-3">
           <SectionHeader
             title={<span id="journey-trail-title">Trilha de sessões</span>}
             description="Sessões com agendamento aparecem primeiro, na ordem em que aconteceram."
@@ -485,11 +479,10 @@ const JourneyPage = () => {
                       className={cn(
                         "relative z-10 mt-0.5 inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-full border",
                         dotClassFor(st),
-                        isKickoff && "ring-2 ring-primary/30 ring-offset-2 ring-offset-card",
                       )}
                     >
                       {st === "completed" && <Check className="h-3.5 w-3.5" strokeWidth={3} />}
-                      {st !== "completed" && isKickoff && <Star className={cn("h-3 w-3", st === "available" ? "text-primary" : "text-primary-foreground")} />}
+                      {st !== "completed" && isKickoff && <Star className={cn("h-3 w-3", st === "available" ? "text-muted-foreground" : "text-primary-foreground")} />}
                     </span>
 
                     {/* Conteúdo */}
@@ -511,8 +504,8 @@ const JourneyPage = () => {
                             {session.name}
                           </p>
                           {isKickoff && (
-                            <StatusPill tone="brand" size="sm" withDot={false}>
-                              <Star className="h-3 w-3" aria-hidden /> Mapeamento · 3h
+                            <StatusPill tone="neutral" size="sm" withDot={false}>
+                              <Star className="h-3.5 w-3.5 text-muted-foreground" aria-label="Mapeamento" /> Mapeamento · 3h
                             </StatusPill>
                           )}
                           <span title={st === "pending_confirmation" ? PENDING_CONFIRMATION_HINT : undefined} className="inline-flex">
@@ -605,7 +598,7 @@ const JourneyPage = () => {
             })()}
             </ol>
           </SectionCard>
-        </motion.section>
+        </section>
 
         {/* Sessão bônus bloqueada (última da jornada) */}
         {(() => {
@@ -613,14 +606,14 @@ const JourneyPage = () => {
           const remaining = Math.max(totalSessions - completedCount, 0);
           const giftProgress = Math.min((completedCount / totalSessions) * 100, 100);
           return (
-            <motion.div variants={fadeUpItem}>
-              <SectionCard tone={unlocked ? "brand" : "default"} className={unlocked ? "" : "border-dashed"}>
+            <div>
+              <SectionCard className={unlocked ? "" : "border-dashed"}>
                 <div className="flex items-start gap-4">
-                  <div className={`flex h-12 w-12 shrink-0 items-center justify-center rounded-ds-lg border ${unlocked ? "border-primary/30 bg-primary/15 text-primary" : "border-border bg-muted text-muted-foreground"}`}>
-                    {unlocked ? <Gift className="h-6 w-6" aria-hidden /> : <Lock className="h-5 w-5" aria-hidden />}
-                  </div>
+                  {unlocked
+                    ? <Gift className="h-5 w-5 text-muted-foreground shrink-0 mt-0.5" aria-hidden />
+                    : <Lock className="h-5 w-5 text-muted-foreground shrink-0 mt-0.5" aria-hidden />}
                   <div className="min-w-0 flex-1">
-                    <p className="ds-kicker text-primary">Sessão bônus</p>
+                    <p className="ds-kicker">Sessão bônus</p>
                     <h3 className="mt-1 text-[17px] font-semibold text-foreground">
                       Próximo Nível: o segredo do seu negócio
                     </h3>
@@ -631,7 +624,7 @@ const JourneyPage = () => {
                     </p>
 
                     <div className="mt-4">
-                      <ProgressBar value={giftProgress} max={100} tone="brand" label="Progresso para a sessão bônus" />
+                      <ProgressBar value={giftProgress} max={100} label="Progresso para a sessão bônus" />
                     </div>
                     <p className="mt-2 text-xs text-muted-foreground tabular-nums">
                       {unlocked
@@ -641,13 +634,13 @@ const JourneyPage = () => {
                   </div>
                 </div>
               </SectionCard>
-            </motion.div>
+            </div>
           );
         })()}
         </>
         )}
 
-      </motion.div>
+      </div>
       </PageContainer>
     </AppLayout>
   );

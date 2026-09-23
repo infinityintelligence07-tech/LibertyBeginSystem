@@ -1,9 +1,7 @@
 import { useState, useEffect } from "react";
-import { motion } from "framer-motion";
 import { AppLayout } from "@/components/AppLayout";
 import { useAuth } from "@/hooks/useAuth";
 import { Calendar, LogOut } from "lucide-react";
-import { staggerContainer, fadeUpItem } from "@/lib/animations";
 import { toast } from "sonner";
 import { useNavigate } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
@@ -116,7 +114,7 @@ const ProfilePage = ({ role = "liberty" }: { role?: "liberty" | "mentor" | "admi
     if (error) {
       toast.error("Erro ao salvar perfil.");
     } else {
-      toast.success("Perfil atualizado com sucesso!");
+      toast.success("Perfil atualizado");
     }
   };
 
@@ -130,13 +128,13 @@ const ProfilePage = ({ role = "liberty" }: { role?: "liberty" | "mentor" | "admi
   return (
     <AppLayout role={role}>
       <PageContainer variant="narrow">
-        <motion.div variants={staggerContainer} initial="hidden" animate="show" className="space-y-6 lg:space-y-8">
-          <motion.div variants={fadeUpItem}>
+        <div className="space-y-6 lg:space-y-8">
+          <div>
             <PageHeader title="Meu perfil" description="Gerencie suas informações pessoais e integrações." />
-          </motion.div>
+          </div>
 
           {/* Avatar + nome */}
-          <motion.div variants={fadeUpItem}>
+          <div>
             <SectionCard className="flex flex-col sm:flex-row sm:items-center gap-5">
               {profile && (
                 <AvatarCropUpload profileId={profile.id} fullName={profile.full_name} avatarUrl={profile.avatar_url} size={96} />
@@ -151,10 +149,10 @@ const ProfilePage = ({ role = "liberty" }: { role?: "liberty" | "mentor" | "admi
                 )}
               </div>
             </SectionCard>
-          </motion.div>
+          </div>
 
           {/* Dados pessoais */}
-          <motion.section variants={fadeUpItem} className="space-y-3" aria-labelledby="perfil-dados">
+          <section className="space-y-3" aria-labelledby="perfil-dados">
             <SectionHeader title={<span id="perfil-dados">Dados pessoais</span>} />
             <SectionCard className="space-y-4">
               <TextField
@@ -187,18 +185,14 @@ const ProfilePage = ({ role = "liberty" }: { role?: "liberty" | "mentor" | "admi
                 </Button>
               </div>
             </SectionCard>
-          </motion.section>
+          </section>
 
           {/* Integrações */}
-          <motion.section variants={fadeUpItem} className="space-y-3" aria-labelledby="perfil-integracoes">
+          <section className="space-y-3" aria-labelledby="perfil-integracoes">
             <SectionHeader title={<span id="perfil-integracoes">Integrações</span>} />
             <SectionCard padding="none">
               <ListRow
-                leading={
-                  <span className="h-10 w-10 rounded-[var(--ds-radius-md)] bg-muted flex items-center justify-center">
-                    <Calendar className="h-5 w-5 text-muted-foreground" aria-hidden />
-                  </span>
-                }
+                leading={<Calendar className="h-5 w-5 text-muted-foreground shrink-0" aria-hidden />}
                 title="Google Agenda"
                 subtitle={googleConnected ? `Conectado: ${profile?.google_calendar_email}` : "Sincronize suas sessões automaticamente"}
                 trailing={
@@ -227,21 +221,21 @@ const ProfilePage = ({ role = "liberty" }: { role?: "liberty" | "mentor" | "admi
                 />
               )}
             </SectionCard>
-          </motion.section>
+          </section>
 
           {/* Notificações */}
-          <motion.div variants={fadeUpItem}>
+          <div>
             <NotificationSettingsCard />
-          </motion.div>
+          </div>
 
           {/* Sair */}
-          <motion.div variants={fadeUpItem} className="pt-2">
+          <div className="pt-2">
             <Button variant="outline" onClick={handleSignOut} className="w-full sm:w-auto text-destructive hover:text-destructive">
               <LogOut aria-hidden />
               Sair da conta
             </Button>
-          </motion.div>
-        </motion.div>
+          </div>
+        </div>
       </PageContainer>
     </AppLayout>
   );

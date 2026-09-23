@@ -1,6 +1,5 @@
 import { useState, useMemo } from "react";
 import { sessionFee } from "@/lib/mentorFees";
-import { motion } from "framer-motion";
 import { AppLayout } from "@/components/AppLayout";
 import { GoogleCalendarBanner } from "@/components/GoogleCalendarBanner";
 import { Calendar, ClipboardList, AlertTriangle, ExternalLink, ChevronLeft, ChevronRight, ChevronDown, FileText, DollarSign, TrendingUp, Wallet, HelpCircle, CalendarDays } from "lucide-react";
@@ -33,7 +32,6 @@ import {
   useMentorBookingActions,
 } from "@/components/mentor/MentorBookingActions";
 import { differenceInDays } from "date-fns";
-import { staggerContainer, fadeUpItem } from "@/lib/animations";
 import { useAuth } from "@/hooks/useAuth";
 import { supabase } from "@/integrations/supabase/client";
 import { useQuery } from "@tanstack/react-query";
@@ -244,17 +242,17 @@ const MentorDashboardPage = () => {
   const totalEarnedAllTime = sumFees(allTimeRealized);
 
   const stats = [
-    { label: "Sessões realizadas", value: realized.length, icon: ClipboardList, tone: "success" as const, tab: "completed", tooltip: "Ver sessões realizadas" },
-    { label: "Sessões agendadas", value: scheduled.length, icon: Calendar, tone: "info" as const, tab: "upcoming", tooltip: "Ver sessões agendadas" },
+    { label: "Sessões realizadas", value: realized.length, icon: ClipboardList, tone: "default" as const, tab: "completed", tooltip: "Ver sessões realizadas" },
+    { label: "Sessões agendadas", value: scheduled.length, icon: Calendar, tone: "default" as const, tab: "upcoming", tooltip: "Ver sessões agendadas" },
     { label: "A confirmar", value: pendingConfirmation.length, icon: HelpCircle, tone: "pending" as const, tab: "to_confirm", tooltip: "Sessões passadas que você ainda não confirmou" },
-    { label: "Relatórios pendentes", value: pendingReports.length, icon: AlertTriangle, tone: "warning" as const, tab: "to_confirm", tooltip: "Sessões realizadas sem relatório" },
+    { label: "Relatórios pendentes", value: pendingReports.length, icon: AlertTriangle, tone: "default" as const, tab: "to_confirm", tooltip: "Sessões realizadas sem relatório" },
   ];
 
   const greeting = (() => {
     const h = new Date().getHours();
-    if (h < 12) return "Faça um bom dia";
-    if (h < 18) return "Faça uma boa tarde";
-    return "Faça uma boa noite";
+    if (h < 12) return "Bom dia";
+    if (h < 18) return "Boa tarde";
+    return "Boa noite";
   })();
 
   const money = (v: number) => `R$ ${v.toLocaleString("pt-BR", { minimumFractionDigits: 2 })}`;
@@ -350,11 +348,11 @@ const MentorDashboardPage = () => {
   return (
     <AppLayout role="mentor">
       <PageContainer>
-      <motion.div variants={staggerContainer} initial="hidden" animate="show" className="space-y-6 lg:space-y-8">
+      <div className="space-y-6 lg:space-y-8">
         <GoogleCalendarBanner />
 
         {/* Saudação */}
-        <motion.div variants={fadeUpItem}>
+        <div>
           <PageHeader
             eyebrow="Mentoria"
             title={`${greeting}, ${firstName}`}
@@ -364,19 +362,19 @@ const MentorDashboardPage = () => {
                 : `Você já impactou ${companiesImpacted} ${companiesImpacted === 1 ? "empresa" : "empresas"}.`
             }
           />
-        </motion.div>
+        </div>
 
         {bookingsError && (
-          <motion.div variants={fadeUpItem}>
+          <div>
             <ErrorState title="Não foi possível carregar suas sessões" onRetry={() => refetchBookings()} />
-          </motion.div>
+          </div>
         )}
 
         <MentorActionBanner />
 
         {/* Pendências: sessões passadas a confirmar ou sem relatório (todos os períodos) */}
         {!bookingsLoading && pendingActions.length > 0 && (
-          <motion.section variants={fadeUpItem} className="space-y-3" aria-labelledby="mentor-pendencias">
+          <section className="space-y-3" aria-labelledby="mentor-pendencias">
             <SectionHeader
               title={<span id="mentor-pendencias">Pendências</span>}
               description="Sessões passadas que ainda precisam do seu fechamento"
@@ -396,7 +394,7 @@ const MentorDashboardPage = () => {
                   return (
                     <li key={b.id} className={cn("px-4 py-3 space-y-3", overdue && "bg-destructive/5")}>
                       <div className="flex items-center gap-3">
-                        <DateBlock date={b.scheduled_date} tone={overdue ? "brand" : "default"} />
+                        <DateBlock date={b.scheduled_date} />
                         <div className="min-w-0 flex-1">
                           {b.liberty_id ? (
                             <Button variant="link" size="sm" className="h-auto p-0 text-sm font-medium text-foreground" onClick={() => navigate(`/mentor/alunos/${b.liberty_id}`)}>
@@ -425,11 +423,11 @@ const MentorDashboardPage = () => {
                 })}
               </ul>
             </Callout>
-          </motion.section>
+          </section>
         )}
 
         {/* Próximas sessões: sempre da lista completa do mentor */}
-        <motion.section variants={fadeUpItem} className="space-y-3">
+        <section className="space-y-3">
           <SectionHeader
             title="Próximas sessões"
             description={upcomingAll.length > 0 ? `${upcomingAll.length} agendada${upcomingAll.length !== 1 ? "s" : ""} no total` : undefined}
@@ -483,10 +481,10 @@ const MentorDashboardPage = () => {
               })}
             </SectionCard>
           )}
-        </motion.section>
+        </section>
 
         {/* Impacto: números do período + financeiro */}
-        <motion.section variants={fadeUpItem} className="space-y-3">
+        <section className="space-y-3">
           <SectionHeader title="Impacto" description={<span className="capitalize">{periodLabel}</span>} actions={periodControls} />
           {bookingsLoading ? (
             <LoadingState variant="stats" rows={4} />
@@ -511,22 +509,20 @@ const MentorDashboardPage = () => {
               <Stat
                 size="sm"
                 icon={DollarSign}
-                tone="success"
                 label={viewMode === "month" ? "Faturamento no mês" : "Faturamento geral"}
                 value={money(viewMode === "overview" ? totalEarnedAllTime : earnedThisPeriod)}
               />
               <Stat
                 size="sm"
                 icon={TrendingUp}
-                tone="info"
                 label={viewMode === "month" ? "Previsto no mês" : "Previsto total"}
                 value={money(projectedThisPeriod)}
                 hint={pendingConfirmation.length > 0 ? `inclui ${pendingConfirmation.length} a confirmar` : undefined}
               />
-              <Stat size="sm" icon={Wallet} tone="brand" label="Acumulado no programa" value={money(totalEarnedAllTime)} />
+              <Stat size="sm" icon={Wallet} label="Acumulado no programa" value={money(totalEarnedAllTime)} />
             </SectionCard>
           )}
-        </motion.section>
+        </section>
 
         {/* Alunos ativos */}
         {!bookingsLoading && <MentorActiveStudents students={activeStudents} />}
@@ -536,7 +532,7 @@ const MentorDashboardPage = () => {
 
         {/* Sessões realizadas (com ou sem relatório) e suas tarefas */}
         {!bookingsLoading && realized.length > 0 && (
-          <motion.section variants={fadeUpItem} className="space-y-3">
+          <section className="space-y-3">
             <SectionHeader title="Sessões realizadas" description={<span className="capitalize">{periodLabel}</span>} />
             <SectionCard padding="none">
               {realized.map((b, idx) => {
@@ -600,12 +596,12 @@ const MentorDashboardPage = () => {
                 );
               })}
             </SectionCard>
-          </motion.section>
+          </section>
         )}
 
         {/* Results ranking */}
         <MentorResultsSection mentorId={profile?.id} />
-      </motion.div>
+      </div>
       </PageContainer>
 
       <NotRealizedDialog

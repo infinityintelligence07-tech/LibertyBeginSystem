@@ -14,32 +14,32 @@ const buildTemplates = (first: string) => [
   {
     key: "agendar",
     label: "Agendar sessão",
-    text: `Oi, ${first}! Tudo bem? Vi aqui que você ainda não tem sessão agendada na plataforma. Bora marcar? É só entrar no app do Liberty Begin, ir em "Agenda" > "Agendar sessão" e escolher o melhor horário pra você. 🚀`,
+    text: `Oi, ${first}, tudo bem? Vi aqui que você ainda não tem sessão agendada na plataforma. Vamos marcar? É só entrar no app do Liberty Begin, ir em "Agenda" > "Agendar sessão" e escolher o melhor horário pra você.`,
   },
   {
     key: "ferramenta",
     label: "Ferramenta disponível",
-    text: `Oi, ${first}! Sua ferramenta já está disponível na área de Ferramentas dentro da plataforma. Dá uma olhada e me conta o que achou. 😉`,
+    text: `Oi, ${first}. Sua ferramenta já está disponível na área de Ferramentas dentro da plataforma. Dá uma olhada e me conta o que achou.`,
   },
   {
     key: "nps",
     label: "Lembrete de NPS",
-    text: `Oi, ${first}! Passando pra lembrar de responder a pesquisa de satisfação (NPS) da sua última sessão. Leva menos de 2 minutos e a notificação está aí na plataforma. Sua opinião ajuda muito! 🙏`,
+    text: `Oi, ${first}. Passando pra lembrar de responder a pesquisa de satisfação (NPS) da sua última sessão. Leva menos de 2 minutos e a notificação está aí na plataforma. Sua opinião ajuda muito.`,
   },
   {
     key: "tarefas",
     label: "Tarefas pendentes",
-    text: `Oi, ${first}! Você tem tarefas pendentes da última sessão na plataforma. Consegue avançar nelas até nosso próximo encontro? Qualquer dúvida, me chama por aqui.`,
+    text: `Oi, ${first}. Você tem tarefas pendentes da última sessão na plataforma. Consegue avançar nelas até nosso próximo encontro? Qualquer dúvida, me chama por aqui.`,
   },
   {
     key: "lembrete",
     label: "Lembrete da sessão",
-    text: `Oi, ${first}! Passando pra confirmar nossa sessão. O link de acesso está na sua agenda dentro da plataforma. Nos vemos lá! 👊`,
+    text: `Oi, ${first}. Passando pra confirmar nossa sessão. O link de acesso está na sua agenda dentro da plataforma. Nos vemos lá.`,
   },
   {
     key: "retomada",
     label: "Retomar contato",
-    text: `Oi, ${first}! Senti sua falta por aqui. Vamos retomar sua jornada? Me diz um horário que funcione pra você que eu te ajudo a agendar a próxima sessão.`,
+    text: `Oi, ${first}. Senti sua falta por aqui. Vamos retomar sua jornada? Me diz um horário que funcione pra você que eu te ajudo a agendar a próxima sessão.`,
   },
 ];
 
@@ -62,14 +62,14 @@ export const MemberQuickMessages = ({ memberName, phone }: Props) => {
       document.body.removeChild(ta);
     }
     setCopiedKey(key);
-    toast.success("Mensagem copiada! Cole no WhatsApp.");
+    toast.success("Mensagem copiada");
     setTimeout(() => setCopiedKey(null), 1500);
   };
 
   return (
     <>
       <Button variant="outline" size="sm" onClick={() => setOpen(true)}>
-        <MessageSquareText className="h-4 w-4 text-primary" aria-hidden /> Mensagens
+        <MessageSquareText className="h-4 w-4" aria-hidden /> Mensagens
       </Button>
 
       <BottomSheet
@@ -93,13 +93,13 @@ export const MemberQuickMessages = ({ memberName, phone }: Props) => {
                       href={`https://wa.me/${digits}?text=${encodeURIComponent(t.text)}`}
                       target="_blank"
                       rel="noopener noreferrer"
-                      className="btn-ghost btn-sm text-status-green"
+                      className="btn-ghost btn-sm"
                     >
                       Enviar
                     </a>
                   )}
                   <IconButton aria-label={`Copiar mensagem: ${t.label}`} size="sm" onClick={() => copy(t.key, t.text)}>
-                    {copiedKey === t.key ? <Check className="h-4 w-4 text-status-green" /> : <Copy className="h-4 w-4" />}
+                    {copiedKey === t.key ? <Check className="h-4 w-4" /> : <Copy className="h-4 w-4" />}
                   </IconButton>
                 </>
               }

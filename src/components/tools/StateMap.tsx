@@ -63,17 +63,8 @@ const SectorCard = ({ pillar, color, answers, onChange, expanded, featured, onEx
   const cardHeight = expanded ? "h-full" : "h-[26rem]";
 
   return (
-    <div
-      className={`flex flex-col overflow-hidden rounded-2xl border bg-card ${cardHeight}`}
-      style={{ borderColor: `color-mix(in srgb, ${color} 35%, transparent)` }}
-    >
-      <div
-        className="flex items-center gap-2 border-b px-4 py-2.5"
-        style={{
-          background: `color-mix(in srgb, ${color} 12%, transparent)`,
-          borderColor: `color-mix(in srgb, ${color} 30%, transparent)`,
-        }}
-      >
+    <div className={`flex flex-col overflow-hidden rounded-ds-lg border border-border bg-card ${cardHeight}`}>
+      <div className="flex items-center gap-2 border-b border-border px-4 py-2.5">
         <span className="h-2 w-2 shrink-0 rounded-full" style={{ background: color }} />
         <h3 className="min-w-0 flex-1 truncate text-[12px] font-semibold text-foreground">{pillar.name}</h3>
         <button
@@ -87,10 +78,7 @@ const SectorCard = ({ pillar, color, answers, onChange, expanded, featured, onEx
 
       <div className="relative grid min-h-0 flex-1 grid-cols-2">
         {/* divisória central firme */}
-        <div
-          className="pointer-events-none absolute inset-y-0 left-1/2 z-10 w-[3px] -translate-x-1/2 rounded-full"
-          style={{ background: `color-mix(in srgb, ${color} 55%, hsl(var(--border)))` }}
-        />
+        <div className="pointer-events-none absolute inset-y-0 left-1/2 z-10 w-px -translate-x-1/2 bg-border" />
 
         {/* HOJE */}
         <div className="flex min-h-0 flex-col gap-1.5 bg-muted/25 p-2.5">
@@ -120,14 +108,7 @@ const SectorCard = ({ pillar, color, answers, onChange, expanded, featured, onEx
             {said.length > 0 ? (
               <div className="space-y-1.5">
                 {said.map((text, idx) => (
-                  <div
-                    key={idx}
-                    className="rounded-md border bg-background/70 px-2.5 py-1.5"
-                    style={{
-                      borderColor: `color-mix(in srgb, ${color} 22%, transparent)`,
-                      borderLeft: `2.5px solid color-mix(in srgb, ${color} 65%, transparent)`,
-                    }}
-                  >
+                  <div key={idx} className="rounded-md border border-border bg-background px-2.5 py-1.5">
                     <p className={`${szSaid} leading-snug text-foreground/85`}>{text}</p>
                   </div>
                 ))}
@@ -139,22 +120,15 @@ const SectorCard = ({ pillar, color, answers, onChange, expanded, featured, onEx
         </div>
 
         {/* DESTINO */}
-        <div
-          className="flex min-h-0 flex-col gap-1.5 p-2.5"
-          style={{ background: `color-mix(in srgb, ${color} 10%, transparent)` }}
-        >
-          <p className="ds-kicker flex items-center gap-1" style={{ color }}>
-            <ArrowRight className="h-3 w-3" /> Onde quer chegar
+        <div className="flex min-h-0 flex-col gap-1.5 p-2.5">
+          <p className="ds-kicker flex items-center gap-1">
+            <ArrowRight className="h-3 w-3" aria-hidden /> Onde quer chegar
           </p>
           <textarea
             value={goal}
             onChange={(e) => onChange(pillarGoalKey(pillar.id), e.target.value)}
             placeholder="O destino deste setor."
-            className={`min-h-0 w-full flex-1 resize-none rounded-ds border bg-background p-2 focus-visible:ring-2 focus-visible:ring-ring ${szGoal} font-bold leading-snug text-foreground placeholder:font-normal placeholder:text-muted-foreground focus:outline-none`}
-            style={{
-              borderColor: `color-mix(in srgb, ${color} 55%, transparent)`,
-              boxShadow: `inset 0 0 0 9999px color-mix(in srgb, ${color} 5%, transparent)`,
-            }}
+            className={`min-h-0 w-full flex-1 resize-none rounded-ds border border-border bg-background p-2 focus-visible:ring-2 focus-visible:ring-ring ${szGoal} font-semibold leading-snug text-foreground placeholder:font-normal placeholder:text-muted-foreground focus:outline-none`}
           />
         </div>
       </div>
@@ -178,9 +152,9 @@ export const StateMap = ({ answers, onChange, onBack, onNext, accentFor }: Props
           <h2 className="text-[22px] font-semibold leading-tight text-foreground">Hoje x onde quer chegar</h2>
         </div>
         <div className="flex items-center gap-2 text-xs text-muted-foreground">
-          <span className="rounded-full bg-muted px-2.5 py-1">Hoje</span>
+          <span>Hoje</span>
           <ArrowRight className="h-3.5 w-3.5" aria-hidden />
-          <span className="rounded-full bg-primary/15 px-2.5 py-1 text-primary">Destino</span>
+          <span className="text-foreground">Destino</span>
         </div>
       </div>
 
@@ -208,7 +182,7 @@ export const StateMap = ({ answers, onChange, onBack, onNext, accentFor }: Props
       </div>
 
       {full !== null && (
-        <div className="fixed inset-0 z-50 bg-background/95 p-4 backdrop-blur-sm sm:p-8">
+        <div className="fixed inset-0 z-50 bg-background p-4 sm:p-8">
           <div className="mx-auto h-full max-w-5xl">
             <SectorCard
               pillar={ordered[full]}

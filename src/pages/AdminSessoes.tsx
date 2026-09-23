@@ -221,25 +221,23 @@ const AdminSessoesPage = () => {
                   className={!session.is_active ? "opacity-70" : undefined}
                   leading={
                     <div
-                      className={`h-10 w-10 rounded-[var(--ds-radius-md)] flex items-center justify-center shrink-0 ${
-                        isKickoff ? "bg-primary text-primary-foreground" : "bg-muted text-foreground"
-                      }`}
+                      className="h-10 w-10 flex items-center justify-center shrink-0 text-muted-foreground"
                       aria-label={isKickoff ? "Sessão de abertura (Mapeamento)" : `Ordem ${session.order}`}
                     >
-                      {isKickoff ? <Star className="h-4 w-4" aria-hidden /> : <span className="text-[15px] font-bold tabular-nums">{session.order}</span>}
+                      {isKickoff ? <Star className="h-4 w-4" aria-hidden /> : <span className="text-[15px] font-semibold tabular-nums text-foreground">{session.order}</span>}
                     </div>
                   }
                   title={
                     <span className="flex items-center gap-2 min-w-0">
                       <span className="truncate">{session.name}</span>
-                      {isKickoff && <StatusPill tone="brand" withDot={false}>Abertura</StatusPill>}
+                      {isKickoff && <StatusPill tone="neutral" withDot={false}>Abertura</StatusPill>}
                     </span>
                   }
                   subtitle={meta}
                   trailing={
                     <>
                       {session.pillar && (
-                        <span className={`hidden md:inline-flex items-center rounded-full px-2 h-[22px] text-[11px] font-medium ${pillarClass(session.pillar)}`}>
+                        <span className="hidden md:inline-flex items-center text-[11px] font-medium text-muted-foreground">
                           {session.pillar}
                         </span>
                       )}

@@ -1,8 +1,6 @@
-import { motion } from "framer-motion";
 import { MessageCircle, Clock, CheckCircle2, PauseCircle, type LucideIcon } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { shortName } from "@/lib/formatName";
-import { fadeUpItem } from "@/lib/animations";
 import { Button } from "@/components/ui/button";
 import { ListRow, SectionCard, SectionHeader } from "@/components/ds";
 import { cn } from "@/lib/utils";
@@ -37,14 +35,14 @@ export const MentorFollowUp = ({ items }: Props) => {
   const sorted = [...items].sort((a, b) => b.urgency - a.urgency);
 
   return (
-    <motion.section variants={fadeUpItem} className="space-y-3">
+    <section className="space-y-3">
       <SectionHeader
         title="Alunos que precisam de atenção"
         description="Acompanhamento sugerido"
         actions={<span className="text-xs text-muted-foreground tabular-nums">{sorted.length} {sorted.length === 1 ? "alerta" : "alertas"}</span>}
       />
 
-      <SectionCard padding="none" tone="warning">
+      <SectionCard padding="none">
         {sorted.map((it, idx) => {
           const meta = reasonMeta[it.reason];
           const Icon = meta.icon;
@@ -53,18 +51,14 @@ export const MentorFollowUp = ({ items }: Props) => {
             <ListRow
               key={`${it.studentId}-${it.reason}-${idx}`}
               last={idx === sorted.length - 1}
-              leading={
-                <span className="h-10 w-10 rounded-[var(--ds-radius-md)] bg-card flex items-center justify-center">
-                  <Icon className={cn("h-4 w-4", meta.tone)} aria-hidden />
-                </span>
-              }
+              leading={<Icon className={cn("h-5 w-5 shrink-0", meta.tone)} aria-hidden />}
               title={shortName(it.studentName)}
               subtitle={`${meta.label} · ${it.detail}`}
               chevron={false}
               trailing={
                 <>
                   {phone && (
-                    <Button asChild size="sm" variant="outline" className="text-status-green hover:text-status-green">
+                    <Button asChild size="sm" variant="outline">
                       <a href={`https://wa.me/${phone}`} target="_blank" rel="noopener noreferrer">
                         <MessageCircle /> WhatsApp
                       </a>
@@ -79,6 +73,6 @@ export const MentorFollowUp = ({ items }: Props) => {
           );
         })}
       </SectionCard>
-    </motion.section>
+    </section>
   );
 };

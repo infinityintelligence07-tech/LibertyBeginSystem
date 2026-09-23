@@ -71,13 +71,13 @@ export const DateBlock = ({ date, className, tone = "default" }: DateBlockProps)
   return (
     <div
       className={cn(
-        "h-10 w-10 rounded-[var(--ds-radius-md)] flex flex-col items-center justify-center leading-none",
-        tone === "brand" ? "bg-primary text-primary-foreground" : tone === "muted" ? "bg-muted text-muted-foreground" : "bg-muted text-foreground",
+        "h-10 w-10 flex flex-col items-center justify-center leading-none",
+        tone === "brand" ? "text-primary" : tone === "muted" ? "text-muted-foreground" : "text-foreground",
         className,
       )}
     >
-      <span className="text-[15px] font-bold tabular-nums">{String(d).padStart(2, "0")}</span>
-      <span className="text-[11px] font-medium leading-none mt-0.5">{monthShort[(m || 1) - 1]}</span>
+      <span className="text-[17px] font-semibold tabular-nums">{String(d).padStart(2, "0")}</span>
+      <span className="text-[11px] text-muted-foreground leading-none mt-0.5">{monthShort[(m || 1) - 1]}</span>
     </div>
   );
 };

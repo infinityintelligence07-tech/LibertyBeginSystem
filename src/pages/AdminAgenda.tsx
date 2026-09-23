@@ -1,6 +1,5 @@
 import { useState, useMemo, useEffect, type ReactNode } from "react";
 import { useSearchParams } from "react-router-dom";
-import { motion } from "framer-motion";
 import { AppLayout } from "@/components/AppLayout";
 import {
   ChevronLeft,
@@ -21,8 +20,7 @@ import {
   CalendarDays,
   type LucideIcon,
 } from "lucide-react";
-import { staggerContainer, fadeUpItem } from "@/lib/animations";
-import { shortName, initials as getInitials, matchesSearch } from "@/lib/formatName";
+import { shortName, matchesSearch } from "@/lib/formatName";
 import { format, addDays, startOfWeek, endOfWeek, startOfMonth, endOfMonth, eachDayOfInterval, isSameMonth, isToday, parseISO, getDay } from "date-fns";
 import { ptBR } from "date-fns/locale";
 import { supabase } from "@/integrations/supabase/client";
@@ -157,16 +155,18 @@ const BOOKING_SELECT =
 
 /* ───── Constants ───── */
 // 9 distinct hues, one per mentor (cycles only if >9 mentors)
+// Superfície neutra; a identidade do mentor fica só no ponto e na borda esquerda do bloco.
+const MENTOR_HEADER = "bg-card border-b border-border";
 const mentorColors = [
-  { header: "bg-status-blue/15 border-b-2 border-status-blue", dot: "bg-status-blue", text: "text-status-blue", bg: "bg-status-blue/15 border-status-blue/50" },
-  { header: "bg-status-green/15 border-b-2 border-status-green", dot: "bg-status-green", text: "text-status-green", bg: "bg-status-green/15 border-status-green/50" },
-  { header: "bg-status-yellow/15 border-b-2 border-status-yellow", dot: "bg-status-yellow", text: "text-status-yellow", bg: "bg-status-yellow/15 border-status-yellow/50" },
-  { header: "bg-destructive/15 border-b-2 border-destructive", dot: "bg-destructive", text: "text-destructive", bg: "bg-destructive/15 border-destructive/50" },
-  { header: "bg-primary/15 border-b-2 border-primary/20", dot: "bg-primary", text: "text-primary", bg: "bg-primary/15 border-primary/50" },
-  { header: "bg-status-orange/15 border-b-2 border-status-orange", dot: "bg-status-orange", text: "text-status-orange", bg: "bg-status-orange/15 border-status-orange/50" },
-  { header: "bg-silver-light/15 border-b-2 border-silver-light", dot: "bg-silver-light", text: "text-silver-light", bg: "bg-silver-light/15 border-silver-light/50" },
-  { header: "bg-muted-foreground/15 border-b-2 border-muted-foreground", dot: "bg-muted-foreground", text: "text-muted-foreground", bg: "bg-muted-foreground/15 border-muted-foreground/50" },
-  { header: "bg-accent-foreground/15 border-b-2 border-accent-foreground", dot: "bg-accent-foreground", text: "text-accent-foreground", bg: "bg-accent-foreground/15 border-accent-foreground/50" },
+  { header: MENTOR_HEADER, dot: "bg-status-blue", text: "text-muted-foreground", bg: "bg-card border-border border-l-2 border-l-status-blue" },
+  { header: MENTOR_HEADER, dot: "bg-status-green", text: "text-muted-foreground", bg: "bg-card border-border border-l-2 border-l-status-green" },
+  { header: MENTOR_HEADER, dot: "bg-status-yellow", text: "text-muted-foreground", bg: "bg-card border-border border-l-2 border-l-status-yellow" },
+  { header: MENTOR_HEADER, dot: "bg-destructive", text: "text-muted-foreground", bg: "bg-card border-border border-l-2 border-l-destructive" },
+  { header: MENTOR_HEADER, dot: "bg-primary", text: "text-muted-foreground", bg: "bg-card border-border border-l-2 border-l-primary" },
+  { header: MENTOR_HEADER, dot: "bg-status-orange", text: "text-muted-foreground", bg: "bg-card border-border border-l-2 border-l-status-orange" },
+  { header: MENTOR_HEADER, dot: "bg-silver-light", text: "text-muted-foreground", bg: "bg-card border-border border-l-2 border-l-silver-light" },
+  { header: MENTOR_HEADER, dot: "bg-muted-foreground", text: "text-muted-foreground", bg: "bg-card border-border border-l-2 border-l-muted-foreground" },
+  { header: MENTOR_HEADER, dot: "bg-accent-foreground", text: "text-muted-foreground", bg: "bg-card border-border border-l-2 border-l-accent-foreground" },
 ];
 
 /** Rótulo único de status (mesmo texto/cor das outras telas). */
@@ -683,10 +683,10 @@ const AdminAgendaPage = () => {
     if (st === "cancelled" || st === "not_realized") return "bg-muted/40 border-border opacity-60";
     // Aguardando aprovação nunca deve parecer confirmada na agenda.
     if (st === "pending_approval")
-      return "bg-status-yellow/10 border-dashed border-status-yellow/60 opacity-90";
+      return "bg-card border-dashed border-status-yellow/60";
     // Passou do horário sem confirmação do mentor.
     if (st === "pending_confirmation")
-      return "bg-status-orange/10 border-dashed border-status-orange/60";
+      return "bg-card border-dashed border-status-orange/60";
     return c.bg;
   };
   const bookingText = (b: BookingRow) => {
@@ -948,7 +948,7 @@ const AdminAgendaPage = () => {
       ? `Olá ${shortName(mentorName)}! Lembre-se de cadastrar sua disponibilidade na plataforma Liberty Begin: ${reminderLink}`
       : reminderLink;
     navigator.clipboard.writeText(message);
-    toast.success("Link copiado!", { description: mentorName ? "Mensagem pronta para enviar." : undefined });
+    toast.success("Link copiado", { description: mentorName ? "Mensagem pronta para enviar." : undefined });
   };
 
   // Mentors without any availability in current range
@@ -1007,7 +1007,7 @@ const AdminAgendaPage = () => {
       onClick={onClick}
       aria-label={label}
       title={label}
-      className={`h-5 w-5 rounded bg-card border border-border text-muted-foreground flex items-center justify-center transition-colors duration-ds-1 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${danger ? "hover:text-destructive" : "hover:text-primary"}`}
+      className={`h-5 w-5 rounded bg-card border border-border text-muted-foreground flex items-center justify-center transition-colors duration-ds-1 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${danger ? "hover:text-destructive" : "hover:text-foreground"}`}
     >
       <Icon className="h-3 w-3" />
     </button>
@@ -1018,15 +1018,15 @@ const AdminAgendaPage = () => {
   return (
     <AppLayout role="admin">
       <PageContainer variant="wide">
-        <motion.div variants={staggerContainer} initial="hidden" animate="show" className="space-y-6">
-          <motion.div variants={fadeUpItem}>
+        <div className="space-y-6">
+          <div>
             <PageHeader
               eyebrow="Admin"
               title="Agenda geral"
               description={
                 <span className="inline-flex items-center gap-2 flex-wrap">
                   <span className="capitalize">{headerLabel}</span>
-                  <StatusPill tone="info" size="sm" withDot={false}>{totalInRange} sessões</StatusPill>
+                  <span className="tabular-nums">· {totalInRange} sessões</span>
                 </span>
               }
               actions={
@@ -1040,17 +1040,17 @@ const AdminAgendaPage = () => {
                 </>
               }
             />
-          </motion.div>
+          </div>
 
           {/* Aprovações pendentes: sessões pedidas com menos de 48h */}
           {pendingBookings.length > 0 && (
-            <motion.div variants={fadeUpItem}>
-              <SectionCard tone="warning" padding="none">
+            <div>
+              <SectionCard padding="none">
                 <div className="px-4 pt-4 pb-2">
                   <SectionHeader
                     title={
                       <span className="inline-flex items-center gap-2">
-                        <AlertTriangle className="h-4 w-4 text-status-yellow" aria-hidden />
+                        <AlertTriangle className="h-4 w-4 text-muted-foreground" aria-hidden />
                         Aguardando aprovação
                         <span className="text-muted-foreground font-normal tabular-nums">({pendingBookings.length})</span>
                       </span>
@@ -1063,28 +1063,28 @@ const AdminAgendaPage = () => {
                     bk,
                     i === pendingBookings.length - 1,
                     <>
-                      <Button size="sm" variant="outline" className="text-status-green" onClick={() => approvePending(bk)}>
+                      <Button size="sm" variant="outline" onClick={() => approvePending(bk)}>
                         <Check className="h-4 w-4" /> Aprovar
                       </Button>
-                      <Button size="sm" variant="outline" className="text-destructive" onClick={() => { setRejectTarget(bk); setRejectReason("Mentor indisponível"); }}>
+                      <Button size="sm" variant="ghost" className="text-destructive hover:text-destructive" onClick={() => { setRejectTarget(bk); setRejectReason("Mentor indisponível"); }}>
                         <Ban className="h-4 w-4" /> Recusar
                       </Button>
                     </>,
                   ),
                 )}
               </SectionCard>
-            </motion.div>
+            </div>
           )}
 
           {/* Não realizadas, marcadas pelos mentores */}
           {notRealizedBookings.length > 0 && (
-            <motion.div variants={fadeUpItem}>
-              <SectionCard tone="warning" padding="none">
+            <div>
+              <SectionCard padding="none">
                 <div className="px-4 pt-4 pb-2">
                   <SectionHeader
                     title={
                       <span className="inline-flex items-center gap-2">
-                        <AlertTriangle className="h-4 w-4 text-status-yellow" aria-hidden />
+                        <AlertTriangle className="h-4 w-4 text-muted-foreground" aria-hidden />
                         Sessões marcadas como não realizadas
                         <span className="text-muted-foreground font-normal tabular-nums">({notRealizedBookings.length})</span>
                       </span>
@@ -1097,24 +1097,24 @@ const AdminAgendaPage = () => {
                     i === notRealizedBookings.length - 1,
                     <>
                       <Button size="sm" variant="outline" onClick={() => openDrawer({ ...bk, status: "not_realized" })}>Gerenciar</Button>
-                      <Button size="sm" variant="outline" className="text-status-blue" onClick={() => reopenNotRealized(bk)}>Reabrir</Button>
+                      <Button size="sm" variant="ghost" onClick={() => reopenNotRealized(bk)}>Reabrir</Button>
                     </>,
-                    bk.cancellation_reason ? <span className="text-status-yellow truncate">· Motivo: {bk.cancellation_reason}</span> : undefined,
+                    bk.cancellation_reason ? <span className="text-muted-foreground truncate">· Motivo: {bk.cancellation_reason}</span> : undefined,
                   ),
                 )}
               </SectionCard>
-            </motion.div>
+            </div>
           )}
 
           {/* Passaram do horário sem confirmação do mentor */}
           {pendingConfirmationBookings.length > 0 && (
-            <motion.div variants={fadeUpItem}>
-              <SectionCard tone="warning" padding="none" className="border-status-orange/30">
+            <div>
+              <SectionCard padding="none">
                 <div className="px-4 pt-4 pb-2">
                   <SectionHeader
                     title={
                       <span className="inline-flex items-center gap-2">
-                        <Clock className="h-4 w-4 text-status-orange" aria-hidden />
+                        <Clock className="h-4 w-4 text-muted-foreground" aria-hidden />
                         Sessões a confirmar
                         <span className="text-muted-foreground font-normal tabular-nums">({pendingConfirmationBookings.length})</span>
                       </span>
@@ -1130,10 +1130,10 @@ const AdminAgendaPage = () => {
                     i === pendingConfirmationBookings.length - 1,
                     <>
                       <Button size="sm" variant="outline" onClick={() => openDrawer(bk)}>Gerenciar</Button>
-                      <Button size="sm" variant="outline" className="text-status-green" disabled={savingStatus} onClick={() => closePendingConfirmation(bk, "completed")}>
+                      <Button size="sm" variant="outline" disabled={savingStatus} onClick={() => closePendingConfirmation(bk, "completed")}>
                         <Check className="h-4 w-4" /> Marcar realizada
                       </Button>
-                      <Button size="sm" variant="outline" className="text-status-yellow" disabled={savingStatus} onClick={() => { openDrawer(bk); setShowNotRealizedModal(true); }}>
+                      <Button size="sm" variant="ghost" disabled={savingStatus} onClick={() => { openDrawer(bk); setShowNotRealizedModal(true); }}>
                         <Ban className="h-4 w-4" /> Não realizada
                       </Button>
                     </>,
@@ -1143,11 +1143,11 @@ const AdminAgendaPage = () => {
                   );
                 })}
               </SectionCard>
-            </motion.div>
+            </div>
           )}
 
           {/* Barra de filtros fixa: período, visão, mentor, status e busca */}
-          <motion.div variants={fadeUpItem} className="sticky top-0 z-20 -mx-4 sm:-mx-6 lg:-mx-8 px-4 sm:px-6 lg:px-8 py-3 bg-background/90 backdrop-blur-sm border-b border-border space-y-3">
+          <div className="sticky top-0 z-20 -mx-4 sm:-mx-6 lg:-mx-8 px-4 sm:px-6 lg:px-8 py-3 bg-background border-b border-border space-y-3">
             <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-3">
               <div className="flex items-center gap-2 flex-wrap">
                 <div className="flex items-center gap-1">
@@ -1199,7 +1199,6 @@ const AdminAgendaPage = () => {
                   key={s}
                   active={statusFilter === s}
                   onClick={() => setStatusFilter(statusFilter === s ? null : s)}
-                  className={statusFilter === s && s === "pending_confirmation" ? "bg-status-orange border-status-orange text-primary-foreground hover:bg-status-orange" : undefined}
                 >
                   <span className={`w-2 h-2 rounded-full ${bookingStatusConfig[s]?.dot ?? "bg-muted-foreground"}`} aria-hidden />
                   {statusLabel(s)}
@@ -1211,7 +1210,7 @@ const AdminAgendaPage = () => {
                 </Button>
               )}
             </div>
-          </motion.div>
+          </div>
 
           {/* Estados de carregamento / erro do período */}
           {bookingsLoading ? (
@@ -1224,7 +1223,7 @@ const AdminAgendaPage = () => {
               {viewMode === "day" && (
                 <>
                   {/* Desktop grid */}
-                  <motion.div variants={fadeUpItem} className="hidden lg:block">
+                  <div className="hidden lg:block">
                     <SectionCard padding="none" className="overflow-auto">
                       {(() => {
                         const ROW_H = 24; // px por 30 min
@@ -1260,11 +1259,9 @@ const AdminAgendaPage = () => {
                                   return (
                                     <div key={mId} className="flex-1 border-l border-border/30 relative" style={{ minWidth: MIN_COL_W }}>
                                       <div className={`sticky top-0 z-10 text-center ${color.header}`} style={{ height: HEADER_H }}>
-                                        <div className="pt-2 flex flex-col items-center gap-1">
-                                          <div className={`w-7 h-7 rounded-full ${color.dot} flex items-center justify-center text-[11px] font-bold text-background`}>
-                                            {mentor ? getInitials(mentor.full_name) : "?"}
-                                          </div>
-                                          <span className="text-xs font-semibold text-foreground leading-tight">
+                                        <div className="h-full flex items-center justify-center gap-1.5 px-2">
+                                          <span className={`w-2 h-2 rounded-full shrink-0 ${color.dot}`} aria-hidden />
+                                          <span className="text-xs font-medium text-foreground leading-tight truncate">
                                             {mentor ? shortName(mentor.full_name) : "Sem dados"}
                                           </span>
                                         </div>
@@ -1287,7 +1284,7 @@ const AdminAgendaPage = () => {
                                           return (
                                             <div
                                               key={`slot-${i}`}
-                                              className="absolute left-0.5 right-0.5 rounded-ds border border-dashed border-status-green/35 bg-status-green/5 hover:bg-status-green/10 hover:border-status-green/55 transition-colors duration-ds-1 group"
+                                              className="absolute left-0.5 right-0.5 rounded-ds border border-dashed border-border hover:bg-accent hover:border-foreground/30 transition-colors duration-ds-1 group"
                                               style={{ top, height: h - 2 }}
                                             >
                                               <button
@@ -1297,7 +1294,7 @@ const AdminAgendaPage = () => {
                                                 aria-label={`Agendar com ${mentor ? shortName(mentor.full_name) : "mentor"} das ${formatTime(slot.start_time)} às ${formatTime(slot.end_time)}`}
                                                 title="Agendar neste horário"
                                               >
-                                                <span className="text-[11px] text-status-green tabular-nums text-center">
+                                                <span className="text-[11px] text-muted-foreground tabular-nums text-center">
                                                   {formatTime(slot.start_time)} às {formatTime(slot.end_time)}
                                                 </span>
                                               </button>
@@ -1320,7 +1317,7 @@ const AdminAgendaPage = () => {
                                               type="button"
                                               onClick={() => openDrawer(b)}
                                               aria-label={`${participantName(b)}, ${b.sessions?.name || "sessão"}, ${formatTime(b.start_time)} às ${formatTime(b.end_time)}, ${statusLabel(st)}`}
-                                              className={`absolute left-0.5 right-0.5 rounded-ds border px-2 py-1 text-left transition-colors duration-ds-1 hover:brightness-110 overflow-hidden focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${bookingBg(b)}`}
+                                              className={`absolute left-0.5 right-0.5 rounded-ds border px-2 py-1 text-left transition-colors duration-ds-1 hover:bg-accent overflow-hidden focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${bookingBg(b)}`}
                                               style={{ top, height: h - 2 }}
                                             >
                                               <p className={`text-[11px] font-medium tabular-nums leading-tight ${bookingText(b)}`}>
@@ -1346,10 +1343,10 @@ const AdminAgendaPage = () => {
                         );
                       })()}
                     </SectionCard>
-                  </motion.div>
+                  </div>
 
                   {/* Lista mobile */}
-                  <motion.div variants={fadeUpItem} className="lg:hidden space-y-4">
+                  <div className="lg:hidden space-y-4">
                     {dayBookings.length === 0 && availability.filter((a) => filteredMentorIds.includes(a.mentor_id)).length === 0 && (
                       <EmptyState
                         icon={CalendarDays}
@@ -1373,8 +1370,8 @@ const AdminAgendaPage = () => {
                                 last={i === total - 1}
                                 onPress={() => openDrawer(b)}
                                 leading={
-                                  <span className={`flex h-10 w-10 items-center justify-center rounded-full text-xs font-bold text-background ${mentorColorFor(b.mentor_id).dot}`} aria-hidden>
-                                    {getInitials(getMentorName(b.mentor_id))}
+                                  <span className="flex h-10 w-10 items-center justify-center" aria-hidden>
+                                    <span className={`h-2.5 w-2.5 rounded-full ${mentorColorFor(b.mentor_id).dot}`} />
                                   </span>
                                 }
                                 title={participantName(b)}
@@ -1388,8 +1385,8 @@ const AdminAgendaPage = () => {
                                 key={`slot-${i}`}
                                 last={hourBookings.length + i === total - 1}
                                 onPress={() => openBookingFromSlot(sl.mentor_id, dateStr, sl.start_time)}
-                                leading={<span className="flex h-10 w-10 items-center justify-center rounded-full border border-dashed border-status-green/50 text-status-green" aria-hidden><Plus className="h-4 w-4" /></span>}
-                                title={<span className="text-status-green">Disponível · {getMentorName(sl.mentor_id)}</span>}
+                                leading={<Plus className="h-5 w-5 text-muted-foreground shrink-0" aria-hidden />}
+                                title={`Disponível · ${getMentorName(sl.mentor_id)}`}
                                 subtitle={`${formatTime(sl.start_time)} às ${formatTime(sl.end_time)} · Toque para agendar`}
                                 trailing={
                                   <span className="flex items-center gap-0.5" onClick={(e) => e.stopPropagation()}>
@@ -1403,19 +1400,19 @@ const AdminAgendaPage = () => {
                         </div>
                       );
                     })}
-                  </motion.div>
+                  </div>
                 </>
               )}
 
               {/* ═══════ SEMANA ═══════ */}
               {viewMode === "week" && (
-                <motion.div variants={fadeUpItem}>
+                <div>
                   <SectionCard padding="none" className="overflow-auto">
                     <div className="grid grid-cols-7 min-w-[760px]">
                       {weekDays.map((day) => (
-                        <div key={day.toISOString()} className={`p-3 border-b border-r border-border text-center ${isToday(day) ? "bg-primary/5" : "bg-muted/20"}`}>
+                        <div key={day.toISOString()} className={`p-3 border-b border-r border-border text-center ${isToday(day) ? "bg-muted/40" : ""}`}>
                           <p className="text-xs text-muted-foreground capitalize">{format(day, "EEE", { locale: ptBR })}</p>
-                          <p className={`text-lg font-semibold tabular-nums ${isToday(day) ? "text-primary" : "text-foreground"}`}>{format(day, "dd")}</p>
+                          <p className="text-lg font-semibold tabular-nums text-foreground">{format(day, "dd")}</p>
                         </div>
                       ))}
                       {weekDays.map((day) => {
@@ -1434,7 +1431,7 @@ const AdminAgendaPage = () => {
                               setDraggingSlot(null);
                               setDragOverDay(null);
                             }}
-                            className={`relative border-r border-b border-border p-2 min-h-[220px] transition-colors duration-ds-1 ${isToday(day) ? "bg-primary/5" : ""} ${isDropTarget ? "bg-status-green/10 ring-2 ring-inset ring-status-green/50" : ""}`}
+                            className={`relative border-r border-b border-border p-2 min-h-[220px] transition-colors duration-ds-1 ${isToday(day) ? "bg-muted/20" : ""} ${isDropTarget ? "bg-accent ring-1 ring-inset ring-foreground/30" : ""}`}
                           >
                             <div className="space-y-1.5">
                               {dayBks.length === 0 && dayAvail.length === 0 && (
@@ -1448,7 +1445,7 @@ const AdminAgendaPage = () => {
                                     type="button"
                                     onClick={() => openDrawer(b)}
                                     aria-label={`${participantName(b)}, ${formatTime(b.start_time)}, ${statusLabel(st)}`}
-                                    className={`w-full rounded-ds border p-2 text-left transition-colors duration-ds-1 hover:brightness-110 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${bookingBg(b)}`}
+                                    className={`w-full rounded-ds border p-2 text-left transition-colors duration-ds-1 hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${bookingBg(b)}`}
                                   >
                                     <p className={`text-[11px] font-medium tabular-nums flex items-center gap-1.5 ${bookingText(b)}`}>
                                       <span className={`w-1.5 h-1.5 rounded-full ${bookingStatusConfig[st]?.dot ?? "bg-muted-foreground"}`} aria-hidden />
@@ -1465,7 +1462,7 @@ const AdminAgendaPage = () => {
                                   draggable
                                   onDragStart={() => setDraggingSlot(sl)}
                                   onDragEnd={() => { setDraggingSlot(null); setDragOverDay(null); }}
-                                  className={`group/slot relative w-full rounded-ds border border-dashed border-status-green/40 bg-status-green/10 p-1.5 hover:bg-status-green/15 transition-colors duration-ds-1 cursor-grab active:cursor-grabbing ${draggingSlot?.id === sl.id && draggingSlot?.date === sl.date ? "opacity-40" : ""}`}
+                                  className={`group/slot relative w-full rounded-ds border border-dashed border-border p-1.5 hover:bg-accent transition-colors duration-ds-1 cursor-grab active:cursor-grabbing ${draggingSlot?.id === sl.id && draggingSlot?.date === sl.date ? "opacity-40" : ""}`}
                                   title="Arraste para outro dia para mover"
                                 >
                                   <button
@@ -1474,7 +1471,7 @@ const AdminAgendaPage = () => {
                                     className="w-full text-left pr-12 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring rounded-ds"
                                     aria-label={`Agendar com ${getMentorName(sl.mentor_id)} às ${formatTime(sl.start_time)}`}
                                   >
-                                    <p className="text-[11px] tabular-nums text-status-green">{formatTime(sl.start_time)} às {formatTime(sl.end_time)}</p>
+                                    <p className="text-[11px] tabular-nums text-foreground">{formatTime(sl.start_time)} às {formatTime(sl.end_time)}</p>
                                     <p className="text-[11px] text-muted-foreground truncate">{getMentorName(sl.mentor_id)}</p>
                                   </button>
                                   <div className="absolute top-1 right-1 flex gap-0.5 opacity-0 group-hover/slot:opacity-100 group-focus-within/slot:opacity-100 transition-opacity duration-ds-1">
@@ -1486,7 +1483,7 @@ const AdminAgendaPage = () => {
                               <button
                                 type="button"
                                 onClick={() => { setSlotAddDate(ds); setSlotAddMentor(mentorFilter || allMentors[0]?.id || ""); setSlotAddStart("07:00"); }}
-                                className="w-full rounded-ds border border-dashed border-border min-h-[32px] text-[11px] text-muted-foreground hover:text-status-green hover:border-status-green/40 transition-colors duration-ds-1 flex items-center justify-center gap-1 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                                className="w-full rounded-ds border border-dashed border-border min-h-[32px] text-[11px] text-muted-foreground hover:text-foreground hover:border-foreground/30 transition-colors duration-ds-1 flex items-center justify-center gap-1 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                               >
                                 <Plus className="h-3 w-3" aria-hidden /> Disponibilidade
                               </button>
@@ -1496,12 +1493,12 @@ const AdminAgendaPage = () => {
                       })}
                     </div>
                   </SectionCard>
-                </motion.div>
+                </div>
               )}
 
               {/* ═══════ MÊS ═══════ */}
               {viewMode === "month" && (
-                <motion.div variants={fadeUpItem} className="space-y-3">
+                <div className="space-y-3">
                   <SectionCard padding="none" className="overflow-auto">
                     <div className="grid grid-cols-7 min-w-[640px]">
                       {["Seg", "Ter", "Qua", "Qui", "Sex", "Sáb", "Dom"].map((d) => (
@@ -1529,14 +1526,14 @@ const AdminAgendaPage = () => {
                             aria-label={`${format(day, "d 'de' MMMM", { locale: ptBR })}, ${dayBks.length} sessões`}
                             className={`border-r border-b border-border p-2 min-h-[96px] text-left transition-colors duration-ds-1 hover:bg-accent/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring ${
                               !inMonth ? "opacity-40" : ""
-                            } ${isToday(day) ? "bg-primary/5" : ""} ${isDropTarget ? "bg-status-green/10 ring-2 ring-inset ring-status-green/50" : ""}`}
+                            } ${isToday(day) ? "bg-muted/20" : ""} ${isDropTarget ? "bg-accent ring-1 ring-inset ring-foreground/30" : ""}`}
                           >
                             <div className="flex items-center justify-between mb-1.5">
-                              <span className={`inline-flex h-6 min-w-6 px-1 items-center justify-center rounded-full text-xs font-medium tabular-nums ${isToday(day) ? "bg-primary text-primary-foreground" : "text-foreground"}`}>
+                              <span className={`inline-flex h-6 min-w-6 px-1 items-center justify-center rounded-full text-xs font-medium tabular-nums ${isToday(day) ? "bg-foreground text-background" : "text-foreground"}`}>
                                 {format(day, "d")}
                               </span>
                               {dayAvail.length > 0 && (
-                                <span className="text-[11px] text-status-green tabular-nums" title={`${dayAvail.length} horário(s) disponível(is)`}>
+                                <span className="text-[11px] text-muted-foreground tabular-nums" title={`${dayAvail.length} horário(s) disponível(is)`}>
                                   {dayAvail.length} disp.
                                 </span>
                               )}
@@ -1572,14 +1569,14 @@ const AdminAgendaPage = () => {
                       </span>
                     ))}
                     <span className="inline-flex items-center gap-1.5">
-                      <span className="w-2 h-2 rounded-full border border-dashed border-status-green" aria-hidden /> Disponibilidade
+                      <span className="w-2 h-2 rounded-full border border-dashed border-muted-foreground" aria-hidden /> Disponibilidade
                     </span>
                   </div>
-                </motion.div>
+                </div>
               )}
             </>
           )}
-        </motion.div>
+        </div>
       </PageContainer>
 
       {/* ═══════ LEMBRETES ═══════ */}
@@ -1596,7 +1593,7 @@ const AdminAgendaPage = () => {
       >
         <div className="space-y-4">
           {mentorsWithoutAvailability.length > 0 && (
-            <SectionCard tone="warning" padding="none">
+            <SectionCard padding="none">
               <div className="px-4 pt-3 pb-1">
                 <SectionHeader
                   as="h3"
@@ -1708,10 +1705,10 @@ const AdminAgendaPage = () => {
               <Callout tone="warning" icon={Clock} title="O mentor ainda não fechou esta sessão">
                 <p className="mb-3">{PENDING_CONFIRMATION_HINT}</p>
                 <div className="flex flex-col sm:flex-row gap-2">
-                  <Button variant="outline" size="sm" className="flex-1 text-status-green" disabled={savingStatus} onClick={() => closePendingConfirmation(selectedBooking, "completed")}>
+                  <Button variant="outline" size="sm" className="flex-1" disabled={savingStatus} onClick={() => closePendingConfirmation(selectedBooking, "completed")}>
                     <Check className="h-4 w-4" /> Marcar realizada
                   </Button>
-                  <Button variant="outline" size="sm" className="flex-1 text-status-yellow" disabled={savingStatus} onClick={() => setShowNotRealizedModal(true)}>
+                  <Button variant="ghost" size="sm" className="flex-1" disabled={savingStatus} onClick={() => setShowNotRealizedModal(true)}>
                     <Ban className="h-4 w-4" /> Não realizada
                   </Button>
                 </div>
@@ -1737,7 +1734,7 @@ const AdminAgendaPage = () => {
 
             {/* Trocar mentor */}
             {showMentorSwap && (
-              <SectionCard padding="none" className="border-primary/30">
+              <SectionCard padding="none">
                 <div className="px-4 pt-3 pb-1 flex items-center justify-between">
                   <SectionHeader as="h3" title="Trocar mentor" />
                   <IconButton aria-label="Fechar troca de mentor" size="sm" onClick={() => setShowMentorSwap(false)}><X className="h-4 w-4" /></IconButton>
@@ -1752,7 +1749,7 @@ const AdminAgendaPage = () => {
                       active={isCurrent}
                       leading={<UserAvatar name={m.full_name} size={32} />}
                       title={shortName(m.full_name)}
-                      trailing={isCurrent ? <StatusPill tone="brand" size="sm" withDot={false}>Atual</StatusPill> : undefined}
+                      trailing={isCurrent ? <StatusPill tone="neutral" size="sm" withDot={false}>Atual</StatusPill> : undefined}
                       chevron={!isCurrent}
                     />
                   );
@@ -1762,7 +1759,7 @@ const AdminAgendaPage = () => {
 
             {/* Alterar data/horário */}
             {showDateChange && (
-              <SectionCard padding="compact" className="border-primary/30 space-y-3">
+              <SectionCard padding="compact" className="space-y-3">
                 <div className="flex items-center justify-between">
                   <SectionHeader as="h3" title="Alterar data e horário" />
                   <IconButton aria-label="Fechar alteração de data" size="sm" onClick={() => setShowDateChange(false)}><X className="h-4 w-4" /></IconButton>
@@ -1795,7 +1792,7 @@ const AdminAgendaPage = () => {
                 </Button>
               )}
               {(selectedBooking.zoom_join_url || selectedBooking.zoom_link) && (
-                <Button variant="outline" className="w-full text-status-blue" asChild>
+                <Button variant="outline" className="w-full" asChild>
                   <a href={selectedBooking.zoom_join_url || selectedBooking.zoom_link || "#"} target="_blank" rel="noopener noreferrer">
                     <Video className="h-4 w-4" /> Abrir Zoom
                   </a>

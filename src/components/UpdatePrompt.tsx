@@ -120,8 +120,8 @@ export const UpdatePrompt = () => {
       aria-live="polite"
       className="fixed inset-x-0 z-40 px-4 pointer-events-none bottom-[calc(env(safe-area-inset-bottom,0px)_+_4.5rem)] lg:bottom-6 lg:left-60"
     >
-      <SectionCard tone="brand" padding="compact" className="max-w-md mx-auto pointer-events-auto shadow-ds-2 flex items-center gap-3">
-        <RefreshCw className="h-5 w-5 text-primary shrink-0" aria-hidden />
+      <SectionCard padding="compact" className="max-w-md mx-auto pointer-events-auto shadow-ds-2 flex items-center gap-3">
+        <RefreshCw className="h-5 w-5 text-muted-foreground shrink-0" aria-hidden />
         <div className="flex-1 min-w-0">
           <p className="text-sm font-semibold text-foreground leading-tight">Nova versão disponível</p>
           <p className="text-xs text-muted-foreground leading-tight mt-0.5">Atualize para ver as novidades.</p>

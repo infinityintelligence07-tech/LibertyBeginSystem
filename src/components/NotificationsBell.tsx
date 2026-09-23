@@ -155,7 +155,7 @@ export const NotificationsBell = () => {
                       type="button"
                       onClick={() => handleOpen(n)}
                       className={`w-full min-h-14 text-left px-4 py-3 flex items-start gap-3 transition-colors duration-ds-1 focus-visible:outline-none focus-visible:bg-accent ${
-                        isUnread ? "bg-primary/5 hover:bg-primary/10" : "hover:bg-accent/60"
+                        isUnread ? "bg-accent/40 hover:bg-accent/60" : "hover:bg-accent/60"
                       }`}
                     >
                       <span

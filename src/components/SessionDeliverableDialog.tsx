@@ -210,7 +210,7 @@ export const SessionDeliverableDialog = ({
     >
         {!data ? (
           <div className="space-y-4">
-            <Callout tone="brand" icon={Info} title="Cole o resumo ou a transcrição bruta do Zoom">
+            <Callout tone="info" icon={Info} title="Cole o resumo ou a transcrição bruta do Zoom">
               Use o material completo (o resumo do Zoom é mais detalhado que o do relatório).
               A IA vai transformar isso num infográfico horizontal de 3 páginas no estilo Begin
               para você enviar no WhatsApp do aluno.

@@ -181,16 +181,16 @@ export const DiagnosticRadar = ({
 
       {showSummary && (
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
-          <div className="rounded-xl border border-primary/30 bg-primary/5 p-3">
+          <div className="rounded-ds-lg border border-border bg-card p-3">
             <p className="text-xs text-muted-foreground">Média geral</p>
-            <p className="text-xl font-semibold text-primary tabular-nums">{total.toFixed(1)}<span className="text-xs text-muted-foreground">/5</span></p>
+            <p className="text-xl font-semibold text-foreground tabular-nums">{total.toFixed(1)}<span className="text-xs text-muted-foreground">/5</span></p>
           </div>
-          <div className="rounded-xl border border-border bg-card/60 p-3 col-span-2">
+          <div className="rounded-ds-lg border border-border bg-card p-3 col-span-2">
             <p className="text-xs text-muted-foreground">Nível de maturidade</p>
             <p className="text-sm font-semibold text-foreground">{level.label}</p>
             <p className="text-xs text-muted-foreground leading-snug">{level.hint}</p>
           </div>
-          <div className="rounded-xl border border-border bg-card/60 p-3">
+          <div className="rounded-ds-lg border border-border bg-card p-3">
             <p className="text-xs text-muted-foreground">Pilares</p>
             <p className="text-xl font-semibold text-foreground tabular-nums">{DIAGNOSTICO_BEGIN_PILLARS.length}</p>
           </div>
@@ -207,10 +207,10 @@ export const DiagnosticRadar = ({
                 key={p.id}
                 type={onPillarSelect ? "button" : undefined}
                 onClick={onPillarSelect ? () => onPillarSelect(p.id) : undefined}
-                className={`w-full flex items-center gap-3 rounded-lg px-1 py-1 text-left ${onPillarSelect ? "hover:bg-muted/40 transition-colors" : ""}`}
+                className={`w-full flex items-center gap-3 rounded-ds px-1 py-1 text-left ${onPillarSelect ? "hover:bg-muted/40 transition-colors" : ""}`}
               >
                 <span className="text-xs text-muted-foreground w-32 shrink-0 truncate">{p.short}</span>
-                <div className="flex-1 h-2 rounded-full bg-muted overflow-hidden">
+                <div className="flex-1 h-1 rounded-full bg-muted overflow-hidden">
                   <div className="h-full rounded-full bg-primary" style={{ width: `${(v / 5) * 100}%` }} />
                 </div>
                 <span className="text-xs font-semibold text-foreground tabular-nums w-8 text-right">{v.toFixed(1)}</span>

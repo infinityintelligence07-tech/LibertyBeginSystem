@@ -229,9 +229,7 @@ const AdminConteudosPage = () => {
                       date ? (
                         <DateBlock date={date} />
                       ) : (
-                        <div className="h-10 w-10 rounded-[var(--ds-radius-md)] bg-muted flex items-center justify-center">
-                          <FileText className="h-4 w-4 text-muted-foreground" aria-hidden />
-                        </div>
+                        <FileText className="h-5 w-5 text-muted-foreground shrink-0" aria-hidden />
                       )
                     }
                     title={sessionName}
@@ -273,11 +271,7 @@ const AdminConteudosPage = () => {
                 <ListRow
                   key={t.id}
                   last={index === contents.length - 1}
-                  leading={
-                    <div className="h-10 w-10 rounded-[var(--ds-radius-md)] bg-primary/10 text-primary flex items-center justify-center">
-                      <Wrench className="h-4 w-4" aria-hidden />
-                    </div>
-                  }
+                  leading={<Wrench className="h-5 w-5 text-muted-foreground shrink-0" aria-hidden />}
                   title={t.title}
                   subtitle={[contentTypeLabel(t.content_type), t.sessions?.name, t.description].filter(Boolean).join(" · ")}
                   trailing={
@@ -296,7 +290,7 @@ const AdminConteudosPage = () => {
                       <IconButton
                         aria-label={`Excluir ${t.title}`}
                         size="sm"
-                        className="hover:text-destructive hover:bg-destructive/10"
+                        className="hover:text-destructive"
                         onClick={() => setDeleteTarget({ id: t.id, title: t.title })}
                       >
                         <Trash2 className="h-4 w-4" />
@@ -343,7 +337,7 @@ const AdminConteudosPage = () => {
             )}
             {openReport.summary || openReport.goals || openReport.action_plan ? (
               <div className="flex items-center gap-2 text-xs text-muted-foreground">
-                <CheckCircle2 className="h-3.5 w-3.5 text-status-green" aria-hidden /> Relatório entregue pelo mentor.
+                <CheckCircle2 className="h-3.5 w-3.5" aria-hidden /> Relatório entregue pelo mentor.
               </div>
             ) : null}
           </div>

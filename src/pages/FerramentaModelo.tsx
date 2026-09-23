@@ -1,6 +1,5 @@
 import { useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { motion } from "framer-motion";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/hooks/useAuth";
@@ -120,7 +119,7 @@ const FerramentaModeloPage = ({ role = "mentor" }: { role?: "mentor" | "admin" }
 
   return (
     <div className="fixed inset-0 z-50 bg-background overflow-y-auto">
-      <div className="sticky top-0 z-20 bg-background/95 backdrop-blur border-b border-border">
+      <div className="sticky top-0 z-20 bg-background border-b border-border">
         <div
           className="max-w-2xl mx-auto px-4 sm:px-6 flex items-center gap-3"
           style={{ paddingTop: "calc(env(safe-area-inset-top) + 0.5rem)", paddingBottom: "0.5rem" }}
@@ -131,15 +130,13 @@ const FerramentaModeloPage = ({ role = "mentor" }: { role?: "mentor" | "admin" }
           <div className="min-w-0 flex-1">
             <p className="text-sm font-semibold text-foreground truncate">Mapeamento do Negócio</p>
           </div>
-          <div className="h-9 w-9 rounded-full flex items-center justify-center shrink-0 bg-primary/10">
-            <RadarIcon className="h-4 w-4 text-primary" aria-hidden />
-          </div>
+          <RadarIcon className="h-5 w-5 text-muted-foreground shrink-0" aria-hidden />
         </div>
       </div>
 
       {/* Abertura */}
       <PageContainer variant="narrow" className="pt-10 sm:pt-16 pb-24">
-        <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} className="space-y-8">
+        <div className="space-y-8">
           <PageHeader
             size="large"
             eyebrow="Ferramenta Begin"
@@ -158,7 +155,7 @@ const FerramentaModeloPage = ({ role = "mentor" }: { role?: "mentor" | "admin" }
               <Play className="h-4 w-4" aria-hidden /> Conhecer a ferramenta (demonstração)
             </Button>
           </div>
-        </motion.div>
+        </div>
       </PageContainer>
 
       {/* Seleção do aluno */}

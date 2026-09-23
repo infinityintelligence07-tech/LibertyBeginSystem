@@ -17,9 +17,7 @@ const NotFound = () => {
       <PageContainer variant="narrow">
         <SectionCard className="max-w-md mx-auto text-center space-y-5">
           <Logo size="md" className="mx-auto" />
-          <div className="mx-auto h-12 w-12 rounded-full bg-muted flex items-center justify-center">
-            <Compass className="h-6 w-6 text-muted-foreground" aria-hidden />
-          </div>
+          <Compass className="mx-auto h-6 w-6 text-muted-foreground" aria-hidden />
           <div className="space-y-2">
             <p className="ds-kicker">Erro 404</p>
             <h1 className="text-[24px] md:text-[28px] font-semibold leading-[1.2] tracking-[var(--ds-tracking-display)] text-foreground">

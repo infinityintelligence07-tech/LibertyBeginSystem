@@ -330,7 +330,7 @@ const AdminMembroDetalhesPage = () => {
       origin: "mentor",
     });
     if (error) { toast.error("Erro ao adicionar tarefa: " + error.message); return; }
-    toast.success("Tarefa adicionada!");
+    toast.success("Tarefa adicionada");
     setAddTaskOpen(false);
     setNewTaskText("");
     refreshAll();
@@ -387,7 +387,7 @@ const AdminMembroDetalhesPage = () => {
         />
         <div className="grid grid-cols-2 gap-3 sm:max-w-sm">
           <Stat label="A fazer" value={activePending} icon={Clock} tone="pending" size="sm" />
-          <Stat label="Concluídas" value={counts.validated} icon={CheckCircle2} tone="success" size="sm" />
+          <Stat label="Concluídas" value={counts.validated} icon={CheckCircle2} size="sm" />
         </div>
         <div className="flex flex-wrap items-center gap-2">
           {chips.map((c) => (
@@ -494,7 +494,7 @@ const AdminMembroDetalhesPage = () => {
           title="Histórico de resultados"
           description={`${withResults.length} ${withResults.length === 1 ? "conquista registrada" : "conquistas registradas"}`}
         />
-        <div className="relative pl-4 border-l border-status-green/30 space-y-3">
+        <div className="relative pl-4 border-l border-border space-y-3">
           {withResults.map((t) => {
             const bk = memberBookings.find((b) => b.id === t.booking_id);
             const sessionName = bk ? (sessionNames[bk.session_id] || "Sessão") : "Sessão";
@@ -504,10 +504,10 @@ const AdminMembroDetalhesPage = () => {
               : "";
             return (
               <div key={t.id} className="relative">
-                <span className="absolute -left-[21px] top-3 h-3 w-3 rounded-full bg-status-green border-2 border-background" aria-hidden />
+                <span className="absolute -left-[20.5px] top-3 h-2.5 w-2.5 rounded-full bg-status-green border-2 border-background" aria-hidden />
                 <SectionCard padding="compact">
                   <div className="flex items-center gap-2 mb-1.5 flex-wrap">
-                    <StatusPill tone={isQuant ? "success" : "info"} size="sm" withDot={false}>
+                    <StatusPill tone="neutral" size="sm" withDot={false}>
                       {isQuant ? <TrendingUp className="h-3 w-3" aria-hidden /> : <MessageSquare className="h-3 w-3" aria-hidden />}
                       {isQuant ? "Quantitativo" : "Qualitativo"}
                     </StatusPill>
@@ -556,7 +556,7 @@ const AdminMembroDetalhesPage = () => {
               eyebrow={
                 <span className="inline-flex items-center gap-2 flex-wrap">
                   <span>{toTitleCase(profile.company_name || "Sem empresa")}</span>
-                  {profile.member_tier === "liberty" && <StatusPill tone="brand" size="sm" withDot={false}>Liberty</StatusPill>}
+                  {profile.member_tier === "liberty" && <StatusPill tone="neutral" size="sm" withDot={false}>Liberty</StatusPill>}
                   {profile.is_active === false && <StatusPill tone="neutral" size="sm" withDot={false}>Inativo</StatusPill>}
                   {!hasAccess && <StatusPill tone="warning" size="sm" withDot={false}>Sem acesso</StatusPill>}
                 </span>
@@ -575,7 +575,7 @@ const AdminMembroDetalhesPage = () => {
                       href={`https://wa.me/${cleanPhone(profile.phone)}`}
                       target="_blank"
                       rel="noopener noreferrer"
-                      className="btn-secondary btn-sm text-status-green"
+                      className="btn-secondary btn-sm"
                     >
                       <MessageCircle className="h-4 w-4" aria-hidden /> WhatsApp
                     </a>
@@ -599,7 +599,7 @@ const AdminMembroDetalhesPage = () => {
 
             {/* Resumo da jornada */}
             <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-              <Stat label="Realizadas" value={`${realizedJourneyCount}/12`} icon={CheckCircle2} tone="success" />
+              <Stat label="Realizadas" value={`${realizedJourneyCount}/12`} icon={CheckCircle2} />
               <Stat
                 label="A confirmar"
                 value={pendingConfirmationCount}
@@ -611,10 +611,9 @@ const AdminMembroDetalhesPage = () => {
                 label="Agendadas"
                 value={scheduledJourneyCount}
                 icon={Clock}
-                tone="info"
                 hint={nextSession ? `Próxima: ${formatValue("scheduled_date", nextSession.scheduled_date)}` : "Sem próxima sessão"}
               />
-              <Stat label="Disponíveis" value={availableJourneyCount} icon={Target} tone="default" hint="Vagas na jornada" />
+              <Stat label="Disponíveis" value={availableJourneyCount} icon={Target} hint="Vagas na jornada" />
             </div>
 
             {/* Observação do administrador: visível no topo para mentor e admin */}
@@ -630,8 +629,8 @@ const AdminMembroDetalhesPage = () => {
             {quickFacts.length > 0 && (
               <div className="flex flex-wrap items-center gap-2">
                 {quickFacts.map((f) => (
-                  <div key={f.key} className="flex items-center gap-2 h-8 px-3 rounded-full border border-border bg-card text-xs">
-                    <f.icon className="h-3.5 w-3.5 text-primary shrink-0" aria-hidden />
+                  <div key={f.key} className="flex items-center gap-2 h-8 px-3 rounded-[var(--ds-radius-sm)] border border-border bg-card text-xs">
+                    <f.icon className="h-3.5 w-3.5 text-muted-foreground shrink-0" aria-hidden />
                     <span className="text-muted-foreground">{f.label}</span>
                     <span className="font-medium text-foreground truncate max-w-[220px]">{String(f.value)}</span>
                   </div>
@@ -660,7 +659,7 @@ const AdminMembroDetalhesPage = () => {
                 {narrative.map((n) => (
                   <SectionCard key={n.key} padding="compact" className="h-full">
                     <p className="ds-kicker flex items-center gap-1.5 mb-1.5">
-                      <n.icon className="h-3.5 w-3.5 text-primary" aria-hidden /> {n.label}
+                      <n.icon className="h-3.5 w-3.5 text-muted-foreground" aria-hidden /> {n.label}
                     </p>
                     <p className="text-sm text-foreground leading-relaxed whitespace-pre-wrap">{String(n.value)}</p>
                   </SectionCard>
@@ -677,7 +676,7 @@ const AdminMembroDetalhesPage = () => {
                 {stories.map((s: any) => (
                   <SectionCard key={s.key}>
                     <p className="ds-kicker flex items-center gap-1.5 mb-2">
-                      <s.icon className="h-3.5 w-3.5 text-primary" aria-hidden /> {s.label}
+                      <s.icon className="h-3.5 w-3.5 text-muted-foreground" aria-hidden /> {s.label}
                     </p>
                     <p className="text-sm text-foreground leading-relaxed whitespace-pre-wrap">{String(s.value)}</p>
                   </SectionCard>

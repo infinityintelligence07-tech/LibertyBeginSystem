@@ -190,9 +190,9 @@ const TarefasPage = ({ role }: TarefasPageProps) => {
         ) : (
           <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
             <SectionCard padding="compact"><Stat icon={Clock} label="Pendentes" value={counts.pending} size="sm" /></SectionCard>
-            <SectionCard padding="compact"><Stat icon={PlayCircle} label="Em andamento" value={counts.in_progress} tone="info" size="sm" /></SectionCard>
-            <SectionCard padding="compact"><Stat icon={ShieldCheck} label="Aguardando" value={counts.awaiting} tone="warning" size="sm" /></SectionCard>
-            <SectionCard padding="compact"><Stat icon={CheckCircle2} label="Concluídas" value={counts.validated} tone="success" size="sm" /></SectionCard>
+            <SectionCard padding="compact"><Stat icon={PlayCircle} label="Em andamento" value={counts.in_progress} size="sm" /></SectionCard>
+            <SectionCard padding="compact"><Stat icon={ShieldCheck} label="Aguardando" value={counts.awaiting} size="sm" /></SectionCard>
+            <SectionCard padding="compact"><Stat icon={CheckCircle2} label="Concluídas" value={counts.validated} size="sm" /></SectionCard>
           </div>
         )}
 

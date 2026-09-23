@@ -1,4 +1,3 @@
-import { motion } from "framer-motion";
 import {
   Check, Compass, Users, Megaphone, Lightbulb, Wallet, Settings2, HeartHandshake, Flag,
   TrendingUp,
@@ -59,7 +58,7 @@ export const TrailPath = ({ answers, onSelect, activeIndex }: Props) => {
             const next = nodes[i + 1];
             const done = isPillarComplete(PILLARS[i], answers);
             return (
-              <motion.path
+              <path
                 key={`seg-${i}`}
                 d={segment(n, next)}
                 fill="none"
@@ -67,9 +66,8 @@ export const TrailPath = ({ answers, onSelect, activeIndex }: Props) => {
                 strokeWidth={7}
                 strokeLinecap="round"
                 strokeDasharray="1 15"
-                initial={{ opacity: 0.3 }}
-                animate={{ opacity: done ? 1 : 0.35 }}
-                transition={{ duration: 0.5 }}
+                opacity={done ? 1 : 0.35}
+                className="transition-opacity duration-ds-2 ease-ds"
               />
             );
           })}
@@ -84,21 +82,18 @@ export const TrailPath = ({ answers, onSelect, activeIndex }: Props) => {
           const count = n.isGoal ? 0 : pillarAnsweredCount(n.pillar, answers);
           const below = n.y === TOP;
           return (
-            <motion.button
+            <button
               key={n.isGoal ? "goal" : n.pillar.id}
+              type="button"
               onClick={() => !n.isGoal && onSelect(n.index)}
-              whileHover={n.isGoal ? undefined : { scale: 1.06 }}
-              whileTap={n.isGoal ? undefined : { scale: 0.96 }}
-              className="absolute flex flex-col items-center"
+              className="absolute flex flex-col items-center -translate-x-1/2 -translate-y-1/2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 ring-offset-background rounded-full"
               style={{
                 left: `${(n.x / W) * 100}%`,
                 top: `${(n.y / H) * 100}%`,
-                translateX: "-50%",
-                translateY: "-50%",
               }}
             >
               <span
-                className="rounded-full p-1 sm:p-1.5 shadow-lg"
+                className="rounded-full p-1 sm:p-1.5"
                 style={{
                   background: "hsl(var(--card))",
                   boxShadow: active ? `0 0 0 3px ${c}` : undefined,
@@ -131,7 +126,7 @@ export const TrailPath = ({ answers, onSelect, activeIndex }: Props) => {
                   </span>
                 )}
               </span>
-            </motion.button>
+            </button>
           );
         })}
       </div>

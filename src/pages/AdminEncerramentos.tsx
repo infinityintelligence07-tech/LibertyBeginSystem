@@ -163,16 +163,14 @@ const AdminEncerramentosPage = () => {
                   const items = grouped[key] || [];
                   const isCurrent = key === currentKey;
                   return (
-                    <SectionCard key={key} padding="none" as="section" className="flex flex-col min-h-[300px]" tone={isCurrent ? "brand" : "default"}>
+                    <SectionCard key={key} padding="none" as="section" className="flex flex-col min-h-[300px]">
                       <div className="px-4 py-3 border-b border-border flex items-center justify-between gap-3">
                         <SectionHeader
                           as="h3"
-                          title={monthLabel(key)}
+                          title={isCurrent ? `${monthLabel(key)} · atual` : monthLabel(key)}
                           description={`${items.length} ${items.length === 1 ? "membro" : "membros"}`}
                         />
-                        <StatusPill tone={items.length > 0 ? "brand" : "neutral"} withDot={false} size="md">
-                          {items.length}
-                        </StatusPill>
+                        <span className="text-sm font-semibold tabular-nums text-foreground">{items.length}</span>
                       </div>
                       <div className="flex-1">
                         {items.length === 0 ? (
@@ -239,10 +237,10 @@ const AdminEncerramentosPage = () => {
                   description="Nenhum membro sem data de início ou término."
                 />
               ) : (
-                <SectionCard padding="none" tone="warning">
-                  <div className="px-4 py-3 border-b border-border flex items-center gap-2 text-sm text-status-yellow">
+                <SectionCard padding="none">
+                  <div className="px-4 py-3 border-b border-border flex items-center gap-2 text-sm text-muted-foreground">
                     <AlertTriangle className="h-4 w-4" aria-hidden />
-                    <span className="font-medium">Defina as datas para que o membro entre no planejamento.</span>
+                    <span>Defina as datas para que o membro entre no planejamento.</span>
                   </div>
                   {missing.map((m, index) => {
                     const d = drafts[m.id] || {

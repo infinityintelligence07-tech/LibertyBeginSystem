@@ -1,12 +1,10 @@
 import { useState, useMemo, useRef, useEffect, Fragment } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import * as XLSX from "xlsx";
-import { motion } from "framer-motion";
 import { AppLayout } from "@/components/AppLayout";
 import { AdminMonthFilter } from "@/components/AdminMonthFilter";
 import { useAdminFilter } from "@/contexts/AdminFilterContext";
 import { useMembers, useSessionCatalog } from "@/hooks/useAdminData";
-import { staggerContainer, fadeUpItem } from "@/lib/animations";
 import { toTitleCase, shortName, normalizeText, matchesSearch } from "@/lib/formatName";
 import {
   Search, ChevronDown, ChevronRight, Users, CheckCircle2, AlertTriangle, Plus, Edit, Trash2, Upload, Download, KeyRound,
@@ -943,9 +941,9 @@ const AdminMembrosPage = () => {
   const monthTone = (count: number): "success" | "warning" | "danger" => (count >= 2 ? "success" : count === 1 ? "warning" : "danger");
   const monthCellClass = (count: number) => {
     const tone = monthTone(count);
-    if (tone === "success") return "bg-status-green/15 text-status-green";
-    if (tone === "warning") return "bg-status-yellow/15 text-status-yellow";
-    return "bg-destructive/10 text-destructive";
+    if (tone === "success") return "border border-border text-foreground";
+    if (tone === "warning") return "border border-border text-muted-foreground";
+    return "border border-border text-destructive";
   };
   const monthStatusLabel = (count: number) => (count >= 2 ? "No ritmo" : count === 1 ? "Parcial" : "Sem sessão");
 
@@ -1092,18 +1090,18 @@ const AdminMembrosPage = () => {
     const isComplete = member.total_completed >= 12;
     return (
       <div className="flex items-center gap-3 min-w-0">
-        <UserAvatar name={member.full_name} avatarUrl={member.avatar_url} size={36} className={isComplete ? "border-status-green/40" : undefined} />
+        <UserAvatar name={member.full_name} avatarUrl={member.avatar_url} size={36} />
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-center gap-x-2 gap-y-1 min-w-0">
             <Link
               to={`/admin/membros/${member.id}`}
               onClick={(e) => e.stopPropagation()}
-              className="text-sm font-medium text-foreground leading-tight hover:text-primary transition-colors truncate"
+              className="text-sm font-medium text-foreground leading-tight hover:underline underline-offset-2 truncate"
             >
               {shortName(member.full_name)}
             </Link>
             {member.member_tier === "liberty" && (
-              <StatusPill tone="brand" size="sm" withDot={false}><LibertyMark size={10} /> Liberty</StatusPill>
+              <StatusPill tone="neutral" size="sm" withDot={false}><LibertyMark size={10} /> Liberty</StatusPill>
             )}
             {member.is_active === false && <StatusPill tone="neutral" size="sm" withDot={false}>Inativo</StatusPill>}
             {!member.email && <StatusPill tone="warning" size="sm" withDot={false}>Sem e-mail</StatusPill>}
@@ -1111,7 +1109,7 @@ const AdminMembrosPage = () => {
           <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 mt-0.5 text-xs text-muted-foreground">
             {member.company_name && <span className="truncate">{toTitleCase(member.company_name)}</span>}
             {member.pending_tasks_count > 0 && (
-              <span className="inline-flex items-center gap-1 text-status-yellow shrink-0">
+              <span className="inline-flex items-center gap-1 shrink-0">
                 <ListTodo className="h-3 w-3" aria-hidden /> {member.pending_tasks_count} tarefa{member.pending_tasks_count > 1 ? "s" : ""}
               </span>
             )}
@@ -1152,8 +1150,8 @@ const AdminMembrosPage = () => {
           <SectionHeader
             as="h3"
             title={
-              <span className="inline-flex items-center gap-2 text-status-orange">
-                <Clock className="h-4 w-4" aria-hidden /> A confirmar ({member.pending_confirmation_sessions!.length})
+              <span className="inline-flex items-center gap-2">
+                <Clock className="h-4 w-4 text-muted-foreground" aria-hidden /> A confirmar ({member.pending_confirmation_sessions!.length})
               </span>
             }
             description={PENDING_CONFIRMATION_HINT}
@@ -1165,9 +1163,9 @@ const AdminMembrosPage = () => {
                 to={`/admin/agenda?booking=${ps.booking_id}`}
                 onClick={(e) => e.stopPropagation()}
                 title="Confirmar na agenda"
-                className="flex items-center gap-2 rounded-ds text-sm px-3 min-h-[40px] bg-status-orange/10 border border-status-orange/20 text-foreground hover:bg-status-orange/15 transition-colors min-w-0"
+                className="flex items-center gap-2 rounded-ds text-sm px-3 min-h-[40px] border border-border text-foreground hover:bg-accent transition-colors min-w-0"
               >
-                <Clock className="h-4 w-4 shrink-0 text-status-orange" aria-hidden />
+                <span className="h-2 w-2 rounded-full bg-status-orange shrink-0" aria-hidden />
                 <span className="truncate">{ps.session_name}</span>
                 <span className="ml-auto text-xs text-muted-foreground tabular-nums shrink-0">{formatShortDate(ps.date)}</span>
               </Link>
@@ -1183,15 +1181,15 @@ const AdminMembrosPage = () => {
             {member.completed_sessions.map((cs) => (
               <div
                 key={cs.booking_id}
-                className="flex items-center gap-1 rounded-ds text-sm bg-status-green/10 border border-border text-foreground min-h-[40px] pr-1"
+                className="flex items-center gap-1 rounded-ds text-sm border border-border text-foreground min-h-[40px] pr-1"
               >
                 <Link
                   to={`/admin/sessoes/${cs.booking_id}/relatorio`}
                   onClick={(e) => e.stopPropagation()}
-                  className="flex items-center gap-2 px-3 py-2 flex-1 min-w-0 hover:text-primary transition-colors"
+                  className="flex items-center gap-2 px-3 py-2 flex-1 min-w-0 hover:underline underline-offset-2"
                   title="Ver detalhes da sessão"
                 >
-                  <CheckCircle2 className="h-4 w-4 text-status-green shrink-0" aria-hidden />
+                  <span className="h-2 w-2 rounded-full bg-status-green shrink-0" aria-hidden />
                   <span className="truncate">{cs.session_name}</span>
                 </Link>
                 <IconButton
@@ -1293,7 +1291,7 @@ const AdminMembrosPage = () => {
                   <td className="px-3 py-2 align-middle min-w-[140px]">
                     <div className="flex items-center gap-2">
                       <ProgressBar value={member.total_completed} max={12} tone={isComplete ? "success" : "brand"} className="flex-1 max-w-[110px]" label={`${member.total_completed} de 12 sessões`} />
-                      <span className={`text-xs tabular-nums whitespace-nowrap ${isComplete ? "text-status-green font-semibold" : "text-muted-foreground"}`}>
+                      <span className={`text-xs tabular-nums whitespace-nowrap ${isComplete ? "text-foreground font-medium" : "text-muted-foreground"}`}>
                         {member.total_completed}/12
                       </span>
                     </div>
@@ -1336,7 +1334,7 @@ const AdminMembrosPage = () => {
                       <AdminMemberNote memberId={member.id} initialNote={member.admin_note} />
                     </div>
                     {isExpanded && (
-                      <div className="px-4 pb-5 pt-2 border-t border-border bg-background/30">
+                      <div className="px-4 pb-5 pt-2 border-t border-border">
                         {renderExpanded(member)}
                       </div>
                     )}
@@ -1370,7 +1368,7 @@ const AdminMembrosPage = () => {
               title={
                 <span className="inline-flex items-center gap-2 flex-wrap">
                   {shortName(member.full_name)}
-                  {member.member_tier === "liberty" && <StatusPill tone="brand" size="sm" withDot={false}>Liberty</StatusPill>}
+                  {member.member_tier === "liberty" && <StatusPill tone="neutral" size="sm" withDot={false}>Liberty</StatusPill>}
                   {member.is_active === false && <StatusPill tone="neutral" size="sm" withDot={false}>Inativo</StatusPill>}
                   {!member.email && <StatusPill tone="warning" size="sm" withDot={false}>Sem e-mail</StatusPill>}
                 </span>
@@ -1378,7 +1376,7 @@ const AdminMembrosPage = () => {
               subtitle={
                 <span className="inline-flex items-center gap-2 flex-wrap">
                   {member.company_name && <span className="truncate">{toTitleCase(member.company_name)}</span>}
-                  <span className={`tabular-nums ${isComplete ? "text-status-green font-semibold" : ""}`}>{member.total_completed}/12</span>
+                  <span className={`tabular-nums ${isComplete ? "text-foreground font-medium" : ""}`}>{member.total_completed}/12</span>
                   {pendingConfirmationCount > 0 && (
                     <span className="inline-flex items-center gap-1 text-status-orange"><Clock className="h-3 w-3" aria-hidden /> {pendingConfirmationCount} a confirmar</span>
                   )}
@@ -1392,7 +1390,7 @@ const AdminMembrosPage = () => {
               }
             />
             {isExpanded && (
-              <div className="px-4 pb-5 space-y-4 bg-background/30">
+              <div className="px-4 pb-5 space-y-4">
                 <div className="flex items-center justify-between gap-2 flex-wrap pt-2">
                   <ProgressBar value={member.total_completed} max={12} tone={isComplete ? "success" : "brand"} className="flex-1 min-w-[120px]" label={`${member.total_completed} de 12 sessões`} />
                   {renderActions(member)}
@@ -1423,8 +1421,8 @@ const AdminMembrosPage = () => {
   return (
     <AppLayout role="admin">
       <PageContainer variant="wide">
-        <motion.div variants={staggerContainer} initial="hidden" animate="show" className="space-y-6">
-          <motion.div variants={fadeUpItem}>
+        <div className="space-y-6">
+          <div>
             <PageHeader
               eyebrow="Admin"
               title={pageTitle}
@@ -1432,7 +1430,7 @@ const AdminMembrosPage = () => {
               actions={
                 <>
                   {duplicateGroups.length > 0 && (
-                    <Button variant="outline" size="sm" onClick={() => setDupOpen(true)} className="text-status-yellow">
+                    <Button variant="outline" size="sm" onClick={() => setDupOpen(true)}>
                       <GitMerge className="h-4 w-4" /> {duplicateGroups.length} duplicata{duplicateGroups.length > 1 ? "s" : ""}
                     </Button>
                   )}
@@ -1448,10 +1446,10 @@ const AdminMembrosPage = () => {
                 </>
               }
             />
-          </motion.div>
+          </div>
 
           {/* Barra de filtros */}
-          <motion.div variants={fadeUpItem} className="space-y-3">
+          <div className="space-y-3">
             <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-3">
               <div className="flex items-center gap-2 flex-wrap" role="tablist" aria-label="Tipo de membro">
                 <Chip active={tierTab === "begin"} onClick={() => setTierTab("begin")} count={tierCounts.begin}>Begin</Chip>
@@ -1489,13 +1487,12 @@ const AdminMembrosPage = () => {
                 <Chip
                   active={sortMode === "priority"}
                   onClick={() => setSortMode(sortMode === "priority" ? "name" : "priority")}
-                  className={sortMode === "priority" ? "" : "text-status-yellow"}
                 >
                   <AlertTriangle className="h-3.5 w-3.5" aria-hidden /> Pendentes no topo
                 </Chip>
               </div>
             </div>
-          </motion.div>
+          </div>
 
           {/* Lista */}
           {isLoading ? (
@@ -1510,12 +1507,12 @@ const AdminMembrosPage = () => {
               action={!search ? <Button size="sm" onClick={openAdd}><Plus className="h-4 w-4" /> Novo membro</Button> : undefined}
             />
           ) : (
-            <motion.div variants={fadeUpItem}>
+            <div>
               {renderTable()}
               {renderMobileList()}
-            </motion.div>
+            </div>
           )}
-        </motion.div>
+        </div>
       </PageContainer>
 
       {/* Novo membro */}
@@ -1666,7 +1663,7 @@ const AdminMembrosPage = () => {
       <BottomSheet
         open={dupOpen}
         onOpenChange={setDupOpen}
-        title={<span className="inline-flex items-center gap-2"><GitMerge className="h-4 w-4 text-status-yellow" aria-hidden /> Perfis duplicados</span>}
+        title={<span className="inline-flex items-center gap-2"><GitMerge className="h-4 w-4 text-muted-foreground" aria-hidden /> Perfis duplicados</span>}
         description={`Detectamos ${duplicateGroups.length} grupo(s) de possíveis duplicatas (mesmo primeiro e último nome). Escolha qual perfil manter; o outro será mesclado no principal e removido.`}
         size="lg"
         footer={<Button variant="ghost" onClick={() => setDupOpen(false)}>Fechar</Button>}
@@ -1677,7 +1674,7 @@ const AdminMembrosPage = () => {
               <SectionHeader as="h3" title={toTitleCase(g.profiles[0].full_name)} />
               <div className="grid gap-2">
                 {g.profiles.map((p) => (
-                  <div key={p.id} className="rounded-ds bg-background/40 border border-border p-3 text-xs">
+                  <div key={p.id} className="rounded-ds border border-border p-3 text-xs">
                     <div className="flex items-center justify-between gap-2 flex-wrap">
                       <div className="min-w-0">
                         <div className="text-sm text-foreground font-medium">{toTitleCase(p.full_name)}</div>
@@ -1744,7 +1741,7 @@ const AdminMembrosPage = () => {
       <BottomSheet
         open={!!mergeTarget}
         onOpenChange={(o) => { if (!o) setMergeTarget(null); }}
-        title={<span className="inline-flex items-center gap-2"><AlertTriangle className="h-4 w-4 text-status-yellow" aria-hidden /> Confirmar mesclagem</span>}
+        title={<span className="inline-flex items-center gap-2"><AlertTriangle className="h-4 w-4 text-muted-foreground" aria-hidden /> Confirmar mesclagem</span>}
         description="As sessões, relatórios e o acesso do perfil removido passam para o perfil mantido. A mesclagem fica em Últimas mesclagens e pode ser desfeita."
         size="sm"
         locked={mergeBusy}
@@ -1760,12 +1757,12 @@ const AdminMembrosPage = () => {
       >
         {mergeTarget && (
           <div className="space-y-3 text-sm">
-            <SectionCard tone="brand" padding="compact">
+            <SectionCard padding="compact">
               <p className="ds-kicker mb-1">Perfil que será mantido</p>
               <p className="text-foreground font-medium">{toTitleCase(mergeTarget.winner.full_name)}</p>
               <p className="text-xs text-muted-foreground">{mergeTarget.winner.email || "sem e-mail"} · {mergeTarget.winner.member_tier}</p>
             </SectionCard>
-            <SectionCard tone="danger" padding="compact">
+            <SectionCard padding="compact">
               <p className="ds-kicker mb-1">Perfil que será removido</p>
               <p className="text-foreground font-medium">{toTitleCase(mergeTarget.loser.full_name)}</p>
               <p className="text-xs text-muted-foreground">{mergeTarget.loser.email || "sem e-mail"} · {mergeTarget.loser.member_tier}</p>

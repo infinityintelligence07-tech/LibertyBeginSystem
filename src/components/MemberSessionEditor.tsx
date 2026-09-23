@@ -365,7 +365,7 @@ export const MemberSessionEditor = ({
       <ListRow
         key={cs.booking_id}
         last={last}
-        leading={<DateBlock date={cs.date} tone={type === "scheduled" ? "brand" : type === "completed" ? "default" : "muted"} />}
+        leading={<DateBlock date={cs.date} tone={type === "pending_confirmation" ? "muted" : "default"} />}
         title={cs.session_name}
         subtitle={
           <span className="inline-flex items-center gap-2 flex-wrap">
@@ -390,7 +390,6 @@ export const MemberSessionEditor = ({
                   <Button
                     variant="ghost"
                     size="sm"
-                    className="text-status-green"
                     disabled={isClosing}
                     onClick={() => handleClosePending(cs, "completed")}
                   >
@@ -400,7 +399,6 @@ export const MemberSessionEditor = ({
                 <Button
                   variant="ghost"
                   size="sm"
-                  className="text-status-yellow"
                   disabled={isClosing}
                   onClick={() => handleClosePending(cs, "not_realized")}
                 >
@@ -496,18 +494,18 @@ export const MemberSessionEditor = ({
 
   return (
     <div className="space-y-5">
-      {renderGroup(CheckCircle2, "text-status-green", filterKey ? "Realizadas neste mês" : "Sessões realizadas", completedInView, "completed")}
+      {renderGroup(CheckCircle2, "text-muted-foreground", filterKey ? "Realizadas neste mês" : "Sessões realizadas", completedInView, "completed")}
 
       {renderGroup(
         Clock,
-        "text-status-orange",
+        "text-muted-foreground",
         filterKey ? "A confirmar neste mês" : "Sessões a confirmar",
         pendingInView,
         "pending_confirmation",
         "Passaram do horário e o mentor ainda não confirmou se aconteceram. Não contam como realizadas até a confirmação.",
       )}
 
-      {renderGroup(Target, "text-primary", filterKey ? "Agendadas neste mês" : "Sessões agendadas", scheduledInView, "scheduled")}
+      {renderGroup(Target, "text-muted-foreground", filterKey ? "Agendadas neste mês" : "Sessões agendadas", scheduledInView, "scheduled")}
 
       {completedInView.length === 0 && pendingInView.length === 0 && scheduledInView.length === 0 && (
         <EmptyState
@@ -533,7 +531,7 @@ export const MemberSessionEditor = ({
           />
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
             {remaining.map((s) => (
-              <div key={s.id} className="flex items-center gap-2 px-3 py-2 rounded-ds text-sm bg-muted/30 border border-border text-muted-foreground min-h-[40px]">
+              <div key={s.id} className="flex items-center gap-2 px-3 py-2 rounded-ds text-sm border border-border text-muted-foreground min-h-[40px]">
                 <span className="w-1.5 h-1.5 rounded-full bg-muted-foreground/50 shrink-0" aria-hidden />
                 <span className="truncate">{s.name}</span>
                 {s.is_kickoff && !kickoffAllowed && (

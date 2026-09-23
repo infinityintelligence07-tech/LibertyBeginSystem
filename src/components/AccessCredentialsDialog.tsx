@@ -23,12 +23,12 @@ const CredentialRow = ({ label, value, highlight, onCopy, copied }: {
   onCopy?: () => void;
   copied?: boolean;
 }) => (
-  <div className={`flex items-center justify-between gap-3 px-3 py-2.5 rounded-ds border ${highlight ? "bg-primary/5 border-primary/20" : "bg-muted/30 border-border"}`}>
+  <div className="flex items-center justify-between gap-3 px-3 py-2.5 rounded-ds border bg-muted/30 border-border">
     <span className="text-xs text-muted-foreground shrink-0 w-14">{label}</span>
     <span className={`font-mono truncate flex-1 text-right ${highlight ? "text-sm font-semibold text-foreground" : "text-xs text-foreground"}`}>{value}</span>
     {onCopy && (
       <IconButton aria-label={`Copiar ${label.toLowerCase()}`} size="sm" onClick={onCopy}>
-        {copied ? <Check className="h-4 w-4 text-status-green" /> : <Copy className="h-4 w-4" />}
+        {copied ? <Check className="h-4 w-4" /> : <Copy className="h-4 w-4" />}
       </IconButton>
     )}
   </div>
@@ -43,13 +43,13 @@ export const AccessCredentialsDialog = ({ data, onClose }: Props) => {
   const roleLabel = data?.role === "mentor" ? "Mentor" : "Membro";
 
   const message = data
-    ? `Olá, ${firstName}! 👋
+    ? `Olá, ${firstName}.
 
 Seu acesso de *${roleLabel}* na plataforma *Liberty Begin* já está liberado.
 
-🔗 Link: ${loginUrl}
-📧 E-mail: ${data.email}
-🔒 Senha: ${data.password}
+Link: ${loginUrl}
+E-mail: ${data.email}
+Senha: ${data.password}
 
 Recomendamos alterar a senha após o primeiro login.
 Qualquer dúvida, fale com nosso suporte.`
@@ -99,7 +99,7 @@ Qualquer dúvida, fale com nosso suporte.`
       onOpenChange={(o) => !o && onClose()}
       title={
         <span className="inline-flex items-center gap-2">
-          <KeyRound className="h-4 w-4 text-primary" aria-hidden /> Acesso de {roleLabel.toLowerCase()} liberado
+          <KeyRound className="h-4 w-4 text-muted-foreground" aria-hidden /> Acesso de {roleLabel.toLowerCase()} liberado
         </span>
       }
       description="Envie o e-mail e a senha temporária para a pessoa. Ela pode trocar a senha depois do primeiro login."

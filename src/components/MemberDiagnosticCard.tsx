@@ -89,7 +89,7 @@ export const MemberDiagnosticCard = ({ libertyId }: Props) => {
         as="h3"
         title={
           <span className="inline-flex items-center gap-2">
-            <Target className="h-4 w-4 text-primary" aria-hidden /> Mapeamento do negócio
+            <Target className="h-4 w-4 text-muted-foreground" aria-hidden /> Mapeamento do negócio
           </span>
         }
         description="Toque em uma área do radar para abrir a folha daquele setor."

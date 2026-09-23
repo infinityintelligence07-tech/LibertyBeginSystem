@@ -14,7 +14,7 @@ export const GoogleCalendarBanner = () => {
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     if (params.get("google") === "connected") {
-      toast.success("Google Agenda conectado com sucesso!");
+      toast.success("Google Agenda conectado");
       refreshProfile?.();
       params.delete("google");
       const newUrl = window.location.pathname + (params.toString() ? "?" + params.toString() : "");
@@ -44,7 +44,7 @@ export const GoogleCalendarBanner = () => {
 
   return (
     <Callout
-      tone="brand"
+      tone="info"
       icon={Calendar}
       title="Conecte seu Google Agenda"
       className="mb-6"

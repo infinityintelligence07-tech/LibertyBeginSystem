@@ -265,7 +265,7 @@ export const MemberTimeline = ({
         <SectionHeader
           title={
             <span className="inline-flex items-center gap-2">
-              <Target className="h-4 w-4 text-primary" aria-hidden /> Linha do tempo
+              <Target className="h-4 w-4 text-muted-foreground" aria-hidden /> Linha do tempo
             </span>
           }
           description={
@@ -360,7 +360,7 @@ export const MemberTimeline = ({
         )}
 
         {/* Session map: one dot per session of the journey */}
-        <SectionCard padding="compact" className="space-y-4 bg-background/30">
+        <div className="space-y-4 pt-4 border-t border-border">
           <div className="flex items-start justify-between gap-3 flex-wrap">
             <div className="space-y-0.5">
               <h3 className="text-sm font-semibold text-foreground">Mapa das 12 sessões</h3>
@@ -369,7 +369,7 @@ export const MemberTimeline = ({
               </p>
             </div>
             <div className="text-right">
-              <p className="text-lg font-bold text-foreground tabular-nums leading-none">
+              <p className="text-lg font-semibold text-foreground tabular-nums leading-none">
                 {reachedCount}<span className="text-sm font-medium text-muted-foreground">/{totalSessions}</span>
               </p>
               <p className="text-xs text-muted-foreground mt-1">Sessões realizadas · {progressPct}%</p>
@@ -378,9 +378,9 @@ export const MemberTimeline = ({
 
           {/* Track + fill + inline dots */}
           <div className="relative h-8 w-full px-3">
-            <div className="absolute left-3 right-3 top-1/2 -translate-y-1/2 h-2 rounded-full bg-muted/50 overflow-hidden">
+            <div className="absolute left-3 right-3 top-1/2 -translate-y-1/2 h-1 rounded-full bg-muted overflow-hidden">
               <div
-                className="h-full rounded-full bg-status-green transition-all duration-ds-3 ease-ds"
+                className="h-full rounded-full bg-status-green transition-[width] duration-ds-3 ease-ds"
                 style={{ width: `${progressPct}%` }}
               />
             </div>
@@ -391,7 +391,7 @@ export const MemberTimeline = ({
                     <div
                       key={s.index}
                       title={`Sessão ${s.index} · ainda não agendada`}
-                      className="relative z-10 h-6 w-6 rounded-full border border-dashed border-border bg-card flex items-center justify-center text-[11px] font-semibold tabular-nums text-muted-foreground"
+                      className="relative z-10 h-5 w-5 rounded-full border border-dashed border-border bg-card flex items-center justify-center text-[10px] font-medium tabular-nums text-muted-foreground"
                     >
                       {s.index}
                     </div>
@@ -409,24 +409,24 @@ export const MemberTimeline = ({
                     onClick={() => setOpenBookingId(s.booking.id)}
                     aria-label={`Sessão ${s.index}: ${sessionLabel}, ${fmtDate(s.booking.scheduled_date)}, ${meta.label}`}
                     title={`Sessão ${s.index} · ${sessionLabel} · ${fmtDate(s.booking.scheduled_date)} · ${meta.label}`}
-                    className={`relative z-10 h-6 w-6 rounded-full border flex items-center justify-center text-[11px] font-bold tabular-nums transition-transform duration-ds-1 ease-ds hover:scale-110 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 ring-offset-background ${
+                    className={`relative z-10 h-5 w-5 rounded-full border bg-card flex items-center justify-center text-[10px] font-medium tabular-nums focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 ring-offset-background ${
                       isCompleted ? "text-primary-foreground" : "text-foreground"
                     }`}
                     style={{
                       borderColor: meta.color,
-                      backgroundColor: isCompleted ? meta.color : `color-mix(in srgb, ${meta.color} 20%, hsl(var(--card)))`,
+                      backgroundColor: isCompleted ? meta.color : undefined,
                     }}
                   >
                     {s.index}
                     {isKickoff && (
-                      <Star className="absolute -top-2 -right-2 h-3 w-3 text-status-yellow fill-status-yellow" aria-hidden />
+                      <Star className="absolute -top-2.5 -right-2.5 h-3.5 w-3.5 text-muted-foreground" aria-label="Mapeamento" />
                     )}
                     {missingReport && (
                       <span
                         className="absolute -bottom-1.5 -right-1.5 h-3.5 w-3.5 rounded-full bg-card border border-border flex items-center justify-center"
                         aria-hidden
                       >
-                        <FileWarning className="h-2.5 w-2.5 text-status-yellow" />
+                        <FileWarning className="h-2.5 w-2.5 text-muted-foreground" />
                       </span>
                     )}
                   </button>
@@ -434,27 +434,27 @@ export const MemberTimeline = ({
               })}
               <div
                 title={reachedCount >= totalSessions ? "Presente desbloqueado" : "Presente bloqueado: conclua as 12 sessões"}
-                className={`relative z-10 flex h-7 w-7 items-center justify-center rounded-full border ${
+                className={`relative z-10 flex h-5 w-5 items-center justify-center rounded-full border ${
                   reachedCount >= totalSessions
                     ? "border-status-green bg-status-green text-primary-foreground"
-                    : "border-dashed border-muted-foreground/50 bg-card text-muted-foreground"
+                    : "border-dashed border-border bg-card text-muted-foreground"
                 }`}
                 aria-label={reachedCount >= totalSessions ? "Presente desbloqueado" : "Presente bloqueado"}
               >
-                {reachedCount >= totalSessions ? <LockOpen className="h-3.5 w-3.5" /> : <Lock className="h-3.5 w-3.5" />}
+                {reachedCount >= totalSessions ? <LockOpen className="h-3 w-3" /> : <Lock className="h-3 w-3" />}
                 <span className="absolute top-8 whitespace-nowrap text-[11px] font-medium text-muted-foreground">Presente</span>
               </div>
             </div>
           </div>
 
           {/* Status summary: only what actually exists, with counts and meaning */}
-          <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 pt-2">
+          <div className="grid grid-cols-2 sm:grid-cols-3 gap-x-4 gap-y-3 pt-2">
             {summaryItems.map((i) => (
-              <div key={i.key} className="flex items-start gap-2 rounded-ds border border-border bg-card/50 px-3 py-2">
-                <span className={`mt-1 w-2.5 h-2.5 shrink-0 rounded-full border-2 ${i.dot}`} aria-hidden />
+              <div key={i.key} className="flex items-start gap-2 min-w-0">
+                <span className={`mt-1 w-2 h-2 shrink-0 rounded-full border ${i.dot}`} aria-hidden />
                 <div className="min-w-0">
-                  <p className="text-xs font-semibold text-foreground leading-tight">
-                    <span className={`tabular-nums ${i.text}`}>{i.n}</span> {i.label}
+                  <p className="text-xs font-medium text-foreground leading-tight">
+                    <span className="tabular-nums">{i.n}</span> {i.label}
                   </p>
                   <p className="text-[11px] text-muted-foreground leading-tight truncate">{i.hint}</p>
                 </div>
@@ -465,16 +465,16 @@ export const MemberTimeline = ({
           <div className="flex flex-wrap gap-x-4 gap-y-1 text-[11px] text-muted-foreground">
             {hasKickoffInTrack && (
               <span className="flex items-center gap-1.5">
-                <Star className="h-3 w-3 text-status-yellow fill-status-yellow" aria-hidden /> Mapeamento do Negócio (sessão de 3h)
+                <Star className="h-3.5 w-3.5 text-muted-foreground" aria-hidden /> Mapeamento do Negócio (sessão de 3h)
               </span>
             )}
             {slots.some((s) => s.status === "awaiting_report") && (
               <span className="flex items-center gap-1.5">
-                <FileWarning className="h-3 w-3 text-status-yellow" aria-hidden /> Realizada sem relatório
+                <FileWarning className="h-3 w-3 text-muted-foreground" aria-hidden /> Realizada sem relatório
               </span>
             )}
           </div>
-        </SectionCard>
+        </div>
       </SectionCard>
 
       {/* Session details */}
@@ -519,7 +519,7 @@ export const MemberTimeline = ({
                 <span className="text-xs text-muted-foreground">Há {daysSinceBookingEnd(openBooking)} dias sem confirmação</span>
               )}
               {openStatus === "awaiting_report" && (
-                <span className="inline-flex items-center gap-1 text-xs text-status-yellow">
+                <span className="inline-flex items-center gap-1 text-xs text-muted-foreground">
                   <FileWarning className="h-3.5 w-3.5" aria-hidden /> Sem relatório
                 </span>
               )}
@@ -547,7 +547,7 @@ export const MemberTimeline = ({
                 {!bookingRequiresReport(openBooking) && (
                   <Button
                     variant="outline"
-                    className="flex-1 text-status-green"
+                    className="flex-1"
                     disabled={closing}
                     onClick={() => closePending(openBooking, "completed")}
                   >
@@ -556,7 +556,7 @@ export const MemberTimeline = ({
                 )}
                 <Button
                   variant="outline"
-                  className="flex-1 text-status-yellow"
+                  className="flex-1"
                   disabled={closing}
                   onClick={() => closePending(openBooking, "not_realized")}
                 >

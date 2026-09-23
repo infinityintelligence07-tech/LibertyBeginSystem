@@ -1,10 +1,8 @@
 import { useState, useMemo } from "react";
-import { motion } from "framer-motion";
 import { AppLayout } from "@/components/AppLayout";
 import { AdminMonthFilter } from "@/components/AdminMonthFilter";
 import { useAdminFilter } from "@/contexts/AdminFilterContext";
 import { useMentors, useAdminStats, useSessionCatalog } from "@/hooks/useAdminData";
-import { staggerContainer, fadeUpItem } from "@/lib/animations";
 import { toTitleCase } from "@/lib/formatName";
 import { UserAvatar } from "@/components/UserAvatar";
 import { GraduationCap, Users, CheckCircle2, Calendar, DollarSign, Plus, Pencil, Trash2, Send, Loader2, Power } from "lucide-react";
@@ -222,7 +220,7 @@ const AdminMentoresPage = () => {
         }
       }
 
-      toast.success(editingId ? "Mentor atualizado" : "Mentor criado com sucesso!");
+      toast.success(editingId ? "Mentor atualizado" : "Mentor criado");
       setFormOpen(false);
       setEditingId(null);
       setForm(emptyForm);
@@ -392,7 +390,6 @@ const AdminMentoresPage = () => {
               aria-label="Gerar acesso e enviar por WhatsApp"
               title="Gerar acesso e enviar por WhatsApp (e-mail + senha temporária)"
               size="sm"
-              className="hover:text-status-green"
               disabled={busy}
               onClick={() => handleInvite(mentor)}
             >
@@ -405,7 +402,7 @@ const AdminMentoresPage = () => {
               aria-label={inactive ? "Reativar mentor" : "Inativar mentor"}
               title={inactive ? "Reativar mentor" : "Inativar mentor (cancela sessões futuras)"}
               size="sm"
-              className={inactive ? "text-destructive" : "hover:text-status-yellow"}
+              className={inactive ? "text-destructive" : undefined}
               disabled={busy}
               onClick={() => handleToggleActive(mentor)}
             >
@@ -425,9 +422,9 @@ const AdminMentoresPage = () => {
 
         {/* Indicadores */}
         <div className="mt-4 grid grid-cols-2 lg:grid-cols-4 gap-3">
-          <Stat size="sm" icon={CheckCircle2} tone="success" label={filterKey ? "Realizadas no mês" : "Realizadas"} value={sessionsCount} />
-          <Stat size="sm" icon={Calendar} tone="info" label="Agendadas" value={mentor.total_scheduled} />
-          <Stat size="sm" icon={Users} tone="brand" label="Membros atendidos" value={mentor.members_served} />
+          <Stat size="sm" icon={CheckCircle2} label={filterKey ? "Realizadas no mês" : "Realizadas"} value={sessionsCount} />
+          <Stat size="sm" icon={Calendar} label="Agendadas" value={mentor.total_scheduled} />
+          <Stat size="sm" icon={Users} label="Membros atendidos" value={mentor.members_served} />
           <Stat size="sm" icon={DollarSign} label={filterKey ? "Receita no mês" : "Receita total"} value={formatBRL(revenue)} />
         </div>
 
@@ -438,7 +435,7 @@ const AdminMentoresPage = () => {
           </p>
           <div className="flex flex-wrap gap-1.5">
             {mentor.assigned_sessions.map((s, i) => (
-              <StatusPill key={i} tone="brand" size="sm" withDot={false}>{s}</StatusPill>
+              <StatusPill key={i} tone="neutral" size="sm" withDot={false}>{s}</StatusPill>
             ))}
             {mentor.assigned_sessions.length === 0 && (
               <span className="text-xs text-muted-foreground">Nenhuma sessão atribuída</span>
@@ -456,10 +453,8 @@ const AdminMentoresPage = () => {
                 return (
                   <li key={mc} className="text-center">
                     <div
-                      className={`w-10 h-10 rounded-ds flex items-center justify-center text-sm font-semibold tabular-nums border ${
-                        c >= 3 ? "bg-status-green/15 border-status-green/30 text-status-green" :
-                        c >= 1 ? "bg-status-blue/15 border-status-blue/30 text-status-blue" :
-                        "bg-muted/30 border-border text-muted-foreground"
+                      className={`w-10 h-10 rounded-ds flex items-center justify-center text-sm font-semibold tabular-nums border border-border ${
+                        c >= 1 ? "text-foreground" : "text-muted-foreground"
                       }`}
                       aria-label={`${formatMonthShort(mc)}: ${c} sessões`}
                     >
@@ -479,8 +474,8 @@ const AdminMentoresPage = () => {
   return (
     <AppLayout role="admin">
       <PageContainer>
-        <motion.div variants={staggerContainer} initial="hidden" animate="show" className="space-y-6">
-          <motion.div variants={fadeUpItem}>
+        <div className="space-y-6">
+          <div>
             <PageHeader
               eyebrow="Admin"
               title="Mentores"
@@ -491,16 +486,16 @@ const AdminMentoresPage = () => {
                 </Button>
               }
             />
-          </motion.div>
+          </div>
 
-          <motion.div variants={fadeUpItem} className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
             <AdminMonthFilter />
             {inactiveCount > 0 && (
               <Chip active={showInactive} onClick={() => setShowInactive((v) => !v)} count={inactiveCount}>
                 <Power className="h-3.5 w-3.5" aria-hidden /> Mostrar inativos
               </Chip>
             )}
-          </motion.div>
+          </div>
 
           {isLoading ? (
             <LoadingState variant="cards" rows={3} />
@@ -525,11 +520,11 @@ const AdminMentoresPage = () => {
               action={<Button size="sm" variant="outline" onClick={() => setShowInactive(true)}>Mostrar inativos</Button>}
             />
           ) : (
-            <motion.div variants={fadeUpItem} className="space-y-4">
+            <div className="space-y-4">
               {visibleMentors.map(renderMentorCard)}
-            </motion.div>
+            </div>
           )}
-        </motion.div>
+        </div>
       </PageContainer>
 
       {/* Novo / editar mentor */}

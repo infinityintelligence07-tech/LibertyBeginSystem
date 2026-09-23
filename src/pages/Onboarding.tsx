@@ -300,9 +300,7 @@ export default function Onboarding() {
       <div className="min-h-[100dvh] bg-background flex items-center justify-center py-10">
         <PageContainer variant="narrow">
           <div className="max-w-sm mx-auto text-center space-y-6" role="status" aria-live="polite">
-            <div className="mx-auto inline-flex items-center justify-center h-16 w-16 rounded-full bg-primary/15">
-              <Check className="h-8 w-8 text-primary" aria-hidden />
-            </div>
+            <Check className="mx-auto h-6 w-6 text-muted-foreground" aria-hidden />
             <div className="space-y-2">
               <h1 className="text-[24px] md:text-[28px] font-semibold leading-[1.2] tracking-[var(--ds-tracking-display)] text-foreground">
                 Tudo pronto

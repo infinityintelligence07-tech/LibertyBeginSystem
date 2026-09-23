@@ -245,21 +245,21 @@ const AdminNps = () => {
                   label="Nota média"
                   value={stats.overall != null ? stats.overall.toFixed(1) : "Sem dados"}
                   hint={stats.overall != null ? "de 10" : undefined}
-                  tone={statTone(stats.overall)}
+                  tone={statTone(stats.overall) === "danger" ? "danger" : "default"}
                 />
               </SectionCard>
               <SectionCard padding="compact">
-                <Stat icon={TrendingUp} label="Promotores" value={stats.promoters} hint={stats.total ? `de ${stats.total}` : undefined} tone="success" />
+                <Stat icon={TrendingUp} label="Promotores" value={stats.promoters} hint={stats.total ? `de ${stats.total}` : undefined} />
               </SectionCard>
               <SectionCard padding="compact">
-                <Stat icon={TrendingUp} label="NPS" value={stats.nps != null ? stats.nps : "Sem dados"} tone={stats.nps != null ? "brand" : "default"} />
+                <Stat icon={TrendingUp} label="NPS" value={stats.nps != null ? stats.nps : "Sem dados"} />
               </SectionCard>
               <SectionCard padding="compact" className="col-span-2 md:col-span-1">
                 <Stat icon={ClipboardCheck} label="Sem resposta" value={pending.length} tone={pending.length > 0 ? "pending" : "default"} />
               </SectionCard>
             </div>
 
-            <SectionCard tone="brand" as="section" className="space-y-4">
+            <SectionCard as="section" className="space-y-4">
               <SectionHeader
                 as="h3"
                 title="Disparo de NPS"
@@ -297,7 +297,7 @@ const AdminNps = () => {
                     return (
                       <li key={note} className="grid grid-cols-[2rem_minmax(0,1fr)_3rem] items-center gap-3">
                         <span className="text-sm font-medium tabular-nums text-foreground text-right">{note}</span>
-                        <ProgressBar value={count} max={distribution.scored} tone={scoreBarTone(note)} label={`Nota ${note}: ${count}`} />
+                        <ProgressBar value={count} max={distribution.scored} label={`Nota ${note}: ${count}`} />
                         <span className="text-xs text-muted-foreground tabular-nums text-right">{count}</span>
                       </li>
                     );
@@ -382,7 +382,7 @@ const AdminNps = () => {
                 const value = openResponse[s.key] as number | null;
                 return (
                   <SectionCard key={s.key} padding="compact">
-                    <Stat size="sm" label={s.label} value={value ?? "Sem dados"} tone={statTone(value)} />
+                    <Stat size="sm" label={s.label} value={value ?? "Sem dados"} tone={statTone(value) === "danger" ? "danger" : "default"} />
                   </SectionCard>
                 );
               })}

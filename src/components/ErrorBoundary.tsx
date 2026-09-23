@@ -91,9 +91,7 @@ export class ErrorBoundary extends Component<Props, State> {
       <div className="min-h-[100dvh] bg-background flex items-center justify-center py-10">
         <PageContainer variant="narrow">
           <SectionCard role="alert" className="max-w-sm mx-auto text-center space-y-4">
-            <div className="mx-auto h-12 w-12 rounded-full bg-destructive/10 flex items-center justify-center">
-              <AlertTriangle className="h-6 w-6 text-destructive" aria-hidden />
-            </div>
+            <AlertTriangle className="mx-auto h-6 w-6 text-destructive" aria-hidden />
             <div className="space-y-2">
               <h1 className="text-[22px] font-semibold text-foreground">Algo travou por aqui</h1>
               <p className="text-sm text-muted-foreground leading-relaxed">

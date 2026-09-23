@@ -13,13 +13,17 @@ interface SectionCardProps extends HTMLAttributes<HTMLDivElement> {
   as?: "div" | "section" | "article" | "button";
 }
 
+/**
+ * Tom do cartão. A superfície continua neutra (HIG: a cor fica no ícone/texto, não em paredes
+ * de fundo). Só `danger` recebe uma borda discreta para alertas que exigem atenção imediata.
+ */
 const toneClasses: Record<CardTone, string> = {
   default: "",
-  info: "bg-status-blue/5 border-status-blue/20",
-  success: "bg-status-green/5 border-status-green/20",
-  warning: "bg-status-yellow/5 border-status-yellow/25",
-  danger: "bg-destructive/5 border-destructive/25",
-  brand: "bg-primary/5 border-primary/20",
+  info: "",
+  success: "",
+  warning: "",
+  danger: "border-destructive/40",
+  brand: "",
 };
 
 const paddings = {

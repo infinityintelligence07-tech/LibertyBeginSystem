@@ -19,7 +19,6 @@ import {
   AlertTriangle,
   Star,
 } from "lucide-react";
-import { staggerContainer, fadeUpItem } from "@/lib/animations";
 import { Link, useSearchParams } from "react-router-dom";
 import { canScheduleKickoff, isJourneySession, KICKOFF_NOT_ALLOWED_MESSAGE } from "@/lib/sessionProgress";
 import { isMonthlyBookingLimitError, isJourneyBookingLimitError } from "@/lib/bookingRules";
@@ -110,13 +109,6 @@ const pillarLabels: Record<string, string> = {
   mentalidade: "Mentalidade",
   espiritual: "Espiritual",
 };
-const pillarClass: Record<string, string> = {
-  negocios: "pillar-negocios",
-  emocional: "pillar-emocional",
-  mentalidade: "pillar-mentalidade",
-  espiritual: "pillar-espiritual",
-};
-
 const confirmSteps = [
   { label: "Criando sala Zoom...", icon: Video, duration: 1400 },
   { label: "Adicionando ao Google Agenda...", icon: CalendarIcon, duration: 1600 },
@@ -543,23 +535,18 @@ const AgendarSessaoPage = () => {
   return (
     <AppLayout role="liberty">
       <PageContainer variant="narrow" className={step === 4 && !confirmed && !isConfirming ? "pb-28 sm:pb-0" : undefined}>
-      <motion.div
-        variants={staggerContainer}
-        initial="hidden"
-        animate="show"
-        className="space-y-6"
-      >
+      <div className="space-y-6">
         {/* Cabeçalho */}
         {!confirmed && !isConfirming && (
-          <motion.div variants={fadeUpItem} className="space-y-4">
+          <div className="space-y-4">
             <PageHeader
               eyebrow={`Passo ${displayStep} de ${totalSteps}`}
               title={stepTitle}
               description={selectedSession && step >= 2 ? selectedSession.name : "Agende sua próxima sessão de mentoria."}
               back={step > 1 ? goBack : undefined}
             />
-            <ProgressBar value={displayStep} max={totalSteps} tone="brand" label={`Passo ${displayStep} de ${totalSteps}`} />
-          </motion.div>
+            <ProgressBar value={displayStep} max={totalSteps} label={`Passo ${displayStep} de ${totalSteps}`} />
+          </div>
         )}
 
         <AnimatePresence mode="wait">
@@ -570,6 +557,7 @@ const AgendarSessaoPage = () => {
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
               exit={{ opacity: 0 }}
+              transition={{ duration: 0.15 }}
             >
               <SectionCard aria-live="polite" aria-busy="true">
                 <ol className="space-y-5 list-none m-0 p-0">
@@ -585,17 +573,10 @@ const AgendarSessaoPage = () => {
                           i > confirmStep && "opacity-40",
                         )}
                       >
-                        <div
-                          className={cn(
-                            "w-10 h-10 rounded-full flex items-center justify-center border shrink-0",
-                            isDone ? "bg-status-green/15 border-status-green/30 text-status-green"
-                              : isActive ? "bg-primary/10 border-primary/20 text-primary"
-                              : "border-border text-muted-foreground",
-                          )}
-                        >
-                          {isDone ? <Check className="h-4 w-4" aria-hidden /> : isActive ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden /> : <StepIcon className="h-4 w-4" aria-hidden />}
-                        </div>
-                        <span className={cn("text-sm font-medium", isDone ? "text-status-green" : isActive ? "text-foreground" : "text-muted-foreground")}>
+                        <span className={cn("shrink-0 inline-flex items-center justify-center", isDone || isActive ? "text-foreground" : "text-muted-foreground")}>
+                          {isDone ? <Check className="h-5 w-5" aria-hidden /> : isActive ? <Loader2 className="h-5 w-5 animate-spin" aria-hidden /> : <StepIcon className="h-5 w-5" aria-hidden />}
+                        </span>
+                        <span className={cn("text-sm font-medium", isDone || isActive ? "text-foreground" : "text-muted-foreground")}>
                           {cs.label}
                         </span>
                       </li>
@@ -608,11 +589,9 @@ const AgendarSessaoPage = () => {
 
           {/* ═══════ SUCCESS SCREEN ═══════ */}
           {confirmed && (
-            <motion.div key="confirmed" initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} className="space-y-6">
+            <motion.div key="confirmed" initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ duration: 0.15 }} className="space-y-6">
               <div className="text-center space-y-4">
-                <div className="mx-auto w-16 h-16 rounded-full bg-status-green/15 flex items-center justify-center">
-                  <Check className="h-8 w-8 text-status-green" aria-hidden />
-                </div>
+                <Check className="mx-auto h-6 w-6 text-muted-foreground" aria-hidden />
                 <PageHeader
                   title={isSameDayBooking ? "Solicitação enviada" : "Sessão agendada"}
                   description={
@@ -624,7 +603,7 @@ const AgendarSessaoPage = () => {
                 />
               </div>
 
-              <SectionCard tone="brand">
+              <SectionCard>
                 <p className="ds-kicker mb-4">Resumo da sessão</p>
                 <dl className="space-y-3 text-sm">
                   <div className="flex justify-between gap-4">
@@ -671,7 +650,7 @@ const AgendarSessaoPage = () => {
 
           {/* ═══════ STEP 1 — Choose Session ═══════ */}
           {!isConfirming && !confirmed && step === 1 && (
-            <motion.div key="step1" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="space-y-4">
+            <motion.div key="step1" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} transition={{ duration: 0.15 }} className="space-y-4">
               {kickoffPending && kickoffSession && kickoffAllowed && (
                 <Callout tone="brand" icon={Star} title="Mapeamento do Negócio: recomendado para o início da jornada">
                   Sessão de 3h que mapeia todos os setores da sua empresa. Pode ser agendada até a 3ª sessão realizada.
@@ -711,7 +690,6 @@ const AgendarSessaoPage = () => {
                       key={session.id}
                       as="button"
                       interactive={!isDisabled}
-                      tone={isKickoff && !isDisabled ? "brand" : "default"}
                       padding="none"
                       role="listitem"
                       aria-disabled={isDisabled}
@@ -744,8 +722,8 @@ const AgendarSessaoPage = () => {
                             <StatusPill tone="success" size="sm">Disponível</StatusPill>
                           )}
                           {isKickoff && (
-                            <StatusPill tone="brand" size="sm" withDot={false}>
-                              <Star className="h-3 w-3" aria-hidden /> Mapeamento · recomendado
+                            <StatusPill tone="neutral" size="sm" withDot={false}>
+                              <Star className="h-3.5 w-3.5 text-muted-foreground" aria-label="Mapeamento" /> Mapeamento · recomendado
                             </StatusPill>
                           )}
                         </div>
@@ -753,9 +731,9 @@ const AgendarSessaoPage = () => {
                         <h3 className="text-[17px] font-semibold text-foreground leading-tight mb-1">{session.name}</h3>
                         <div className="flex items-center gap-2 mb-2 flex-wrap">
                           {session.pillar && (
-                            <span className={cn("text-xs px-2 h-[22px] inline-flex items-center rounded-full", pillarClass[session.pillar] || "bg-muted text-muted-foreground")}>
+                            <StatusPill tone="neutral" size="sm" withDot={false}>
                               {pillarLabels[session.pillar] || session.pillar}
-                            </span>
+                            </StatusPill>
                           )}
                           <span className="text-xs text-muted-foreground inline-flex items-center gap-1">
                             <Clock className="h-3 w-3" aria-hidden /> {formatDuration(session.duration_minutes)}
@@ -777,7 +755,7 @@ const AgendarSessaoPage = () => {
 
           {/* ═══════ STEP 2 — Choose Date ═══════ */}
           {!isConfirming && !confirmed && step === 2 && (
-            <motion.div key="step2" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="space-y-4">
+            <motion.div key="step2" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} transition={{ duration: 0.15 }} className="space-y-4">
               {selectedSession?.description && (
                 <p className="text-sm text-muted-foreground leading-relaxed">
                   {selectedSession.description}
@@ -834,7 +812,7 @@ const AgendarSessaoPage = () => {
                           "aspect-square min-h-[44px] rounded-ds text-sm font-medium relative flex items-center justify-center transition-colors duration-ds-1 ease-ds",
                           "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 ring-offset-background",
                           isSelected ? "bg-primary text-primary-foreground"
-                            : isClickable ? "bg-primary/10 text-foreground hover:bg-primary/15"
+                            : isClickable ? "bg-muted text-foreground hover:bg-accent"
                             : "text-muted-foreground/40 cursor-not-allowed",
                         )}
                       >
@@ -848,8 +826,8 @@ const AgendarSessaoPage = () => {
                 </div>
 
                 <div className="flex items-center gap-4 mt-4 text-xs text-muted-foreground">
-                  <div className="flex items-center gap-1.5"><span aria-hidden className="w-2.5 h-2.5 rounded-full bg-primary/30" /> Com horários</div>
-                  <div className="flex items-center gap-1.5"><span aria-hidden className="w-2.5 h-2.5 rounded-full bg-muted" /> Indisponível</div>
+                  <div className="flex items-center gap-1.5"><span aria-hidden className="w-2 h-2 rounded-full bg-primary" /> Com horários</div>
+                  <div className="flex items-center gap-1.5"><span aria-hidden className="w-2 h-2 rounded-full bg-muted-foreground/40" /> Indisponível</div>
                 </div>
               </SectionCard>
             </motion.div>
@@ -857,7 +835,7 @@ const AgendarSessaoPage = () => {
 
           {/* ═══════ PASSO 3: horário ═══════ */}
           {!isConfirming && !confirmed && step === 3 && selectedDate && (
-            <motion.div key="step3" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="space-y-4">
+            <motion.div key="step3" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} transition={{ duration: 0.15 }} className="space-y-4">
               <p className="text-sm text-muted-foreground first-letter:uppercase">
                 {format(selectedDate, "EEEE, dd 'de' MMMM 'de' yyyy", { locale: ptBR })} · {durationLabel} · Zoom
               </p>
@@ -897,7 +875,7 @@ const AgendarSessaoPage = () => {
 
           {/* ═══════ STEP 4 — Confirm ═══════ */}
           {!isConfirming && !confirmed && step === 4 && (
-            <motion.div key="step4" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="space-y-5">
+            <motion.div key="step4" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} transition={{ duration: 0.15 }} className="space-y-5">
               {isSameDayBooking ? (
                 <Callout tone="warning" icon={AlertTriangle} title="Requer aprovação da equipe">
                   Este horário começa em menos de 48 horas. Ele fica reservado no seu nome e a sessão passa para{" "}
@@ -910,7 +888,7 @@ const AgendarSessaoPage = () => {
                 </Callout>
               )}
 
-              <SectionCard tone="brand">
+              <SectionCard>
                 <p className="ds-kicker mb-4">Resumo da sessão</p>
                 <dl className="space-y-3 text-sm">
                   <div className="flex justify-between gap-4">
@@ -957,7 +935,7 @@ const AgendarSessaoPage = () => {
               </p>
 
               {/* Ações: fixas na base no mobile, inline no desktop */}
-              <div className="fixed inset-x-0 bottom-0 z-30 border-t border-border bg-background/95 backdrop-blur px-4 pt-3 pb-[calc(env(safe-area-inset-bottom)+12px)] sm:static sm:border-0 sm:bg-transparent sm:backdrop-blur-0 sm:p-0">
+              <div className="fixed inset-x-0 bottom-0 z-30 border-t border-border bg-background px-4 pt-3 pb-[calc(env(safe-area-inset-bottom)+12px)] sm:static sm:border-0 sm:bg-transparent sm:p-0">
                 <div className="mx-auto w-full max-w-2xl flex flex-col gap-2 sm:flex-row-reverse">
                   <Button size="lg" className="w-full sm:w-auto" onClick={() => handleConfirm()}>
                     {isSameDayBooking ? "Enviar para aprovação" : "Confirmar agendamento"}
@@ -996,7 +974,7 @@ const AgendarSessaoPage = () => {
           cancelLabel="Fechar"
           onConfirm={() => setShowJourneyLimitModal(false)}
         />
-      </motion.div>
+      </div>
       </PageContainer>
     </AppLayout>
   );

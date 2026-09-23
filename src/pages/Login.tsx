@@ -1,8 +1,6 @@
 import { useState, useEffect } from "react";
-import { motion, useReducedMotion } from "framer-motion";
 import { AlertCircle, Eye, EyeOff } from "lucide-react";
 import { Logo } from "@/components/Logo";
-import { InstallAndNotify } from "@/components/InstallAndNotify";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "@/hooks/useAuth";
 import { supabase } from "@/integrations/supabase/client";
@@ -22,7 +20,6 @@ const LoginPage = () => {
   const [loading, setLoading] = useState(false);
   const [mode, setMode] = useState<"login" | "forgot">("login");
   const [formError, setFormError] = useState<string | null>(null);
-  const reduceMotion = useReducedMotion();
   const navigate = useNavigate();
   const { signIn, signOut, user, roles, rolesLoaded, rolesError, loading: authLoading } = useAuth();
 
@@ -100,12 +97,7 @@ const LoginPage = () => {
   return (
     <div className="min-h-[100dvh] bg-background flex items-center justify-center py-10 pt-[calc(env(safe-area-inset-top,0px)_+_2.5rem)] pb-[calc(env(safe-area-inset-bottom,0px)_+_2.5rem)]">
       <PageContainer variant="narrow">
-        <motion.div
-          initial={reduceMotion ? false : { opacity: 0, y: 8 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.32, ease: "easeOut" }}
-          className="w-full max-w-md mx-auto space-y-8"
-        >
+        <div className="w-full max-w-md mx-auto space-y-8">
           <div className="flex justify-center">
             <Logo size="md" />
           </div>
@@ -114,7 +106,7 @@ const LoginPage = () => {
             {authenticatedWithoutRole ? (
               <>
                 <div className="space-y-2">
-                  <h1 className="text-[24px] md:text-[28px] font-semibold leading-[1.2] tracking-[var(--ds-tracking-display)] silver-gradient-text">
+                  <h1 className="text-[24px] md:text-[28px] font-semibold leading-[1.2] tracking-[var(--ds-tracking-display)] text-foreground">
                     {rolesError ? "Não foi possível carregar seu acesso" : "Conta sem perfil de acesso"}
                   </h1>
                   <p className="text-sm text-muted-foreground leading-relaxed">
@@ -133,7 +125,7 @@ const LoginPage = () => {
             ) : (
               <>
                 <div className="space-y-1">
-                  <h1 className="text-[24px] md:text-[28px] font-semibold leading-[1.2] tracking-[var(--ds-tracking-display)] silver-gradient-text">
+                  <h1 className="text-[24px] md:text-[28px] font-semibold leading-[1.2] tracking-[var(--ds-tracking-display)] text-foreground">
                     {mode === "login" ? "Acessar plataforma" : "Recuperar senha"}
                   </h1>
                   <p className="text-sm text-muted-foreground">
@@ -212,7 +204,7 @@ const LoginPage = () => {
               </>
             )}
 
-            <div className="pt-5 border-t border-border space-y-4">
+            <div className="pt-5 border-t border-border">
               <p className="text-xs text-muted-foreground text-center leading-relaxed">
                 Dúvidas ou sem acesso?{" "}
                 <a
@@ -224,10 +216,9 @@ const LoginPage = () => {
                   Fale com a equipe Liberty no WhatsApp
                 </a>
               </p>
-              <InstallAndNotify />
             </div>
           </SectionCard>
-        </motion.div>
+        </div>
       </PageContainer>
     </div>
   );

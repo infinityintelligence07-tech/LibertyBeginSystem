@@ -212,8 +212,8 @@ const AdminDashboardPage = () => {
 
   const statCards: StatCardItem[] = [
     { label: "Membros Begin ativos", value: filterKey ? monthlyGoal.totalMembers : beginMembers.length, icon: Users, to: "/admin/membros", hint: "com acesso ativo", span: "lg:col-span-2" },
-    { label: filterKey ? "Meta do mês" : "Sessões Begin (total)", value: filterKey ? `${monthlyGoal.monthSessions}/${monthlyGoal.goalSessions}` : completedCount, icon: Target, tone: "warning", to: "/admin/agenda", hint: filterKey ? "2 por membro ativo" : "histórico Begin", span: "lg:col-span-2" },
-    { label: filterKey ? "Realizadas no mês (Begin)" : "Realizadas total (Begin)", value: completedCount, icon: CheckCircle2, tone: "success", to: "/admin/agenda", hint: "somente Begin", span: "lg:col-span-2" },
+    { label: filterKey ? "Meta do mês" : "Sessões Begin (total)", value: filterKey ? `${monthlyGoal.monthSessions}/${monthlyGoal.goalSessions}` : completedCount, icon: Target, to: "/admin/agenda", hint: filterKey ? "2 por membro ativo" : "histórico Begin", span: "lg:col-span-2" },
+    { label: filterKey ? "Realizadas no mês (Begin)" : "Realizadas total (Begin)", value: completedCount, icon: CheckCircle2, to: "/admin/agenda", hint: "somente Begin", span: "lg:col-span-2" },
     { label: filterKey ? "Membros no ritmo" : "Jornada completa (12)", value: membersMetaAnalysis.onTrack, icon: Users, to: "/admin/membros?filter=on_track", hint: `de ${filterKey ? monthlyGoal.totalMembers : beginMembers.length}`, span: "lg:col-span-3" },
     { label: "Mentores ativos", value: activeMentorsCount, icon: GraduationCap, to: "/admin/mentores", hint: "disponíveis para agenda", span: "lg:col-span-3" },
   ];
@@ -282,7 +282,7 @@ const AdminDashboardPage = () => {
 
             {/* Meta mensal Begin */}
             {filterKey && (
-              <SectionCard as="section" tone={monthlyGoal.goalReached ? "success" : "default"} className="space-y-4">
+              <SectionCard as="section" className="space-y-4">
                 <SectionHeader
                   as="h3"
                   title="Meta mensal Begin"
@@ -292,13 +292,12 @@ const AdminDashboardPage = () => {
                       size="sm"
                       label="da meta"
                       value={`${monthlyGoal.pct}%`}
-                      tone={monthlyGoal.goalReached ? "success" : "default"}
                     />
                   }
                 />
                 <div className="grid grid-cols-3 gap-3">
-                  <Stat label="Realizadas" value={monthlyGoal.monthSessions} tone="success" />
-                  <Stat label="Agendadas" value={monthlyGoal.monthScheduled} tone="info" />
+                  <Stat label="Realizadas" value={monthlyGoal.monthSessions} />
+                  <Stat label="Agendadas" value={monthlyGoal.monthScheduled} />
                   <Stat label="Meta" value={monthlyGoal.goalSessions} hint={`de ${monthlyGoal.targetSessions}`} />
                 </div>
                 <ProgressBar
@@ -308,7 +307,7 @@ const AdminDashboardPage = () => {
                   label={`Meta mensal: ${monthlyGoal.monthSessions} de ${monthlyGoal.goalSessions} sessões`}
                 />
                 {monthlyGoal.goalReached && (
-                  <div className="flex items-center gap-2 text-sm font-medium text-status-green">
+                  <div className="flex items-center gap-2 text-sm text-muted-foreground">
                     <CheckCircle2 className="h-4 w-4 shrink-0" aria-hidden />
                     Meta do mês alcançada.
                   </div>
@@ -329,8 +328,8 @@ const AdminDashboardPage = () => {
               <SectionCard as="section" className="space-y-4">
                 <SectionHeader as="h3" title="Progresso da jornada: 12 sessões" description="Membros Begin ativos por etapa." />
                 <div className="grid grid-cols-3 gap-3">
-                  <Stat label="Jornada completa" value={membersMetaAnalysis.onTrack} tone="success" />
-                  <Stat label="Em progresso" value={membersMetaAnalysis.behind} tone="warning" />
+                  <Stat label="Jornada completa" value={membersMetaAnalysis.onTrack} />
+                  <Stat label="Em progresso" value={membersMetaAnalysis.behind} />
                   <Stat label="Sem iniciar" value={membersMetaAnalysis.zero} tone={membersMetaAnalysis.zero > 0 ? "danger" : "default"} />
                 </div>
                 {membersMetaAnalysis.zeroList.length > 0 && (
@@ -428,11 +427,7 @@ const AdminDashboardPage = () => {
                     key={link.path}
                     last={index === arr.length - 1}
                     onPress={() => navigate(link.path)}
-                    leading={
-                      <span className="h-10 w-10 rounded-[var(--ds-radius-md)] bg-muted text-foreground flex items-center justify-center">
-                        <link.icon className="h-4 w-4" aria-hidden />
-                      </span>
-                    }
+                    leading={<link.icon className="h-5 w-5 text-muted-foreground shrink-0" aria-hidden />}
                     title={link.label}
                   />
                 ))}

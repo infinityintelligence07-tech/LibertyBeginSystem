@@ -36,10 +36,10 @@ const Section = ({ title, children }: { title: string; children: ReactNode }) =>
   );
 };
 
-const Narrative = ({ icon: Icon, label, value, tone = "default" }: { icon: LucideIcon; label: string; value?: string | null; tone?: "default" | "warning" | "success" }) => {
+const Narrative = ({ icon: Icon, label, value }: { icon: LucideIcon; label: string; value?: string | null }) => {
   if (!value) return null;
   return (
-    <SectionCard tone={tone} padding="compact">
+    <SectionCard padding="compact">
       <p className="text-xs font-medium text-muted-foreground flex items-center gap-1.5 mb-1.5">
         <Icon className="h-3.5 w-3.5" aria-hidden /> {label}
       </p>
@@ -64,7 +64,7 @@ export const MemberProfilePanel = ({ profile }: Props) => {
       <div className="flex items-center justify-between gap-2">
         <p className="ds-kicker">Sobre o aluno</p>
         {p.member_tier === "liberty" && (
-          <StatusPill tone="brand" withDot={false}>
+          <StatusPill tone="neutral" withDot={false}>
             <LibertyMark size={12} /> Liberty
           </StatusPill>
         )}
@@ -106,12 +106,12 @@ export const MemberProfilePanel = ({ profile }: Props) => {
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
         <Narrative icon={User} label="História pessoal" value={str(p.personal_story)} />
         <Narrative icon={Briefcase} label="O que a empresa faz" value={str(p.business_description)} />
-        <Narrative icon={AlertCircle} label="Principal dor" value={str(p.main_pain)} tone="warning" />
-        <Narrative icon={AlertCircle} label="Desafio financeiro" value={str(p.financial_challenge)} tone="warning" />
+        <Narrative icon={AlertCircle} label="Principal dor" value={str(p.main_pain)} />
+        <Narrative icon={AlertCircle} label="Desafio financeiro" value={str(p.financial_challenge)} />
         <Narrative icon={Trophy} label="Desafio 2026" value={str(p.challenge_2026)} />
-        <Narrative icon={Star} label="Sonho 2026" value={str(p.dream_2026)} tone="success" />
+        <Narrative icon={Star} label="Sonho 2026" value={str(p.dream_2026)} />
         <Narrative icon={Compass} label="Visão em 6 meses" value={str(p.vision_6_months)} />
-        <Narrative icon={Trophy} label="Expectativa do programa" value={str(p.program_expectation)} tone="success" />
+        <Narrative icon={Trophy} label="Expectativa do programa" value={str(p.program_expectation)} />
       </div>
     </div>
   );

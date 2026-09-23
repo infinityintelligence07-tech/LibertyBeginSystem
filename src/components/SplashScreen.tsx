@@ -31,18 +31,12 @@ export const SplashScreen = ({ onComplete }: SplashScreenProps) => {
         <motion.div
           initial={{ opacity: 1 }}
           exit={{ opacity: 0 }}
-          transition={{ duration: reduceMotion ? 0 : 0.32 }}
+          transition={{ duration: reduceMotion ? 0 : 0.2 }}
           className="fixed inset-0 z-50 flex flex-col items-center justify-center bg-background"
           role="status"
           aria-label="Carregando Liberty Begin"
         >
-          <motion.div
-            initial={reduceMotion ? false : { opacity: 0, y: 8 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.32, ease: "easeOut" }}
-          >
-            <img src={logoBegin} alt="Begin by Liberty" className="h-12 object-contain" />
-          </motion.div>
+          <img src={logoBegin} alt="Begin by Liberty" className="h-12 object-contain" />
 
           {/* Linha de progresso única (não repete) */}
           <div className="mt-8 w-32 h-0.5 rounded-full bg-muted relative overflow-hidden" aria-hidden>

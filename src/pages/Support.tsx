@@ -1,5 +1,4 @@
 import { useState } from "react";
-import { motion, useReducedMotion } from "framer-motion";
 import { SUPPORT_WHATSAPP_URL } from "@/lib/authErrors";
 import { AppLayout } from "@/components/AppLayout";
 import { MessageCircle, Clock, ChevronDown } from "lucide-react";
@@ -17,27 +16,19 @@ const faqs = [
 
 const SupportPage = () => {
   const [openFaq, setOpenFaq] = useState<number | null>(null);
-  const reduceMotion = useReducedMotion();
 
   return (
     <AppLayout role="liberty">
       <PageContainer variant="narrow">
-        <motion.div
-          initial={reduceMotion ? false : { opacity: 0, y: 8 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.32, ease: "easeOut" }}
-          className="space-y-6 lg:space-y-8"
-        >
+        <div className="space-y-6 lg:space-y-8">
           <PageHeader
             title="Suporte"
-            description="Tire dúvidas sobre agendamento, acesso e direcionamento. Estamos aqui para você."
+            description="Tire dúvidas sobre agendamento, acesso e direcionamento."
           />
 
           <SectionCard className="flex flex-col sm:flex-row sm:items-center gap-4">
             <div className="flex items-start gap-3 flex-1 min-w-0">
-              <span className="h-10 w-10 rounded-[var(--ds-radius-md)] bg-primary/10 flex items-center justify-center shrink-0">
-                <MessageCircle className="h-5 w-5 text-primary" aria-hidden />
-              </span>
+              <MessageCircle className="h-5 w-5 text-muted-foreground shrink-0 mt-0.5" aria-hidden />
               <div className="min-w-0 space-y-1">
                 <p className="text-[17px] font-semibold text-foreground">Fale com o nosso suporte</p>
                 <p className="text-sm text-muted-foreground">Atendimento pelo WhatsApp, com a equipe Liberty.</p>
@@ -86,7 +77,7 @@ const SupportPage = () => {
               })}
             </SectionCard>
           </section>
-        </motion.div>
+        </div>
       </PageContainer>
     </AppLayout>
   );

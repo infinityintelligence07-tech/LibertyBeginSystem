@@ -1,5 +1,4 @@
 import { useState, useEffect } from "react";
-import { motion, useReducedMotion } from "framer-motion";
 import { AlertCircle, Eye, EyeOff } from "lucide-react";
 import { Logo } from "@/components/Logo";
 import { useNavigate } from "react-router-dom";
@@ -12,7 +11,7 @@ import { Callout, IconButton, PageContainer, SectionCard, TextField } from "@/co
 const MIN_PASSWORD_LENGTH = 6;
 
 const titleClass =
-  "text-[24px] md:text-[28px] font-semibold leading-[1.2] tracking-[var(--ds-tracking-display)] silver-gradient-text";
+  "text-[24px] md:text-[28px] font-semibold leading-[1.2] tracking-[var(--ds-tracking-display)] text-foreground";
 
 const ResetPasswordPage = () => {
   const [password, setPassword] = useState("");
@@ -22,7 +21,6 @@ const ResetPasswordPage = () => {
   const [checking, setChecking] = useState(true);
   const [valid, setValid] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
-  const reduceMotion = useReducedMotion();
   const navigate = useNavigate();
 
   useEffect(() => {
@@ -127,7 +125,7 @@ const ResetPasswordPage = () => {
     const { error: signOutError } = await supabase.auth.signOut();
     if (signOutError) console.error("[ResetPassword] signOut", signOutError.message);
     setLoading(false);
-    toast.success("Senha atualizada com sucesso. Entre com a nova senha.");
+    toast.success("Senha atualizada. Entre com a nova senha.");
     navigate("/login", { replace: true });
   };
 
@@ -174,12 +172,7 @@ const ResetPasswordPage = () => {
   return (
     <div className={shellClass}>
       <PageContainer variant="narrow">
-        <motion.div
-          initial={reduceMotion ? false : { opacity: 0, y: 8 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.32, ease: "easeOut" }}
-          className="w-full max-w-md mx-auto space-y-8"
-        >
+        <div className="w-full max-w-md mx-auto space-y-8">
           <div className="flex justify-center">
             <Logo size="md" />
           </div>
@@ -245,7 +238,7 @@ const ResetPasswordPage = () => {
               </Button>
             </div>
           </SectionCard>
-        </motion.div>
+        </div>
       </PageContainer>
     </div>
   );

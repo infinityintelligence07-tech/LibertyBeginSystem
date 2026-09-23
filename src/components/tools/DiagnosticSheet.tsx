@@ -66,7 +66,7 @@ export const DiagnosticSheet = ({
         </div>
         <div className="shrink-0 text-right">
           <p className="text-xs font-medium text-muted-foreground">Nota</p>
-          <p className="text-xl font-semibold leading-none tabular-nums text-primary">
+          <p className="text-xl font-semibold leading-none tabular-nums text-foreground">
             {Number(value ?? 0).toFixed(1)}
             <span className="text-xs font-normal text-muted-foreground">/5</span>
           </p>
@@ -100,7 +100,7 @@ export const DiagnosticSheet = ({
                 {said.map((text, i) => (
                   <div
                     key={i}
-                    className="rounded-md border border-muted-foreground/20 border-l-[2.5px] border-l-primary/60 bg-background/70 px-2.5 py-1.5"
+                    className="rounded-md border border-border bg-background px-2.5 py-1.5"
                   >
                     <p className="text-xs leading-snug text-foreground">{text}</p>
                   </div>
@@ -113,13 +113,13 @@ export const DiagnosticSheet = ({
         </div>
 
         {/* Destino */}
-        <div className="flex min-h-0 flex-col gap-2 bg-status-green/10 p-3">
-          <p className="ds-kicker flex items-center gap-1.5 text-status-green">
+        <div className="flex min-h-0 flex-col gap-2 p-3">
+          <p className="ds-kicker flex items-center gap-1.5">
             <ArrowRight className="h-3 w-3" aria-hidden /> Onde quer chegar
           </p>
-          <div className="flex min-h-[6rem] flex-1 items-start rounded-lg border border-status-green/40 bg-background p-3">
+          <div className="flex min-h-[6rem] flex-1 items-start rounded-lg border border-border bg-background p-3">
             {goal ? (
-              <p className="whitespace-pre-wrap text-xl font-bold leading-snug text-foreground md:text-2xl">
+              <p className="whitespace-pre-wrap text-xl font-semibold leading-snug text-foreground md:text-2xl">
                 {goal}
               </p>
             ) : (

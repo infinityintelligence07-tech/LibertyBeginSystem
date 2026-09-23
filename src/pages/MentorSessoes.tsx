@@ -1,5 +1,4 @@
 import { useState, useMemo } from "react";
-import { motion } from "framer-motion";
 import { AppLayout } from "@/components/AppLayout";
 import { Calendar, Clock, CheckCircle2, ChevronLeft, ChevronRight, FileText, AlertCircle, Target, XCircle } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -18,7 +17,6 @@ import {
   StatusPill,
   TextAreaField,
 } from "@/components/ds";
-import { staggerContainer, fadeUpItem } from "@/lib/animations";
 import { useAuth } from "@/hooks/useAuth";
 import { supabase } from "@/integrations/supabase/client";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
@@ -295,8 +293,8 @@ const MentorSessoesPage = () => {
   return (
     <AppLayout role="mentor">
       <PageContainer>
-      <motion.div variants={staggerContainer} initial="hidden" animate="show" className="space-y-6">
-        <motion.div variants={fadeUpItem}>
+      <div className="space-y-6">
+        <div>
           <PageHeader
             title="Minha agenda"
             description="Acompanhe e feche suas sessões de mentoria"
@@ -314,10 +312,10 @@ const MentorSessoesPage = () => {
               </div>
             }
           />
-        </motion.div>
+        </div>
 
         {/* Filtros */}
-        <motion.div variants={fadeUpItem} className="flex gap-2 overflow-x-auto pb-1 -mb-1 scrollbar-hide" role="tablist" aria-label="Filtrar sessões">
+        <div className="flex gap-2 overflow-x-auto pb-1 -mb-1 scrollbar-hide" role="tablist" aria-label="Filtrar sessões">
           {tabs.map((tab) => (
             <Chip
               key={tab.key}
@@ -329,18 +327,18 @@ const MentorSessoesPage = () => {
               {tab.label}
             </Chip>
           ))}
-        </motion.div>
+        </div>
 
         {activeTab === "to_confirm" && (
-          <motion.div variants={fadeUpItem}>
+          <div>
             <Callout tone="warning" icon={AlertCircle} title="Pendências de todos os meses">
               {MENTOR_PENDING_CONFIRMATION_HINT}
             </Callout>
-          </motion.div>
+          </div>
         )}
 
         {/* Lista de sessões */}
-        <motion.div variants={fadeUpItem}>
+        <div>
           {isError ? (
             <ErrorState title="Não foi possível carregar suas sessões" onRetry={() => refetch()} />
           ) : isLoading ? (
@@ -414,8 +412,8 @@ const MentorSessoesPage = () => {
               })}
             </SectionCard>
           )}
-        </motion.div>
-      </motion.div>
+        </div>
+      </div>
       </PageContainer>
 
       {/* Detalhe da sessão */}

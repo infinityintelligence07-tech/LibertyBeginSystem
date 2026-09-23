@@ -1,6 +1,5 @@
 import { useState, useMemo, useCallback } from "react";
 import { Link } from "react-router-dom";
-import { motion, AnimatePresence } from "framer-motion";
 import { AppLayout } from "@/components/AppLayout";
 import { useAuth } from "@/hooks/useAuth";
 import { supabase } from "@/integrations/supabase/client";
@@ -22,7 +21,6 @@ import {
   Trash2,
   CalendarRange,
 } from "lucide-react";
-import { staggerContainer, fadeUpItem } from "@/lib/animations";
 import { format, addDays, startOfMonth, endOfMonth, startOfWeek, getDay, isSameDay, isBefore, isAfter } from "date-fns";
 import { ptBR } from "date-fns/locale";
 import { Button } from "@/components/ui/button";
@@ -475,7 +473,7 @@ const MentorDisponibilidadePage = () => {
         }]);
         if (errorMessage) { toast.error(errorMessage); return; }
         await queryClient.invalidateQueries({ queryKey: ["mentor-availability"] });
-        toast.success("Horário adicionado!");
+        toast.success("Horário adicionado");
       }
 
       setIsAdding(false);
@@ -554,7 +552,7 @@ const MentorDisponibilidadePage = () => {
               variant={active ? "secondary" : "outline"}
               aria-pressed={active}
               onClick={() => onChange(opt.value)}
-              className={cn("h-auto min-h-[44px] flex-col items-start gap-0 py-2 text-left", active && "ring-1 ring-primary/40")}
+              className="h-auto min-h-[44px] flex-col items-start gap-0 py-2 text-left"
             >
               <span className="text-sm font-semibold">{opt.label}</span>
               <span className="text-xs font-normal text-muted-foreground">{opt.hint}</span>
@@ -568,7 +566,7 @@ const MentorDisponibilidadePage = () => {
   const slotPills = (slot: { isBooked: boolean; isRecurring: boolean }) => (
     <>
       {slot.isRecurring && (
-        <StatusPill tone="brand" withDot={false}>
+        <StatusPill tone="neutral" withDot={false}>
           <Repeat className="h-3 w-3" aria-hidden /> Recorrente
         </StatusPill>
       )}
@@ -579,8 +577,8 @@ const MentorDisponibilidadePage = () => {
   return (
     <AppLayout role="mentor">
       <PageContainer variant="wide">
-      <motion.div variants={staggerContainer} initial="hidden" animate="show" className="space-y-6 lg:space-y-8">
-        <motion.div variants={fadeUpItem}>
+      <div className="space-y-6 lg:space-y-8">
+        <div>
           <PageHeader
             title="Disponibilidade"
             description="Gerencie os horários em que os membros podem marcar sessões com você."
@@ -589,7 +587,7 @@ const MentorDisponibilidadePage = () => {
                 <Button variant="outline" onClick={openRangeSheet}>
                   <CalendarRange /> Adicionar por período
                 </Button>
-                <Button asChild variant={googleConnected ? "ghost" : "outline"} className={cn("max-w-full", googleConnected && "text-status-green hover:text-status-green")}>
+                <Button asChild variant={googleConnected ? "ghost" : "outline"} className="max-w-full">
                   <Link to="/mentor/perfil">
                     {googleConnected ? <CheckCircle2 /> : <Link2 />}
                     <span className="truncate">
@@ -600,9 +598,9 @@ const MentorDisponibilidadePage = () => {
               </>
             }
           />
-        </motion.div>
+        </div>
 
-        <motion.div variants={fadeUpItem} className="grid grid-cols-1 lg:grid-cols-[380px_1fr] gap-6">
+        <div className="grid grid-cols-1 lg:grid-cols-[380px_1fr] gap-6">
           {/* Calendário */}
           <SectionCard as="section" aria-label="Calendário" className="self-start">
             <div className="flex items-center justify-between mb-3">
@@ -643,7 +641,7 @@ const MentorDisponibilidadePage = () => {
                       "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 ring-offset-background",
                       !inMonth && "text-muted-foreground opacity-30 cursor-default",
                       inMonth && !isSelected && !hasAvail && "text-muted-foreground hover:bg-muted",
-                      inMonth && !isSelected && hasAvail && "bg-primary/10 text-foreground hover:bg-primary/15",
+                      inMonth && !isSelected && hasAvail && "bg-accent text-foreground hover:bg-accent/80",
                       isSelected && "bg-primary text-primary-foreground",
                       hasBooked && !isSelected && "ring-1 ring-status-blue/40",
                     )}
@@ -668,16 +666,8 @@ const MentorDisponibilidadePage = () => {
 
           {/* Horários do dia selecionado */}
           <div className="space-y-4">
-            <AnimatePresence mode="wait">
-              {selectedDate ? (
-                <motion.div
-                  key={selectedDate.toISOString()}
-                  initial={{ opacity: 0, x: 16 }}
-                  animate={{ opacity: 1, x: 0 }}
-                  exit={{ opacity: 0, x: -16 }}
-                  transition={{ duration: 0.25 }}
-                  className="space-y-4"
-                >
+            {selectedDate ? (
+                <div key={selectedDate.toISOString()} className="space-y-4">
                   <SectionCard as="section" padding="none">
                     <div className="px-4 sm:px-6 pt-4 sm:pt-6 pb-3">
                       <SectionHeader
@@ -714,11 +704,7 @@ const MentorDisponibilidadePage = () => {
                           <li key={slot.id + slot.date.toISOString()} className="flex items-center gap-1 pr-2">
                             <div className="min-w-0 flex-1">
                               <ListRow
-                                leading={
-                                  <span className="h-10 w-10 rounded-[var(--ds-radius-md)] bg-muted text-muted-foreground flex items-center justify-center">
-                                    <Clock className="h-4 w-4" aria-hidden />
-                                  </span>
-                                }
+                                leading={<Clock className="h-5 w-5 text-muted-foreground shrink-0" aria-hidden />}
                                 title={<span className="tabular-nums">{slot.startTime} – {slot.endTime}</span>}
                                 subtitle={<span className="inline-flex flex-wrap items-center gap-1.5 mt-0.5">{slotPills(slot)}</span>}
                                 chevron={false}
@@ -745,30 +731,29 @@ const MentorDisponibilidadePage = () => {
                       </p>
                     )}
                   </SectionCard>
-                </motion.div>
+                </div>
               ) : (
-                <motion.div key="empty" initial={{ opacity: 0 }} animate={{ opacity: 1 }}>
+                <div key="empty">
                   <EmptyState icon={Calendar} title="Selecione um dia" description="Toque em um dia do calendário para ver e cadastrar horários." />
-                </motion.div>
+                </div>
               )}
-            </AnimatePresence>
           </div>
-        </motion.div>
+        </div>
 
         {/* Resumo do mês */}
-        <motion.section variants={fadeUpItem} className="space-y-3">
+        <section className="space-y-3">
           <SectionHeader title={<span>Resumo · <span className="capitalize">{format(currentMonth, "MMMM yyyy", { locale: ptBR })}</span></span>} />
           <SectionCard>
             <div className="grid grid-cols-3 gap-4">
               <Stat label="Dias com horário" value={daysWithAvail} icon={CalendarDays} />
               <Stat label="Horários cadastrados" value={totalSlots} icon={Clock} />
-              <Stat label="Sessões agendadas" value={bookedSlots} icon={Lock} tone="info" />
+              <Stat label="Sessões agendadas" value={bookedSlots} icon={Lock} />
             </div>
           </SectionCard>
-        </motion.section>
+        </section>
 
         {/* Lista completa */}
-        <motion.section variants={fadeUpItem} className="space-y-3">
+        <section className="space-y-3">
           <SectionHeader
             title="Todas as disponibilidades"
             description={`${fullList.length} ocorrência${fullList.length !== 1 ? "s" : ""} nos próximos 6 meses`}
@@ -795,7 +780,7 @@ const MentorDisponibilidadePage = () => {
                   <li key={s.id + s.date.toISOString()} className="flex items-center gap-1 pr-2">
                     <div className="min-w-0 flex-1">
                       <ListRow
-                        leading={<DateBlock date={format(s.date, "yyyy-MM-dd")} tone={s.isBooked ? "brand" : "default"} />}
+                        leading={<DateBlock date={format(s.date, "yyyy-MM-dd")} />}
                         title={<span className="capitalize">{format(s.date, "EEEE", { locale: ptBR })}</span>}
                         subtitle={<span className="tabular-nums">{s.startTime} – {s.endTime}</span>}
                         trailing={<span className="hidden sm:inline-flex items-center gap-1.5">{slotPills(s)}</span>}
@@ -820,8 +805,8 @@ const MentorDisponibilidadePage = () => {
               </ul>
             </SectionCard>
           )}
-        </motion.section>
-      </motion.div>
+        </section>
+      </div>
       </PageContainer>
 
       {/* Folha: adicionar horário no dia selecionado */}

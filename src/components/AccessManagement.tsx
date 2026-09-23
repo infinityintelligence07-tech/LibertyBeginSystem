@@ -178,7 +178,7 @@ export const AccessManagement = () => {
       <SectionHeader
         title={
           <span className="inline-flex items-center gap-2">
-            <Shield className="h-4 w-4 text-primary" aria-hidden /> Gestão de acessos
+            <Shield className="h-4 w-4 text-muted-foreground" aria-hidden /> Gestão de acessos
           </span>
         }
         description="Filtre por perfil, defina papéis e ative ou desative contas. Apenas Super Admins veem esta área."

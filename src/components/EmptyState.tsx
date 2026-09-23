@@ -27,16 +27,7 @@ export const EmptyState = ({
         className,
       )}
     >
-      {Icon && (
-        <div
-          className={cn(
-            "rounded-full bg-muted text-muted-foreground flex items-center justify-center",
-            compact ? "h-9 w-9" : "h-12 w-12",
-          )}
-        >
-          <Icon className={compact ? "h-4 w-4" : "h-5 w-5"} aria-hidden />
-        </div>
-      )}
+      {Icon && <Icon className={cn("text-muted-foreground", compact ? "h-5 w-5" : "h-6 w-6")} aria-hidden />}
       <div className="space-y-1">
         <p className={cn("font-semibold text-foreground", compact ? "text-sm" : "text-[17px]")}>
           {title}

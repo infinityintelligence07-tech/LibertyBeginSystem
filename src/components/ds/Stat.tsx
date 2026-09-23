@@ -33,7 +33,7 @@ export const Stat = ({ label, value, hint, icon: Icon, tone = "default", size = 
     <div className="flex items-baseline gap-1.5 mt-1">
       <span
         className={cn(
-          "font-bold tabular-nums leading-none tracking-[var(--ds-tracking-title)]",
+          "font-semibold tabular-nums leading-none tracking-[var(--ds-tracking-title)]",
           size === "sm" ? "text-lg" : size === "lg" ? "text-[34px]" : "text-2xl",
           toneText[tone],
         )}
@@ -73,7 +73,7 @@ export const ProgressBar = ({ value, max = 100, tone = "brand", className, label
       aria-valuemin={0}
       aria-valuemax={max}
       aria-label={label}
-      className={cn("h-2 w-full rounded-full bg-muted overflow-hidden", className)}
+      className={cn("h-1 w-full rounded-full bg-muted overflow-hidden", className)}
     >
       <div
         className={cn("h-full rounded-full transition-[width] duration-ds-3 ease-ds-out", barTone[tone])}

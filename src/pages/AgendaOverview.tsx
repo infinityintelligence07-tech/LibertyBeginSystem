@@ -1,5 +1,4 @@
 import { useCallback, useMemo, useState } from "react";
-import { motion } from "framer-motion";
 import { Link } from "react-router-dom";
 import { AppLayout } from "@/components/AppLayout";
 import { useAuth } from "@/hooks/useAuth";
@@ -43,7 +42,6 @@ import {
   startOfMonth,
 } from "date-fns";
 import { ptBR } from "date-fns/locale";
-import { staggerContainer, fadeUpItem } from "@/lib/animations";
 import { useDemoData } from "@/contexts/DemoDataContext";
 import {
   bookingStatusConfig,
@@ -582,9 +580,9 @@ const AgendaOverviewPage = () => {
   return (
     <AppLayout role="liberty">
       <PageContainer variant="wide">
-      <motion.div variants={staggerContainer} initial="hidden" animate="show" className="space-y-5">
+      <div className="space-y-5">
         {/* Cabeçalho */}
-        <motion.div variants={fadeUpItem}>
+        <div>
           <PageHeader
             title="Sua agenda"
             description="Escolha um horário disponível e agende em um clique."
@@ -598,16 +596,16 @@ const AgendaOverviewPage = () => {
                     <StatusPill tone="pending">{pendingConfirmationCount} a confirmar</StatusPill>
                   </span>
                 )}
-                <StatusPill tone="brand">
+                <StatusPill tone="neutral">
                   {availableCount} sessão{availableCount !== 1 ? "s" : ""} a agendar
                 </StatusPill>
               </div>
             }
           />
-        </motion.div>
+        </div>
 
         {sessionsError && (
-          <motion.div variants={fadeUpItem}>
+          <div>
             <Callout
               tone="danger"
               icon={Info}
@@ -616,34 +614,34 @@ const AgendaOverviewPage = () => {
             >
               Verifique sua conexão e tente novamente.
             </Callout>
-          </motion.div>
+          </div>
         )}
 
         {kickoffBlocked && (
-          <motion.div variants={fadeUpItem}>
+          <div>
             <Callout tone="warning" icon={Info}>
               {KICKOFF_NOT_ALLOWED_MESSAGE} Ele não aparece mais entre os horários disponíveis.
             </Callout>
-          </motion.div>
+          </div>
         )}
 
         {/* Aviso de preview do admin (controlado pelo toggle global "Dados fictícios") */}
         {isAdmin && previewMode && (
-          <motion.div variants={fadeUpItem}>
-            <Callout tone="brand" icon={Info} title="Preview de dados fictícios ativo">
+          <div>
+            <Callout tone="info" icon={Info} title="Preview de dados fictícios ativo">
               Horários simulados em todas as sessões disponíveis. Desative em "Dados fictícios" na barra lateral.
             </Callout>
-          </motion.div>
+          </div>
         )}
 
         {isLoading && (
-          <motion.div variants={fadeUpItem}>
+          <div>
             <LoadingState variant="page" />
-          </motion.div>
+          </div>
         )}
 
         {!isLoading && upcomingBookings.length > 0 && (
-          <motion.section variants={fadeUpItem} className="space-y-3" aria-labelledby="upcoming-title">
+          <section className="space-y-3" aria-labelledby="upcoming-title">
             <SectionHeader
               title={<span id="upcoming-title">Sessões já agendadas</span>}
               description="Próximos compromissos confirmados ou aguardando confirmação."
@@ -661,7 +659,7 @@ const AgendaOverviewPage = () => {
                   <ListRow
                     key={booking.id}
                     href="/agenda"
-                    leading={<DateBlock date={booking.scheduled_date} tone={i === 0 ? "brand" : "default"} />}
+                    leading={<DateBlock date={booking.scheduled_date} />}
                     title={session?.name || "Sessão"}
                     subtitle={`${booking.start_time.slice(0, 5)} às ${booking.end_time.slice(0, 5)} · ${shortName(mentorMap.get(booking.mentor_id ?? "") || "Mentor")}`}
                     trailing={<StatusPill status={status} size="sm" />}
@@ -670,15 +668,12 @@ const AgendaOverviewPage = () => {
                 );
               })}
             </SectionCard>
-          </motion.section>
+          </section>
         )}
 
         {/* Calendário + lista de horários */}
         {!isLoading && (
-        <motion.div
-          variants={fadeUpItem}
-          className="grid grid-cols-1 lg:grid-cols-[minmax(0,1fr)_minmax(360px,440px)] gap-5 items-start"
-        >
+        <div className="grid grid-cols-1 lg:grid-cols-[minmax(0,1fr)_minmax(360px,440px)] gap-5 items-start">
           {/* Calendário */}
           <SectionCard padding="compact">
             <div className="flex items-center justify-between mb-3">
@@ -726,14 +721,6 @@ const AgendaOverviewPage = () => {
                 const hasSlots = count > 0 && !isPast;
                 const isSelected = Boolean(selectedDate && isSameDay(day, selectedDate));
                 const userBooking = bookedDateMap[ds];
-                const intensity =
-                  count >= 6
-                    ? "bg-primary/25 hover:bg-primary/30 text-foreground"
-                    : count >= 3
-                    ? "bg-primary/15 hover:bg-primary/25 text-foreground"
-                    : count > 0
-                    ? "bg-primary/10 hover:bg-primary/15 text-foreground"
-                    : "";
                 const dayLabel = format(day, "EEEE, dd 'de' MMMM", { locale: ptBR });
                 const ariaLabel = userBooking === "scheduled"
                   ? `${dayLabel}, sessão agendada`
@@ -756,21 +743,22 @@ const AgendaOverviewPage = () => {
                       "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 ring-offset-background",
                       isSelected
                         ? "bg-primary text-primary-foreground"
-                        : userBooking === "scheduled"
-                        ? "bg-status-blue/15 text-status-blue cursor-default"
-                        : userBooking === "pending_confirmation"
-                        ? "bg-status-orange/15 text-status-orange cursor-default"
+                        : userBooking
+                        ? "text-foreground cursor-default"
                         : hasSlots
-                        ? intensity
+                        ? "bg-muted text-foreground hover:bg-accent"
                         : "text-muted-foreground/40 cursor-not-allowed",
                     )}
                   >
                     <span>{day.getDate()}</span>
                     {hasSlots && !isSelected && (
-                      <span className="text-[11px] leading-none mt-0.5 tabular-nums opacity-80" aria-hidden>{count}</span>
+                      <span className="text-[11px] leading-none mt-0.5 tabular-nums text-muted-foreground" aria-hidden>{count}</span>
                     )}
                     {userBooking && !isSelected && !hasSlots && (
-                      <CalendarClock className="h-3 w-3 mt-0.5" aria-hidden />
+                      <span
+                        aria-hidden
+                        className={cn("mt-1 h-1.5 w-1.5 rounded-full", userBooking === "scheduled" ? "bg-status-blue" : "bg-status-orange")}
+                      />
                     )}
                   </button>
                 );
@@ -779,17 +767,14 @@ const AgendaOverviewPage = () => {
 
             <div className="flex flex-wrap items-center gap-3 mt-4 text-xs text-muted-foreground">
               <span className="flex items-center gap-1.5">
-                <span aria-hidden className="w-2.5 h-2.5 rounded-sm bg-primary/25" /> Muitos horários
+                <span aria-hidden className="w-2.5 h-2.5 rounded-sm bg-muted" /> Com horários
               </span>
               <span className="flex items-center gap-1.5">
-                <span aria-hidden className="w-2.5 h-2.5 rounded-sm bg-primary/10" /> Poucos horários
-              </span>
-              <span className="flex items-center gap-1.5">
-                <span aria-hidden className="w-2.5 h-2.5 rounded-sm bg-status-blue/15 border border-status-blue/30" /> {bookingStatusConfig.scheduled.label}
+                <span aria-hidden className="w-2 h-2 rounded-full bg-status-blue" /> {bookingStatusConfig.scheduled.label}
               </span>
               {pendingConfirmationCount > 0 && (
                 <span className="flex items-center gap-1.5" title={PENDING_CONFIRMATION_HINT}>
-                  <span aria-hidden className="w-2.5 h-2.5 rounded-sm bg-status-orange/15 border border-status-orange/30" /> {bookingStatusConfig.pending_confirmation.label}
+                  <span aria-hidden className="w-2 h-2 rounded-full bg-status-orange" /> {bookingStatusConfig.pending_confirmation.label}
                 </span>
               )}
               {selectedDate && (
@@ -807,7 +792,7 @@ const AgendaOverviewPage = () => {
                 as="h2"
                 title={
                   <span className="inline-flex items-center gap-2">
-                    <CalendarClock className="h-4 w-4 text-primary" aria-hidden />
+                    <CalendarClock className="h-4 w-4 text-muted-foreground" aria-hidden />
                     {selectedDate ? "Horários do dia" : "Próximos horários"}
                   </span>
                 }
@@ -870,7 +855,7 @@ const AgendaOverviewPage = () => {
                   ))}
                 </div>
 
-                <div className="flex-1 overflow-y-auto -mr-2 pr-2 space-y-2">
+                <div className="flex-1 overflow-y-auto -mr-2 pr-2 divide-y divide-border">
                   {(() => {
                     // Agrupa conforme seleção
                     const grouped = new Map<string, { label: string; sublabel: string; cover: string | null; pillar: string | null; slots: Slot[]; sortKey: string }>();
@@ -911,7 +896,7 @@ const AgendaOverviewPage = () => {
                       const isOpen = expandedGroup === key;
                       const groupId = `slot-group-${groupBy}-${key.replace(/[^a-zA-Z0-9_-]/g, "")}`;
                       return (
-                        <div key={key} className="rounded-ds-lg border border-border bg-card overflow-hidden">
+                        <div key={key}>
                           <button
                             type="button"
                             onClick={() => setExpandedGroup(isOpen ? null : key)}
@@ -926,14 +911,10 @@ const AgendaOverviewPage = () => {
                               group.cover ? (
                                 <img src={group.cover} alt="" className="w-10 h-10 object-cover rounded-ds bg-muted flex-shrink-0" />
                               ) : (
-                                <div className="w-10 h-10 rounded-ds bg-primary/10 flex-shrink-0 flex items-center justify-center">
-                                  <CalendarCheck className="h-4 w-4 text-primary" aria-hidden />
-                                </div>
+                                <CalendarCheck className="h-5 w-5 text-muted-foreground shrink-0" aria-hidden />
                               )
                             ) : (
-                              <div className="w-10 h-10 rounded-ds flex-shrink-0 flex items-center justify-center bg-primary/10">
-                                <CalendarClock className="h-4 w-4 text-primary" aria-hidden />
-                              </div>
+                              <CalendarClock className="h-5 w-5 text-muted-foreground shrink-0" aria-hidden />
                             )}
                             <div className="flex-1 min-w-0">
                               <p className="text-[15px] font-medium text-foreground truncate leading-tight first-letter:uppercase">{group.label}</p>
@@ -1006,9 +987,9 @@ const AgendaOverviewPage = () => {
             )}
 
           </SectionCard>
-        </motion.div>
+        </div>
         )}
-      </motion.div>
+      </div>
       </PageContainer>
     </AppLayout>
   );

@@ -214,7 +214,7 @@ const AdminMembroEditarPage = () => {
             <p className="text-sm text-foreground font-medium truncate">{toTitleCase(profile.full_name || "")}</p>
             <div className="flex items-center gap-2 mt-1">
               <span className="text-xs text-muted-foreground">Tipo:</span>
-              <StatusPill tone={profile.member_tier === "liberty" ? "brand" : "neutral"} size="sm" withDot={false}>
+              <StatusPill tone="neutral" size="sm" withDot={false}>
                 {profile.member_tier === "liberty" ? "Liberty Premium" : "Begin"}
               </StatusPill>
             </div>

@@ -336,7 +336,7 @@ export const StudentTools = ({
         as="h3"
         title={
           <span className="flex items-center gap-2">
-            <Wrench className="h-4 w-4 text-primary" aria-hidden />
+            <Wrench className="h-4 w-4 text-muted-foreground" aria-hidden />
             {heading}
           </span>
         }
@@ -350,7 +350,7 @@ export const StudentTools = ({
       />
 
       {canManage && adding && (
-        <SectionCard tone="brand" padding="compact" className="space-y-3">
+        <SectionCard padding="compact" className="space-y-3">
           <div className="flex gap-2" role="group" aria-label="Tipo de ferramenta">
             <Chip active={mode === "file"} onClick={() => setMode("file")}>
               <Upload className="h-3.5 w-3.5" aria-hidden /> Arquivo
@@ -475,9 +475,7 @@ export const StudentTools = ({
               className="flex flex-col gap-3 min-h-[120px]"
             >
               <div className="flex items-start justify-between gap-2">
-                <div className="w-10 h-10 rounded-ds bg-primary/10 text-primary flex items-center justify-center shrink-0">
-                  {iconForTool(t)}
-                </div>
+                {iconForTool(t, "h-5 w-5 text-muted-foreground shrink-0")}
                 <span className="text-muted-foreground">
                   {t.file_type === "link" ? (
                     <ExternalLink className="h-4 w-4" aria-hidden />
@@ -508,16 +506,12 @@ export const StudentTools = ({
                 <ListRow
                   key={t.id}
                   last={index === tools.length - 1}
-                  leading={
-                    <div className="w-10 h-10 rounded-ds bg-primary/10 text-primary flex items-center justify-center">
-                      {iconForTool(t)}
-                    </div>
-                  }
+                  leading={iconForTool(t, "h-5 w-5 text-muted-foreground shrink-0")}
                   title={t.title}
                   subtitle={
                     <span className="block space-y-0.5">
                       {t.description && <span className="block text-foreground/80 whitespace-normal line-clamp-2">{t.description}</span>}
-                      {bookingLine && <span className="block truncate text-primary">{bookingLine}</span>}
+                      {bookingLine && <span className="block truncate">{bookingLine}</span>}
                       <span className="block truncate">{metaLine}</span>
                     </span>
                   }

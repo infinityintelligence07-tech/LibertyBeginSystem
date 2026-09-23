@@ -21,11 +21,11 @@ export const AdminMonthFilter = () => {
           onClick={() => setMode("month")}
           aria-pressed={mode === "month"}
           className={cn(
-            "h-8 min-w-[150px] px-3 rounded-full border text-[13px] font-medium capitalize text-center transition-colors duration-ds-1 ease-ds",
+            "h-8 min-w-[150px] px-3 rounded-[var(--ds-radius-sm)] text-[13px] font-medium capitalize text-center transition-colors duration-ds-1 ease-ds",
             "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 ring-offset-background",
             mode === "month"
-              ? "bg-primary text-primary-foreground border-primary"
-              : "bg-transparent text-muted-foreground border-border hover:bg-accent hover:text-foreground",
+              ? "bg-foreground text-background"
+              : "bg-transparent text-muted-foreground hover:bg-accent hover:text-foreground",
           )}
         >
           {monthLabel}

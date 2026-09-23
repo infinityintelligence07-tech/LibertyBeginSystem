@@ -1,8 +1,6 @@
 import { useState, useMemo } from "react";
-import { motion } from "framer-motion";
 import { AppLayout } from "@/components/AppLayout";
 import { Users, Calendar, CheckCircle2, Target, Search, HelpCircle, ExternalLink } from "lucide-react";
-import { staggerContainer, fadeUpItem } from "@/lib/animations";
 import { supabase } from "@/integrations/supabase/client";
 import { useQuery } from "@tanstack/react-query";
 import { shortName } from "@/lib/formatName";
@@ -195,13 +193,13 @@ const MentorAlunosPage = () => {
   return (
     <AppLayout role="mentor">
       <PageContainer>
-      <motion.div variants={staggerContainer} initial="hidden" animate="show" className="space-y-6">
-        <motion.div variants={fadeUpItem}>
+      <div className="space-y-6">
+        <div>
           <PageHeader title="Membros" description="Visão completa de todos os membros do programa" />
-        </motion.div>
+        </div>
 
         {/* Busca e filtros */}
-        <motion.div variants={fadeUpItem} className="space-y-3">
+        <div className="space-y-3">
           <div className="relative">
             <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground pointer-events-none" aria-hidden />
             <TextField
@@ -225,9 +223,9 @@ const MentorAlunosPage = () => {
               <Chip active={showCompleted} onClick={() => setShowCompleted(true)} count={graduatedCount}>Concluídos</Chip>
             </div>
           </div>
-        </motion.div>
+        </div>
 
-        <motion.div variants={fadeUpItem}>
+        <div>
           {isErrorPage ? (
             <ErrorState title="Não foi possível carregar os membros" onRetry={retryAll} />
           ) : isLoadingPage ? (
@@ -281,8 +279,8 @@ const MentorAlunosPage = () => {
               })}
             </SectionCard>
           )}
-        </motion.div>
-      </motion.div>
+        </div>
+      </div>
       </PageContainer>
 
       {/* Detalhe rápido do membro */}
@@ -316,9 +314,9 @@ const MentorAlunosPage = () => {
             </div>
 
             <div className="grid grid-cols-3 gap-3">
-              <Stat size="sm" icon={CheckCircle2} tone="success" label="Realizadas" value={detail.completed} />
-              <Stat size="sm" icon={Calendar} tone="info" label="Agendadas" value={detail.scheduled} />
-              <Stat size="sm" icon={Target} tone="brand" label="Tarefas" value={`${detail.totalTasks > 0 ? Math.round((detail.completedTasks / detail.totalTasks) * 100) : 0}%`} hint={`${detail.completedTasks}/${detail.totalTasks}`} />
+              <Stat size="sm" icon={CheckCircle2} label="Realizadas" value={detail.completed} />
+              <Stat size="sm" icon={Calendar} label="Agendadas" value={detail.scheduled} />
+              <Stat size="sm" icon={Target} label="Tarefas" value={`${detail.totalTasks > 0 ? Math.round((detail.completedTasks / detail.totalTasks) * 100) : 0}%`} hint={`${detail.completedTasks}/${detail.totalTasks}`} />
             </div>
 
             <div className="space-y-2">

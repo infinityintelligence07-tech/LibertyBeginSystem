@@ -161,7 +161,7 @@ const AdminFinanceiroPage = () => {
       <span className="text-sm text-muted-foreground tabular-nums">{formatBRL(row.rate)}</span>
       {row.usesDefaultRate && <span className="block text-[11px] text-muted-foreground">valor padrão</span>}
       {row.kickoffCount > 0 && (
-        <span className="block text-[11px] text-primary tabular-nums">
+        <span className="block text-[11px] text-muted-foreground tabular-nums">
           {row.kickoffCount}× Mapeamento · {formatBRL(row.rate * KICKOFF_FEE_MULTIPLIER)}
         </span>
       )}
@@ -193,11 +193,10 @@ const AdminFinanceiroPage = () => {
                   label={`Realizadas${periodSuffix}`}
                   value={totalCompleted}
                   hint={totalAwaiting > 0 ? `${totalAwaiting} sem relatório` : undefined}
-                  tone="success"
                 />
               </SectionCard>
               <SectionCard padding="compact">
-                <Stat icon={Calendar} label={`Agendadas${periodSuffix}`} value={totalScheduled} tone="info" />
+                <Stat icon={Calendar} label={`Agendadas${periodSuffix}`} value={totalScheduled} />
               </SectionCard>
               <SectionCard padding="compact" title={PENDING_CONFIRMATION_HINT}>
                 <Stat
@@ -212,7 +211,7 @@ const AdminFinanceiroPage = () => {
                 <Stat icon={DollarSign} label={`A pagar${periodSuffix}`} value={formatBRL(totalDone)} hint="realizadas" />
               </SectionCard>
               <SectionCard padding="compact" className="col-span-2 lg:col-span-1">
-                <Stat icon={DollarSign} label={`Projeção${periodSuffix}`} value={formatBRL(totalProjected)} hint="a pagar + agendadas + a confirmar" tone="brand" />
+                <Stat icon={DollarSign} label={`Projeção${periodSuffix}`} value={formatBRL(totalProjected)} hint="a pagar + agendadas + a confirmar" />
               </SectionCard>
             </div>
 
@@ -261,14 +260,14 @@ const AdminFinanceiroPage = () => {
                                 </div>
                               </TableCell>
                               <TableCell className="text-right tabular-nums">
-                                <span className={`text-sm font-semibold ${row.completed > 0 ? "text-status-green" : "text-muted-foreground"}`}>{row.completed}</span>
+                                <span className={`text-sm font-medium ${row.completed > 0 ? "text-foreground" : "text-muted-foreground"}`}>{row.completed}</span>
                                 {row.awaiting > 0 && <span className="block text-[11px] text-muted-foreground">{row.awaiting} sem relatório</span>}
                               </TableCell>
                               <TableCell className="text-right tabular-nums">
-                                <span className={`text-sm font-semibold ${row.scheduled > 0 ? "text-status-blue" : "text-muted-foreground"}`}>{row.scheduled}</span>
+                                <span className={`text-sm font-medium ${row.scheduled > 0 ? "text-foreground" : "text-muted-foreground"}`}>{row.scheduled}</span>
                               </TableCell>
                               <TableCell className="text-right tabular-nums">
-                                <span className={`text-sm font-semibold ${row.pendingConfirmation > 0 ? "text-status-orange" : "text-muted-foreground"}`} title={PENDING_CONFIRMATION_HINT}>
+                                <span className={`text-sm font-medium ${row.pendingConfirmation > 0 ? "text-status-orange" : "text-muted-foreground"}`} title={PENDING_CONFIRMATION_HINT}>
                                   {row.pendingConfirmation}
                                 </span>
                               </TableCell>
@@ -277,7 +276,7 @@ const AdminFinanceiroPage = () => {
                                 <span className="text-sm font-medium text-foreground">{formatBRL(row.revenueDone)}</span>
                               </TableCell>
                               <TableCell className="text-right tabular-nums">
-                                <span className="text-sm font-semibold text-primary">{formatBRL(row.revenueProjected)}</span>
+                                <span className="text-sm font-medium text-foreground">{formatBRL(row.revenueProjected)}</span>
                               </TableCell>
                               <TableCell className="text-right">
                                 <Button
@@ -294,13 +293,13 @@ const AdminFinanceiroPage = () => {
                           );
                         })}
                         <TableRow className="bg-muted/30 hover:bg-muted/30 border-t border-border">
-                          <TableCell><span className="text-sm font-bold text-foreground">Total</span></TableCell>
-                          <TableCell className="text-right tabular-nums"><span className="text-sm font-bold text-status-green">{totalCompleted}</span></TableCell>
-                          <TableCell className="text-right tabular-nums"><span className="text-sm font-bold text-status-blue">{totalScheduled}</span></TableCell>
-                          <TableCell className="text-right tabular-nums"><span className="text-sm font-bold text-status-orange">{totalPendingConfirmation}</span></TableCell>
+                          <TableCell><span className="text-sm font-semibold text-foreground">Total</span></TableCell>
+                          <TableCell className="text-right tabular-nums"><span className="text-sm font-semibold text-foreground">{totalCompleted}</span></TableCell>
+                          <TableCell className="text-right tabular-nums"><span className="text-sm font-semibold text-foreground">{totalScheduled}</span></TableCell>
+                          <TableCell className="text-right tabular-nums"><span className="text-sm font-semibold text-status-orange">{totalPendingConfirmation}</span></TableCell>
                           <TableCell />
-                          <TableCell className="text-right tabular-nums"><span className="text-sm font-bold text-foreground">{formatBRL(totalDone)}</span></TableCell>
-                          <TableCell className="text-right tabular-nums"><span className="text-sm font-bold text-primary">{formatBRL(totalProjected)}</span></TableCell>
+                          <TableCell className="text-right tabular-nums"><span className="text-sm font-semibold text-foreground">{formatBRL(totalDone)}</span></TableCell>
+                          <TableCell className="text-right tabular-nums"><span className="text-sm font-semibold text-foreground">{formatBRL(totalProjected)}</span></TableCell>
                           <TableCell />
                         </TableRow>
                       </TableBody>
@@ -325,8 +324,8 @@ const AdminFinanceiroPage = () => {
                       />
                     ))}
                     <div className="px-4 py-3 border-t border-border flex items-center justify-between gap-3 bg-muted/30 tabular-nums">
-                      <span className="text-sm font-bold text-foreground">Total a pagar</span>
-                      <span className="text-sm font-bold text-foreground">{formatBRL(totalDone)}</span>
+                      <span className="text-sm font-semibold text-foreground">Total a pagar</span>
+                      <span className="text-sm font-semibold text-foreground">{formatBRL(totalDone)}</span>
                     </div>
                   </SectionCard>
                 </>
@@ -384,10 +383,10 @@ const AdminFinanceiroPage = () => {
           <div className="space-y-5">
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
               <SectionCard padding="compact">
-                <Stat size="sm" label="Realizadas" value={detailRow.completed} hint={detailRow.awaiting > 0 ? `${detailRow.awaiting} sem rel.` : undefined} tone="success" />
+                <Stat size="sm" label="Realizadas" value={detailRow.completed} hint={detailRow.awaiting > 0 ? `${detailRow.awaiting} sem rel.` : undefined} />
               </SectionCard>
               <SectionCard padding="compact">
-                <Stat size="sm" label="Agendadas" value={detailRow.scheduled} tone="info" />
+                <Stat size="sm" label="Agendadas" value={detailRow.scheduled} />
               </SectionCard>
               <SectionCard padding="compact">
                 <Stat size="sm" label="A confirmar" value={detailRow.pendingConfirmation} tone={detailRow.pendingConfirmation > 0 ? "pending" : "default"} />

@@ -1,8 +1,6 @@
-import { motion } from "framer-motion";
 import { Flag } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { shortName } from "@/lib/formatName";
-import { fadeUpItem } from "@/lib/animations";
 import { ListRow, SectionCard, SectionHeader, StatusPill } from "@/components/ds";
 
 export interface ClosingStudent {
@@ -23,7 +21,7 @@ export const MentorClosingSoon = ({ students }: Props) => {
   if (students.length === 0) return null;
 
   return (
-    <motion.section variants={fadeUpItem} className="space-y-3">
+    <section className="space-y-3">
       <SectionHeader
         title="Encerramentos próximos"
         description="Jornadas que terminam nos próximos 30 dias"
@@ -33,11 +31,7 @@ export const MentorClosingSoon = ({ students }: Props) => {
           <ListRow
             key={s.id}
             last={idx === students.length - 1}
-            leading={
-              <span className="h-10 w-10 rounded-[var(--ds-radius-md)] bg-muted text-muted-foreground flex items-center justify-center">
-                <Flag className="h-4 w-4" aria-hidden />
-              </span>
-            }
+            leading={<Flag className="h-5 w-5 text-muted-foreground shrink-0" aria-hidden />}
             title={shortName(s.full_name)}
             subtitle={`Encerra em ${s.endDateLabel}`}
             trailing={
@@ -49,6 +43,6 @@ export const MentorClosingSoon = ({ students }: Props) => {
           />
         ))}
       </SectionCard>
-    </motion.section>
+    </section>
   );
 };

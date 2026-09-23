@@ -1,8 +1,6 @@
 import { useState } from "react";
-import { motion } from "framer-motion";
 import { AppLayout } from "@/components/AppLayout";
 import { Wrench, ExternalLink, Lock, Radar as RadarIcon, FileText } from "lucide-react";
-import { staggerContainer, fadeUpItem } from "@/lib/animations";
 import { Button } from "@/components/ui/button";
 import { EmptyState, LoadingState, PageContainer, PageHeader, SectionCard, SectionHeader, StatusPill } from "@/components/ds";
 import { supabase } from "@/integrations/supabase/client";
@@ -102,21 +100,21 @@ const FerramentasPage = () => {
   return (
     <AppLayout role="liberty">
       <PageContainer>
-      <motion.div variants={staggerContainer} initial="hidden" animate="show" className="space-y-8">
-        <motion.div variants={fadeUpItem}>
+      <div className="space-y-8">
+        <div>
           <PageHeader
             title="Ferramentas"
             description="Ferramentas aplicadas nas suas sessões de mentoria."
           />
-        </motion.div>
+        </div>
 
         {base && (
-          <motion.div variants={fadeUpItem}>
+          <div>
           <SectionCard className="space-y-4">
             <SectionHeader
               title={
                 <span className="inline-flex items-center gap-2">
-                  <RadarIcon className="h-4 w-4 text-primary" aria-hidden />
+                  <RadarIcon className="h-4 w-4 text-muted-foreground" aria-hidden />
                   Mapeamento do Negócio
                 </span>
               }
@@ -138,7 +136,7 @@ const FerramentasPage = () => {
               }}
             />
           </SectionCard>
-          </motion.div>
+          </div>
         )}
 
         <Dialog open={openSheet} onOpenChange={(o) => { setOpenSheet(o); if (!o) setSelected(null); }}>
@@ -165,16 +163,16 @@ const FerramentasPage = () => {
 
         {/* Arquivos e links enviados pelos mentores nas sessões */}
         {profile?.id && (
-          <motion.div variants={fadeUpItem}>
+          <div>
             <StudentTools libertyId={profile.id} title="Ferramentas das suas sessões" />
-          </motion.div>
+          </div>
         )}
 
 
         {isLoading ? (
           <LoadingState variant="cards" rows={3} />
         ) : effectiveTools.length > 0 ? (
-          <motion.section variants={fadeUpItem} className="space-y-3" aria-labelledby="tools-title">
+          <section className="space-y-3" aria-labelledby="tools-title">
             <SectionHeader title={<span id="tools-title">Biblioteca de ferramentas</span>} />
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
               {effectiveTools.map((tool: any) => {
@@ -183,9 +181,9 @@ const FerramentasPage = () => {
                 const inner = (
                   <>
                     <div className="flex items-start justify-between gap-2">
-                      <div className={`w-11 h-11 rounded-ds-lg flex items-center justify-center ${unlocked ? "bg-status-green/10" : "bg-muted"}`}>
-                        {unlocked ? <Wrench className="h-4 w-4 text-status-green" aria-hidden /> : <Lock className="h-4 w-4 text-muted-foreground" aria-hidden />}
-                      </div>
+                      {unlocked
+                        ? <Wrench className="h-5 w-5 text-muted-foreground shrink-0" aria-hidden />
+                        : <Lock className="h-5 w-5 text-muted-foreground shrink-0" aria-hidden />}
                       {isLink && <ExternalLink className="h-4 w-4 text-muted-foreground" aria-hidden />}
                     </div>
                     <p className="text-[17px] font-semibold text-foreground leading-snug line-clamp-2">{tool.title}</p>
@@ -213,7 +211,7 @@ const FerramentasPage = () => {
                 );
               })}
             </div>
-          </motion.section>
+          </section>
         ) : !hasSessionTools ? (
           <EmptyState
             icon={Wrench}
@@ -222,7 +220,7 @@ const FerramentasPage = () => {
           />
         ) : null}
 
-      </motion.div>
+      </div>
       </PageContainer>
     </AppLayout>
   );

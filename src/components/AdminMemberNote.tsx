@@ -40,10 +40,10 @@ export const AdminMemberNote = ({ memberId, initialNote }: Props) => {
   return (
     <div
       onClick={(e) => e.stopPropagation()}
-      className="relative rounded-ds border border-status-yellow/30 bg-status-yellow/5 px-3 py-2"
+      className="relative rounded-ds border border-border bg-card px-3 py-2"
     >
       <div className="flex items-start gap-2">
-        <StickyNote className="h-4 w-4 text-status-yellow shrink-0 mt-0.5" aria-hidden />
+        <StickyNote className="h-4 w-4 text-muted-foreground shrink-0 mt-0.5" aria-hidden />
         <textarea
           value={value}
           onChange={(e) => setValue(e.target.value)}
@@ -56,7 +56,7 @@ export const AdminMemberNote = ({ memberId, initialNote }: Props) => {
         />
         <div className="shrink-0 w-4 h-4 flex items-center justify-center" aria-live="polite">
           {saving && <Loader2 className="h-3.5 w-3.5 animate-spin text-muted-foreground" aria-label="Salvando" />}
-          {savedFlash && !saving && <Check className="h-3.5 w-3.5 text-status-green" aria-label="Salvo" />}
+          {savedFlash && !saving && <Check className="h-3.5 w-3.5 text-muted-foreground" aria-label="Salvo" />}
         </div>
       </div>
     </div>

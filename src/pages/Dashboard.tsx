@@ -1,12 +1,10 @@
 import { useMemo } from "react";
-import { motion } from "framer-motion";
 import { AppLayout } from "@/components/AppLayout";
 import { RankingHighlightsBlock } from "@/components/RankingHighlightsBlock";
 import { Calendar, Map, BookOpen, TrendingUp, BarChart3, ListChecks, Sprout, Leaf, TreePine, Trophy, ExternalLink } from "lucide-react";
 import { LibertyMark } from "@/components/LibertyMark";
 import { Link } from "react-router-dom";
 import { useAuth } from "@/hooks/useAuth";
-import { staggerContainer, fadeUpItem } from "@/lib/animations";
 import { supabase } from "@/integrations/supabase/client";
 import { useQuery } from "@tanstack/react-query";
 import { format as fmtDate, addDays, parseISO } from "date-fns";
@@ -35,6 +33,8 @@ import {
 const DashboardPage = () => {
   const { profile } = useAuth();
   const firstName = profile?.full_name?.split(" ")[0] ?? "...";
+  const hour = new Date().getHours();
+  const greeting = hour < 12 ? "Bom dia" : hour < 18 ? "Boa tarde" : "Boa noite";
 
   const {
     demoEnabled,
@@ -154,11 +154,11 @@ const DashboardPage = () => {
   const taskPct = Math.round(taskProgress);
   const tier =
     taskPct >= 95 ? { name: "Liberty", icon: <LibertyMark size={22} />, next: null } :
-    taskPct >= 85 ? { name: "Águia", icon: <TreePine className="h-5 w-5 text-status-yellow" aria-hidden />, next: 95 } :
-    taskPct >= 75 ? { name: "Falcão", icon: <TreePine className="h-5 w-5 text-status-yellow" aria-hidden />, next: 85 } :
-    taskPct >= 50 ? { name: "Muda", icon: <Leaf className="h-5 w-5 text-status-yellow" aria-hidden />, next: 75 } :
-    taskPct >= 25 ? { name: "Broto", icon: <Leaf className="h-5 w-5 text-status-yellow" aria-hidden />, next: 50 } :
-    { name: "Semente", icon: <Sprout className="h-5 w-5 text-status-yellow" aria-hidden />, next: 25 };
+    taskPct >= 85 ? { name: "Águia", icon: <TreePine className="h-5 w-5 text-muted-foreground" aria-hidden />, next: 95 } :
+    taskPct >= 75 ? { name: "Falcão", icon: <TreePine className="h-5 w-5 text-muted-foreground" aria-hidden />, next: 85 } :
+    taskPct >= 50 ? { name: "Muda", icon: <Leaf className="h-5 w-5 text-muted-foreground" aria-hidden />, next: 75 } :
+    taskPct >= 25 ? { name: "Broto", icon: <Leaf className="h-5 w-5 text-muted-foreground" aria-hidden />, next: 50 } :
+    { name: "Semente", icon: <Sprout className="h-5 w-5 text-muted-foreground" aria-hidden />, next: 25 };
 
   const nextSessionName = nextScheduled ? sessionMap[nextScheduled.session_id] || "Sessão" : "";
   const nextSessionCover = nextScheduled ? sessionCoverMap[nextScheduled.session_id] : null;
@@ -166,37 +166,37 @@ const DashboardPage = () => {
   return (
     <AppLayout role="liberty">
       <PageContainer>
-        <motion.div variants={staggerContainer} initial="hidden" animate="show" className="space-y-8">
+        <div className="space-y-8">
           {/* 1. Saudação */}
-          <motion.div variants={fadeUpItem}>
+          <div>
             <PageHeader
               size="large"
               eyebrow="Minha jornada"
-              title={`Olá, ${firstName}`}
+              title={`${greeting}, ${firstName}`}
               description="Continue de onde parou."
             />
-          </motion.div>
+          </div>
 
           {isError && (
-            <motion.div variants={fadeUpItem}>
+            <div>
               <ErrorState
                 compact
                 title="Não foi possível carregar suas sessões"
                 description="Os números abaixo podem estar incompletos. Verifique sua conexão e tente novamente."
                 onRetry={() => void refetch()}
               />
-            </motion.div>
+            </div>
           )}
 
           {isLoading ? (
-            <motion.div variants={fadeUpItem}>
+            <div>
               <LoadingState variant="page" />
-            </motion.div>
+            </div>
           ) : (
             <>
               {/* 2. Próxima sessão (ou aviso para agendar) */}
               {nextScheduled ? (
-                <motion.div variants={fadeUpItem}>
+                <div>
                   <SectionCard padding="none" as="section" aria-labelledby="next-session-title">
                     {nextSessionCover && (
                       <div className="relative h-32 w-full overflow-hidden rounded-t-ds-lg">
@@ -206,7 +206,7 @@ const DashboardPage = () => {
                     <div className="p-4 sm:p-6">
                       <div className="flex flex-wrap items-center gap-2 mb-3">
                         <p className="ds-kicker inline-flex items-center gap-1.5">
-                          <Calendar className="h-3.5 w-3.5 text-status-blue" aria-hidden />
+                          <Calendar className="h-3.5 w-3.5 text-muted-foreground" aria-hidden />
                           Próxima sessão
                         </p>
                         {nextScheduledStatus && <StatusPill status={nextScheduledStatus} size="sm" />}
@@ -233,19 +233,19 @@ const DashboardPage = () => {
                       </div>
                     </div>
                   </SectionCard>
-                </motion.div>
+                </div>
               ) : (
-                <motion.div variants={fadeUpItem}>
+                <div>
                   <UrgencyBookingCard
                     scheduledCount={scheduledSessionsCount}
                     completedCount={completedSessions}
                     availabilityCount={availabilityCount}
                   />
-                </motion.div>
+                </div>
               )}
 
               {/* 3. Progresso */}
-              <motion.section variants={fadeUpItem} aria-labelledby="progress-title" className="space-y-3">
+              <section aria-labelledby="progress-title" className="space-y-3">
                 <SectionHeader
                   title={<span id="progress-title">Seu progresso</span>}
                   actions={
@@ -262,9 +262,8 @@ const DashboardPage = () => {
                         label="Sessões realizadas"
                         value={`${completedSessions}/${totalSessions}`}
                         hint={`${Math.round(progress)}% da jornada`}
-                        tone="success"
                       />
-                      <ProgressBar value={completedSessions} max={totalSessions} tone="success" label="Sessões realizadas" />
+                      <ProgressBar value={completedSessions} max={totalSessions} label="Sessões realizadas" />
                       <div className="flex flex-wrap gap-2">
                         {scheduledSessionsCount > 0 && (
                           <StatusPill tone="info" size="sm">
@@ -286,16 +285,13 @@ const DashboardPage = () => {
                         label="Tarefas concluídas"
                         value={`${completedTasks.length}/${tasks.length}`}
                         hint={`${pendingTasks.length} pendente${pendingTasks.length !== 1 ? "s" : ""}`}
-                        tone="brand"
                       />
-                      <ProgressBar value={completedTasks.length} max={Math.max(tasks.length, 1)} tone="brand" label="Tarefas concluídas" />
+                      <ProgressBar value={completedTasks.length} max={Math.max(tasks.length, 1)} label="Tarefas concluídas" />
                     </div>
                   </div>
                   {tasks.length > 0 && (
                     <div className="mt-5 pt-5 border-t border-border flex items-center gap-4">
-                      <div className="w-12 h-12 rounded-full bg-status-yellow/15 border border-status-yellow/30 flex items-center justify-center shrink-0">
-                        {tier.icon}
-                      </div>
+                      <div className="shrink-0 flex items-center justify-center">{tier.icon}</div>
                       <div>
                         <p className="text-sm font-medium text-foreground">Nível {tier.name}</p>
                         <p className="text-xs text-muted-foreground inline-flex items-center gap-1.5">
@@ -308,23 +304,23 @@ const DashboardPage = () => {
                     </div>
                   )}
                 </SectionCard>
-              </motion.section>
+              </section>
 
               {/* 4. Tarefas da semana */}
               {tasks.length > 0 && (
-                <motion.div variants={fadeUpItem} className="space-y-3">
+                <div className="space-y-3">
                   <WeekTasksBento tasks={tasks} sessionNameByBooking={sessionNameByBooking} />
                   <div className="flex justify-end">
                     <Button asChild variant="ghost" size="sm">
                       <Link to="/tarefas">Ver todas as tarefas</Link>
                     </Button>
                   </div>
-                </motion.div>
+                </div>
               )}
 
 
               {/* Linha do tempo: realizado × projetado */}
-              <motion.div variants={fadeUpItem}>
+              <div>
                 <MemberTimeline
                   profile={demoEnabled ? demoProfileFill(profile) : profile}
                   bookings={bookings}
@@ -334,7 +330,7 @@ const DashboardPage = () => {
                   reports={reportsMap}
                   hideReportButton
                 />
-              </motion.div>
+              </div>
 
 
 
@@ -343,7 +339,7 @@ const DashboardPage = () => {
 
               {/* Meus resultados */}
               {tasksWithResults.length > 0 && (
-                <motion.section variants={fadeUpItem} aria-labelledby="results-title" className="space-y-3">
+                <section aria-labelledby="results-title" className="space-y-3">
                   <SectionHeader
                     title={<span id="results-title">Meus resultados</span>}
                     description={`${tasksWithResults.length} resultado${tasksWithResults.length !== 1 ? "s" : ""} registrado${tasksWithResults.length !== 1 ? "s" : ""}`}
@@ -357,11 +353,9 @@ const DashboardPage = () => {
                         <ListRow
                           key={task.id}
                           leading={
-                            <div className={`w-9 h-9 rounded-full flex items-center justify-center shrink-0 ${isQuantitative ? "bg-status-green/15" : "bg-status-blue/15"}`}>
-                              {isQuantitative
-                                ? <TrendingUp className="h-4 w-4 text-status-green" aria-hidden />
-                                : <BarChart3 className="h-4 w-4 text-status-blue" aria-hidden />}
-                            </div>
+                            isQuantitative
+                              ? <TrendingUp className="h-5 w-5 text-muted-foreground shrink-0" aria-hidden />
+                              : <BarChart3 className="h-5 w-5 text-muted-foreground shrink-0" aria-hidden />
                           }
                           title={task.result_value}
                           subtitle={`${task.description} · ${sName}${task.result_metric ? ` · ${task.result_metric}` : ""}`}
@@ -375,47 +369,39 @@ const DashboardPage = () => {
                       );
                     })}
                   </SectionCard>
-                </motion.section>
+                </section>
               )}
 
               {/* Atalhos */}
-              <motion.div variants={fadeUpItem}>
+              <div>
                 <SectionCard padding="none">
                   <ListRow
                     href="/jornada"
-                    leading={
-                      <div className="w-9 h-9 rounded-full bg-primary/10 flex items-center justify-center shrink-0">
-                        <Map className="h-4 w-4 text-primary" aria-hidden />
-                      </div>
-                    }
+                    leading={<Map className="h-5 w-5 text-muted-foreground shrink-0" aria-hidden />}
                     title="Minha jornada"
                     subtitle="Progresso completo e histórico de sessões"
                   />
                   <ListRow
                     href="/conteudos"
-                    leading={
-                      <div className="w-9 h-9 rounded-full bg-primary/10 flex items-center justify-center shrink-0">
-                        <BookOpen className="h-4 w-4 text-primary" aria-hidden />
-                      </div>
-                    }
+                    leading={<BookOpen className="h-5 w-5 text-muted-foreground shrink-0" aria-hidden />}
                     title="Conteúdos"
                     subtitle="Materiais, ferramentas e templates"
                     last
                   />
                 </SectionCard>
-              </motion.div>
+              </div>
 
               {/* 5. NPS e ranking */}
-              <motion.div variants={fadeUpItem}>
+              <div>
                 <PendingNpsCard />
-              </motion.div>
+              </div>
 
-              <motion.div variants={fadeUpItem}>
+              <div>
                 <RankingHighlightsBlock />
-              </motion.div>
+              </div>
             </>
           )}
-        </motion.div>
+        </div>
       </PageContainer>
     </AppLayout>
   );

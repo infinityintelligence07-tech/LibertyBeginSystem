@@ -1,5 +1,5 @@
 import { Link } from "react-router-dom";
-import { ClipboardCheck, ArrowRight, Star } from "lucide-react";
+import { ClipboardCheck, ArrowRight } from "lucide-react";
 import { useAuth } from "@/hooks/useAuth";
 import { Button } from "@/components/ui/button";
 import { SectionCard, Stat, StatusPill } from "@/components/ds";
@@ -78,11 +78,10 @@ export const PendingNpsCard = () => {
     : null;
 
   return (
-    <SectionCard tone="brand" as="section" aria-labelledby="pending-nps-title">
+    <SectionCard as="section" aria-labelledby="pending-nps-title">
       <div className="grid grid-cols-1 md:grid-cols-[1fr_auto] gap-4 md:gap-6 md:items-center">
         <div className="space-y-3 min-w-0">
-          <StatusPill tone="brand" withDot={false}>
-            <Star className="h-3 w-3" aria-hidden />
+          <StatusPill tone="pending">
             Avaliação pendente
           </StatusPill>
           <h3 id="pending-nps-title" className="text-[17px] font-semibold text-foreground leading-tight">
@@ -97,8 +96,8 @@ export const PendingNpsCard = () => {
           <div className="pt-1">
             <Button asChild className="w-full sm:w-auto">
               <Link to={`/nps/${next.id}`}>
-                Responder agora
-                <ArrowRight className="h-4 w-4" />
+                Responder avaliação
+                <ArrowRight className="h-4 w-4" aria-hidden />
               </Link>
             </Button>
           </div>
@@ -108,7 +107,6 @@ export const PendingNpsCard = () => {
           icon={ClipboardCheck}
           label={pending.length === 1 ? "Avaliação pendente" : "Avaliações pendentes"}
           value={pending.length}
-          tone="brand"
           className="md:min-w-[140px]"
         />
       </div>

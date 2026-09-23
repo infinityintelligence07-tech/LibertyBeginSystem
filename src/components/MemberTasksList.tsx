@@ -1,6 +1,6 @@
 import { useState } from "react";
 import {
-  CheckCircle2, Clock, Pencil, Trash2, X, Save, RotateCcw, ShieldCheck,
+  Check, Clock, Pencil, Trash2, X, Save, RotateCcw, ShieldCheck,
   TrendingUp, MessageSquare, Calendar as CalendarIcon, User, Plus,
 } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
@@ -81,7 +81,7 @@ export const MemberTasksList = ({ tasks, sessionNameFor, canManage, onChanged, r
         .eq("id", id);
       if (error) throw error;
     },
-    onSuccess: () => { toast.success("Tarefa validada!"); onChanged(); },
+    onSuccess: () => { toast.success("Tarefa validada"); onChanged(); },
     onError: (e: any) => toast.error("Erro ao validar: " + (e?.message || "")),
   });
 
@@ -112,7 +112,7 @@ export const MemberTasksList = ({ tasks, sessionNameFor, canManage, onChanged, r
       const { error } = await supabase.from("session_tasks").update({ description }).eq("id", id);
       if (error) throw error;
     },
-    onSuccess: () => { toast.success("Tarefa editada!"); setEditingId(null); onChanged(); },
+    onSuccess: () => { toast.success("Tarefa editada"); setEditingId(null); onChanged(); },
     onError: (e: any) => toast.error("Erro ao editar: " + (e?.message || "")),
   });
 
@@ -142,7 +142,7 @@ export const MemberTasksList = ({ tasks, sessionNameFor, canManage, onChanged, r
       if (error) throw error;
     },
     onSuccess: () => {
-      toast.success("Resultado registrado!");
+      toast.success("Resultado registrado");
       setResultTaskId(null); setResultValue(""); setResultMetric("");
       onChanged();
     },
@@ -175,7 +175,7 @@ export const MemberTasksList = ({ tasks, sessionNameFor, canManage, onChanged, r
           onClick={() => openResult(t)}
           aria-label="Concluir e registrar resultado"
           title="Concluir e registrar resultado"
-          className="hit-44 flex h-6 w-6 shrink-0 items-center justify-center rounded-full border border-muted-foreground/40 transition-colors duration-ds-1 hover:border-status-green hover:bg-status-green/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          className="hit-44 flex h-5 w-5 shrink-0 items-center justify-center rounded-full border border-border bg-card transition-colors duration-ds-1 hover:border-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
         />
       );
     }
@@ -186,9 +186,9 @@ export const MemberTasksList = ({ tasks, sessionNameFor, canManage, onChanged, r
           onClick={() => openResult(t)}
           aria-label="Validar com resultado"
           title="Validar com resultado"
-          className="hit-44 flex h-6 w-6 shrink-0 items-center justify-center rounded-full border border-status-yellow/60 bg-status-yellow/10 transition-colors duration-ds-1 hover:bg-status-yellow/20 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          className="hit-44 flex h-5 w-5 shrink-0 items-center justify-center rounded-full border border-status-yellow bg-card transition-colors duration-ds-1 hover:border-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
         >
-          <Clock className="h-3.5 w-3.5 text-status-yellow" />
+          <Clock className="h-3 w-3 text-muted-foreground" />
         </button>
       );
     }
@@ -199,9 +199,9 @@ export const MemberTasksList = ({ tasks, sessionNameFor, canManage, onChanged, r
         disabled={reopen.isPending}
         aria-label="Reabrir tarefa"
         title="Reabrir tarefa"
-        className="hit-44 flex h-6 w-6 shrink-0 items-center justify-center rounded-full border border-status-green bg-status-green/15 transition-colors duration-ds-1 hover:bg-status-green/25 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50"
+        className="hit-44 flex h-5 w-5 shrink-0 items-center justify-center rounded-full border border-status-green bg-status-green text-primary-foreground transition-opacity duration-ds-1 hover:opacity-80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50"
       >
-        <CheckCircle2 className="h-4 w-4 text-status-green" />
+        <Check className="h-3 w-3" />
       </button>
     );
   };
@@ -241,7 +241,6 @@ export const MemberTasksList = ({ tasks, sessionNameFor, canManage, onChanged, r
                     <IconButton
                       aria-label="Salvar descrição"
                       size="sm"
-                      className="text-primary"
                       disabled={updateDescription.isPending || !editText.trim()}
                       onClick={() => editText.trim() && updateDescription.mutate({ id: t.id, description: editText.trim() })}
                     >
@@ -273,11 +272,11 @@ export const MemberTasksList = ({ tasks, sessionNameFor, canManage, onChanged, r
                       )}
                     </div>
                     {t.result_value && (
-                      <div className="mt-2 rounded-ds border border-border bg-muted/40 p-2.5">
+                      <div className="mt-2 pt-2 border-t border-border">
                         <div className="mb-0.5 flex items-center gap-1.5">
                           {t.result_type === "quantitative"
-                            ? <TrendingUp className="h-3.5 w-3.5 text-status-green" aria-hidden />
-                            : <MessageSquare className="h-3.5 w-3.5 text-status-blue" aria-hidden />}
+                            ? <TrendingUp className="h-3.5 w-3.5 text-muted-foreground" aria-hidden />
+                            : <MessageSquare className="h-3.5 w-3.5 text-muted-foreground" aria-hidden />}
                           <span className="ds-kicker">{t.result_type === "quantitative" ? "Quantitativo" : "Qualitativo"}</span>
                           {canManage && (
                             <IconButton
@@ -308,7 +307,7 @@ export const MemberTasksList = ({ tasks, sessionNameFor, canManage, onChanged, r
                     </Button>
                   )}
                   {status === "validated" && !t.result_value && (
-                    <Button variant="ghost" size="sm" className="text-primary" onClick={() => openResult(t)}>
+                    <Button variant="ghost" size="sm" onClick={() => openResult(t)}>
                       <Plus className="h-3.5 w-3.5" /> Resultado
                     </Button>
                   )}
@@ -358,7 +357,7 @@ export const MemberTasksList = ({ tasks, sessionNameFor, canManage, onChanged, r
         onOpenChange={(o) => !o && setResultTaskId(null)}
         title={
           <span className="inline-flex items-center gap-2">
-            <ShieldCheck className="h-4 w-4 text-status-green" aria-hidden /> Registrar resultado da tarefa
+            <ShieldCheck className="h-4 w-4 text-muted-foreground" aria-hidden /> Registrar resultado da tarefa
           </span>
         }
         description="A tarefa é marcada como concluída e validada com o resultado informado."

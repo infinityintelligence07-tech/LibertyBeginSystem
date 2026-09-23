@@ -1,5 +1,5 @@
 import { Link } from "react-router-dom";
-import { AlertTriangle, ArrowRight, CalendarCheck } from "lucide-react";
+import { ArrowRight, CalendarCheck } from "lucide-react";
 import { useAuth } from "@/hooks/useAuth";
 import { BEGIN_JOURNEY_SESSIONS } from "@/lib/sessionProgress";
 import { Button } from "@/components/ui/button";
@@ -28,18 +28,17 @@ export const UrgencyBookingCard = ({ scheduledCount, completedCount, availabilit
 
   const subtext =
     availabilityCount > 0
-      ? `Os horários estão se esgotando. Restam ${availabilityCount} ${
+      ? `Restam ${availabilityCount} ${
           availabilityCount === 1 ? "dia disponível" : "dias disponíveis"
-        } nas próximas 3 semanas. Garanta o seu antes que acabem.`
-      : "Reserve seu próximo encontro de mentoria agora para não perder o ritmo da jornada.";
+        } nas próximas 3 semanas.`
+      : "Reserve seu próximo encontro de mentoria para manter o ritmo da jornada.";
 
   return (
-    <SectionCard tone="warning" as="section" aria-labelledby="urgency-booking-title">
+    <SectionCard as="section" aria-labelledby="urgency-booking-title">
       <div className="grid grid-cols-1 md:grid-cols-[1fr_auto] gap-4 md:gap-6 md:items-center">
         <div className="space-y-3 min-w-0">
-          <StatusPill tone="warning" withDot={false}>
-            <AlertTriangle className="h-3 w-3" aria-hidden />
-            Vagas se esgotando
+          <StatusPill tone="warning">
+            Agendamento pendente
           </StatusPill>
           <h3 id="urgency-booking-title" className="text-[17px] font-semibold text-foreground leading-tight">
             {headline}
@@ -48,8 +47,8 @@ export const UrgencyBookingCard = ({ scheduledCount, completedCount, availabilit
           <div className="pt-1">
             <Button asChild className="w-full sm:w-auto">
               <Link to="/agenda/overview">
-                Agendar agora
-                <ArrowRight className="h-4 w-4" />
+                Agendar sessão
+                <ArrowRight className="h-4 w-4" aria-hidden />
               </Link>
             </Button>
           </div>
@@ -61,7 +60,6 @@ export const UrgencyBookingCard = ({ scheduledCount, completedCount, availabilit
             label={availabilityCount === 1 ? "Dia livre" : "Dias livres"}
             value={availabilityCount}
             hint="nas próximas 3 semanas"
-            tone="warning"
             className="md:min-w-[140px]"
           />
         )}

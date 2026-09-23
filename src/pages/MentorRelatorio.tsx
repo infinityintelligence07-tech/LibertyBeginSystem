@@ -1,7 +1,6 @@
 import { useState, useEffect, useMemo } from "react";
 import { useParams, useNavigate, useLocation } from "react-router-dom";
 import { useGoBack } from "@/lib/navigation";
-import { motion } from "framer-motion";
 import { AppLayout } from "@/components/AppLayout";
 import {
   ExternalLink, AlertCircle, Wand2, Lock, Check, FileText,
@@ -25,7 +24,6 @@ import {
   TextAreaField,
 } from "@/components/ds";
 import { cn } from "@/lib/utils";
-import { staggerContainer, fadeUpItem } from "@/lib/animations";
 import { supabase } from "@/integrations/supabase/client";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { format, parseISO } from "date-fns";
@@ -405,9 +403,9 @@ const MentorRelatorioPage = () => {
   return (
     <AppLayout role={layoutRole}>
       <PageContainer variant="narrow">
-      <motion.div variants={staggerContainer} initial="hidden" animate="show" className="space-y-6">
+      <div className="space-y-6">
         {/* Header */}
-        <motion.div variants={fadeUpItem}>
+        <div>
           <PageHeader
             back={goBack}
             title="Relatório da sessão"
@@ -430,27 +428,27 @@ const MentorRelatorioPage = () => {
               ) : undefined
             }
           />
-        </motion.div>
+        </div>
 
         {/* Avisos de contexto: sessão futura, somente leitura, mapeamento sem relatório */}
         {!sessionEnded && (
-          <motion.div variants={fadeUpItem}>
+          <div>
             <Callout tone="info" icon={Clock} title="O relatório só pode ser enviado depois do horário da sessão">
               Esta sessão termina em {format(parseISO(booking.scheduled_date), "dd/MM", { locale: ptBR })} às {booking.end_time?.slice(0, 5) ?? "--:--"}. Você pode preparar o texto agora, mas o botão de salvar fica liberado só após o término.
             </Callout>
-          </motion.div>
+          </div>
         )}
         {!canEdit && (
-          <motion.div variants={fadeUpItem}>
+          <div>
             <Callout tone="info" icon={Lock} title="Sessão de outro mentor · somente leitura">
               Você pode consultar o relatório, mas só o mentor responsável (ou um administrador) pode editá-lo.
             </Callout>
-          </motion.div>
+          </div>
         )}
         {!requiresReport && (
-          <motion.div variants={fadeUpItem}>
+          <div>
             <Callout
-              tone="brand"
+              tone="info"
               icon={CheckCircle2}
               title={booking.is_retroactive ? "Registro retroativo: não exige relatório" : "Mapeamento do Negócio: não exige relatório"}
               action={
@@ -463,12 +461,12 @@ const MentorRelatorioPage = () => {
             >
               Esta sessão conta como realizada sem relatório. Se quiser, registre observações privadas abaixo.
             </Callout>
-          </motion.div>
+          </div>
         )}
 
         {/* Trocar sessão entregue */}
         {canEdit && (
-          <motion.div variants={fadeUpItem}>
+          <div>
             <SelectField
               label="Sessão entregue"
               hint="Use se a sessão realizada foi diferente da agendada. A troca altera o histórico do aluno."
@@ -480,12 +478,12 @@ const MentorRelatorioPage = () => {
                 <option key={s.id} value={s.id}>{s.name}</option>
               ))}
             </SelectField>
-          </motion.div>
+          </div>
         )}
 
         {/* Sobre o aluno */}
         {libertyProfile && essentials.length > 0 && (
-          <motion.section variants={fadeUpItem}>
+          <section>
             <SectionCard className="space-y-4">
               <SectionHeader
                 as="h3"
@@ -504,19 +502,19 @@ const MentorRelatorioPage = () => {
                 {essentials.map((e) => (
                   <div key={e.label} className="min-w-0">
                     <dt className="flex items-center gap-1.5 text-xs font-medium text-muted-foreground mb-1">
-                      <e.icon className="h-3.5 w-3.5 text-primary" aria-hidden /> {e.label}
+                      <e.icon className="h-3.5 w-3.5" aria-hidden /> {e.label}
                     </dt>
                     <dd className="text-sm text-foreground leading-relaxed line-clamp-3">{String(e.value)}</dd>
                   </div>
                 ))}
               </dl>
             </SectionCard>
-          </motion.section>
+          </section>
         )}
 
         {/* Organizar com IA */}
-        <motion.section variants={fadeUpItem}>
-          <SectionCard tone="brand" className="space-y-4">
+        <section>
+          <SectionCard className="space-y-4">
             <SectionHeader
               as="h3"
               title="Organizar com IA"
@@ -537,20 +535,20 @@ const MentorRelatorioPage = () => {
               </Button>
             </div>
           </SectionCard>
-        </motion.section>
+        </section>
 
         {/* Relatório estruturado */}
-        <motion.section variants={fadeUpItem}>
+        <section>
           <SectionCard className="space-y-4">
             <SectionHeader as="h3" title="Relatório" description="O que o aluno vai ler." />
             <TextAreaField label="Resumo" required value={summary} onChange={(e) => setSummary(e.target.value)} placeholder="Panorama da sessão..." className="min-h-[120px] resize-y" />
             <TextAreaField label="O que foi entregue" value={delivered} onChange={(e) => setDelivered(e.target.value)} placeholder="O que foi efetivamente trabalhado..." className="min-h-[96px] resize-y" />
             <TextAreaField label="Próximos passos" value={nextSteps} onChange={(e) => setNextSteps(e.target.value)} placeholder="Encaminhamentos combinados..." className="min-h-[96px] resize-y" />
           </SectionCard>
-        </motion.section>
+        </section>
 
         {/* Insights da IA */}
-        <motion.section variants={fadeUpItem}>
+        <section>
           <SectionCard className="space-y-4">
             <SectionHeader as="h3" title="Insights da IA" />
             {!aiAlert && !aiStrategy ? (
@@ -558,14 +556,14 @@ const MentorRelatorioPage = () => {
             ) : (
               <div className="space-y-4">
                 <TextAreaField
-                  label={<span className="inline-flex items-center gap-1.5"><AlertCircle className="h-3.5 w-3.5 text-status-yellow" aria-hidden /> Alerta</span>}
+                  label={<span className="inline-flex items-center gap-1.5"><AlertCircle className="h-3.5 w-3.5 text-muted-foreground" aria-hidden /> Alerta</span>}
                   value={aiAlert}
                   onChange={(e) => setAiAlert(e.target.value)}
                   placeholder="Nenhum alerta identificado."
                   className="min-h-[72px] resize-y"
                 />
                 <TextAreaField
-                  label={<span className="inline-flex items-center gap-1.5"><Wand2 className="h-3.5 w-3.5 text-primary" aria-hidden /> Sugestão estratégica</span>}
+                  label={<span className="inline-flex items-center gap-1.5"><Wand2 className="h-3.5 w-3.5 text-muted-foreground" aria-hidden /> Sugestão estratégica</span>}
                   value={aiStrategy}
                   onChange={(e) => setAiStrategy(e.target.value)}
                   placeholder="Nenhuma sugestão estratégica registrada."
@@ -574,10 +572,10 @@ const MentorRelatorioPage = () => {
               </div>
             )}
           </SectionCard>
-        </motion.section>
+        </section>
 
         {/* Tarefas sugeridas */}
-        <motion.section variants={fadeUpItem}>
+        <section>
           <SectionCard className="space-y-4">
             <SectionHeader
               as="h3"
@@ -650,22 +648,20 @@ const MentorRelatorioPage = () => {
               </ul>
             )}
           </SectionCard>
-        </motion.section>
+        </section>
 
         {/* Ferramentas anexadas a esta sessão */}
         {libertyProfile?.id && bookingId && (
-          <motion.div variants={fadeUpItem}>
+          <div>
             <StudentTools libertyId={libertyProfile.id} bookingId={bookingId} />
-          </motion.div>
+          </div>
         )}
 
         {/* Observações privadas */}
-        <motion.section variants={fadeUpItem}>
+        <section>
           {!showImpressions ? (
             <SectionCard as="button" interactive onClick={() => setShowImpressions(true)} className="flex items-center gap-3">
-              <span className="h-10 w-10 rounded-[var(--ds-radius-md)] bg-muted text-muted-foreground flex items-center justify-center shrink-0">
-                <Lock className="h-4 w-4" aria-hidden />
-              </span>
+              <Lock className="h-5 w-5 text-muted-foreground shrink-0" aria-hidden />
               <span className="min-w-0 flex-1">
                 <span className="block text-sm font-medium text-foreground">Observações privadas</span>
                 <span className="block text-xs text-muted-foreground">Não compartilhadas com o aluno. Só você e os administradores veem.</span>
@@ -673,10 +669,10 @@ const MentorRelatorioPage = () => {
               <Plus className="h-4 w-4 text-muted-foreground shrink-0" aria-hidden />
             </SectionCard>
           ) : (
-            <SectionCard tone="warning" className="space-y-3">
+            <SectionCard className="space-y-3">
               <SectionHeader
                 as="h3"
-                title={<span className="inline-flex items-center gap-2"><Lock className="h-4 w-4 text-status-yellow" aria-hidden /> Observações privadas</span>}
+                title={<span className="inline-flex items-center gap-2"><Lock className="h-4 w-4 text-muted-foreground" aria-hidden /> Observações privadas</span>}
                 description="Privado. Não compartilhado com o aluno."
               />
               <TextAreaField
@@ -688,14 +684,14 @@ const MentorRelatorioPage = () => {
               />
             </SectionCard>
           )}
-        </motion.section>
+        </section>
 
         {/* Checklist de conclusão da sessão */}
-        <motion.section variants={fadeUpItem}>
+        <section>
           <SectionCard className="space-y-3">
             <SectionHeader
               as="h3"
-              title={<span className="inline-flex items-center gap-2"><ShieldCheck className="h-4 w-4 text-primary" aria-hidden /> Para concluir a sessão</span>}
+              title={<span className="inline-flex items-center gap-2"><ShieldCheck className="h-4 w-4 text-muted-foreground" aria-hidden /> Para concluir a sessão</span>}
             />
             <ul className="space-y-2 text-sm">
               {[
@@ -703,7 +699,7 @@ const MentorRelatorioPage = () => {
                 { ok: summary.trim().length > 0, label: "Resumo preenchido" },
                 { ok: hasTool, label: "Ferramenta anexada (recomendado)" },
               ].map((item) => (
-                <li key={item.label} className={cn("flex items-center gap-2", item.ok ? "text-status-green" : "text-muted-foreground")}>
+                <li key={item.label} className={cn("flex items-center gap-2", item.ok ? "text-foreground" : "text-muted-foreground")}>
                   <Check className={cn("h-4 w-4 shrink-0", !item.ok && "opacity-30")} aria-hidden /> {item.label}
                 </li>
               ))}
@@ -714,13 +710,10 @@ const MentorRelatorioPage = () => {
                 : "A sessão é marcada como realizada ao salvar o relatório com o resumo preenchido. A ferramenta é recomendada, mas não obrigatória."}
             </p>
           </SectionCard>
-        </motion.section>
+        </section>
 
         {/* Ações: fixas na base no mobile */}
-        <motion.div
-          variants={fadeUpItem}
-          className="sticky bottom-[calc(64px+env(safe-area-inset-bottom))] lg:static z-20 -mx-4 px-4 sm:-mx-6 sm:px-6 py-3 bg-background/95 backdrop-blur border-t border-border lg:mx-0 lg:p-0 lg:bg-transparent lg:border-0 lg:backdrop-blur-none"
-        >
+        <div className="sticky bottom-[calc(64px+env(safe-area-inset-bottom))] lg:static z-20 -mx-4 px-4 sm:-mx-6 sm:px-6 py-3 bg-background border-t border-border lg:mx-0 lg:p-0 lg:bg-transparent lg:border-0">
           <div className="flex flex-col-reverse sm:flex-row sm:items-center sm:justify-end gap-2">
             <Button variant="outline" size="lg" onClick={() => setDeliverableOpen(true)}>
               <FileText /> Gerar material
@@ -737,8 +730,8 @@ const MentorRelatorioPage = () => {
             </Button>
           </div>
           {saveHint && <p className="text-xs text-muted-foreground text-right mt-2">{saveHint}</p>}
-        </motion.div>
-      </motion.div>
+        </div>
+      </div>
       </PageContainer>
 
       <ConfirmDialog

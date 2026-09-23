@@ -30,9 +30,9 @@ export const FeaturedCaseCard = () => {
   const member = (featured as any).member;
 
   return (
-    <SectionCard tone="brand">
+    <SectionCard>
       <p className="ds-kicker flex items-center gap-1.5 mb-2">
-        <TrendingUp className="h-3.5 w-3.5 text-primary" aria-hidden /> Estudo de caso do dia
+        <TrendingUp className="h-3.5 w-3.5 text-muted-foreground" aria-hidden /> Estudo de caso do dia
       </p>
       <h3 className="text-[17px] font-semibold text-foreground leading-snug tracking-[var(--ds-tracking-title-sm)]">{featured.headline}</h3>
       <p className="text-sm text-muted-foreground mt-2 leading-relaxed">{featured.summary}</p>

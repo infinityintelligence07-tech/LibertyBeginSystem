@@ -24,11 +24,11 @@ export const SendNpsButton = ({ libertyProfileId, libertyName, sessionName, book
 
   const link = `${typeof window !== "undefined" ? window.location.origin : ""}${bookingId ? `/nps/${bookingId}` : "/nps"}`;
   const first = (libertyName || "").split(" ")[0] || "tudo bem";
-  const message = `Oi, ${first}! Pode responder a pesquisa de satisfação${sessionName ? ` da sessão "${sessionName}"` : ""}? Leva menos de 2 minutos:
+  const message = `Oi, ${first}. Pode responder a pesquisa de satisfação${sessionName ? ` da sessão "${sessionName}"` : ""}? Leva menos de 2 minutos:
 
 ${link}
 
-Obrigado! 🙏`;
+Obrigado.`;
   const digits = phone ? phone.replace(/\D/g, "") : "";
 
   const copy = async (text: string) => {
@@ -43,7 +43,7 @@ Obrigado! 🙏`;
       document.body.removeChild(ta);
     }
     setCopied(true);
-    toast.success("Copiado! Cole no WhatsApp.");
+    toast.success("Mensagem copiada");
     setTimeout(() => setCopied(false), 1800);
   };
 
@@ -71,7 +71,7 @@ Obrigado! 🙏`;
         link: bookingId ? `/nps/${bookingId}` : `/nps`,
       });
       if (error) throw error;
-      toast.success(`NPS enviado${libertyName ? ` para ${libertyName.split(" ")[0]}` : ""}!`);
+      toast.success(`NPS enviado${libertyName ? ` para ${libertyName.split(" ")[0]}` : ""}`);
       setOpen(true);
     } catch (e: any) {
       toast.error("Erro ao enviar NPS: " + (e?.message || "desconhecido"));
@@ -116,7 +116,7 @@ Obrigado! 🙏`;
           <div className="flex items-center justify-between gap-2 pl-3 pr-1 py-1 rounded-ds bg-muted/30 border border-border min-h-[44px]">
             <span className="font-mono text-xs text-foreground truncate">{link}</span>
             <IconButton aria-label={copied ? "Link copiado" : "Copiar link"} size="sm" onClick={() => copy(link)}>
-              {copied ? <Check className="h-4 w-4 text-status-green" /> : <Copy className="h-4 w-4" />}
+              {copied ? <Check className="h-4 w-4" /> : <Copy className="h-4 w-4" />}
             </IconButton>
           </div>
 

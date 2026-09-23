@@ -69,20 +69,15 @@ const RankingPage = () => {
                 <ol className="grid grid-cols-1 md:grid-cols-3 gap-3 list-none m-0 p-0">
                   {featured.map((m, idx) => (
                     <li key={m.id}>
-                      <SectionCard tone="brand" padding="compact" className="flex items-center gap-4 h-full">
-                        <div className="relative shrink-0">
-                          <UserAvatar name={m.full_name} avatarUrl={m.photo_url ?? undefined} size={56} />
-                          <span
-                            className="absolute -bottom-1 -right-1 h-6 w-6 rounded-full bg-primary text-primary-foreground flex items-center justify-center text-xs font-bold ring-2 ring-card"
-                            aria-label={`${idx + 1}º lugar`}
-                          >
-                            {idx + 1}
-                          </span>
-                        </div>
+                      <SectionCard padding="compact" className="flex items-center gap-4 h-full">
+                        <span className="w-5 text-center text-sm font-semibold tabular-nums text-muted-foreground shrink-0" aria-label={`${idx + 1}º lugar`}>
+                          {idx + 1}
+                        </span>
+                        <UserAvatar name={m.full_name} avatarUrl={m.photo_url ?? undefined} size={40} />
                         <div className="min-w-0">
                           <p className="text-[15px] font-semibold text-foreground truncate">{shortName(m.full_name)}</p>
                           {m.company_name && <p className="text-xs text-muted-foreground truncate">{m.company_name}</p>}
-                          <p className="text-xs text-primary font-semibold mt-1 tabular-nums">{m.points} pts</p>
+                          <p className="text-xs text-muted-foreground mt-1 tabular-nums">{m.points} pts</p>
                         </div>
                       </SectionCard>
                     </li>
@@ -120,12 +115,12 @@ const RankingPage = () => {
                           title={shortName(m.full_name)}
                           subtitle={
                             <span className="flex items-center gap-1.5 flex-wrap">
-                              {m.role_label && <StatusPill tone="brand" size="sm" withDot={false}>{m.role_label}</StatusPill>}
+                              {m.role_label && <StatusPill tone="neutral" size="sm" withDot={false}>{m.role_label}</StatusPill>}
                               {m.company_name && <span className="truncate">{m.company_name}</span>}
                             </span>
                           }
                           trailing={
-                            <span className="text-sm font-semibold text-primary tabular-nums">
+                            <span className="text-sm font-semibold text-foreground tabular-nums">
                               {m.points ?? 0}<span className="text-xs text-muted-foreground ml-1">pts</span>
                             </span>
                           }
@@ -148,12 +143,12 @@ const RankingPage = () => {
                     return (
                       <SectionCard key={t.id} as="article" padding="compact" className="space-y-2">
                         <div className="flex items-start gap-2">
-                          <Star className="h-4 w-4 text-primary shrink-0 mt-0.5" aria-hidden />
+                          <Star className="h-4 w-4 text-muted-foreground shrink-0 mt-0.5" aria-hidden />
                           <p className="text-[15px] font-semibold text-foreground">{t.headline}</p>
                         </div>
                         <p className="text-sm text-muted-foreground leading-relaxed line-clamp-4">{t.content}</p>
                         {t.result_metric && (
-                          <p className="text-xs text-primary font-semibold">Resultado: {t.result_metric}</p>
+                          <p className="text-xs text-foreground font-medium">Resultado: {t.result_metric}</p>
                         )}
                         {m && (
                           <p className="text-xs text-muted-foreground pt-2 border-t border-border">

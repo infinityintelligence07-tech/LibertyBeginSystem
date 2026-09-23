@@ -188,14 +188,8 @@ export const MentorActionBanner = () => {
 
   return (
     <>
-      <AnimatePresence>
-        {items.length > 0 && (
-          <motion.div
-            initial={{ opacity: 0, y: -8 }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: -8 }}
-            transition={{ duration: 0.2 }}
-          >
+      {items.length > 0 && (
+          <div>
             <SectionCard as="section" padding="none" aria-label="Ações pendentes">
               <button
                 type="button"
@@ -274,9 +268,8 @@ export const MentorActionBanner = () => {
                 )}
               </AnimatePresence>
             </SectionCard>
-          </motion.div>
+          </div>
         )}
-      </AnimatePresence>
 
       <BottomSheet
         open={!!rejectTarget}

@@ -1,8 +1,7 @@
 import { useState, useMemo } from "react";
 import { Trophy, TrendingUp, MessageSquare } from "lucide-react";
-import { motion } from "framer-motion";
-import { fadeUpItem } from "@/lib/animations";
 import { shortName } from "@/lib/formatName";
+import { cn } from "@/lib/utils";
 import { Chip, EmptyState, SectionCard, SectionHeader } from "@/components/ds";
 
 type Task = {
@@ -58,7 +57,7 @@ export const ResultsRanking = ({ tasks, profileMap }: Props) => {
 
 
   return (
-    <motion.div variants={fadeUpItem} className="space-y-4">
+    <div className="space-y-4">
       <SectionHeader
         title="Ranking de resultados"
         actions={
@@ -76,18 +75,13 @@ export const ResultsRanking = ({ tasks, profileMap }: Props) => {
       {ranking.length === 0 ? (
         <EmptyState icon={Trophy} title="Nenhum resultado registrado ainda" compact />
       ) : (
-        <div className="space-y-3">
-          {ranking.slice(0, 10).map((member, i) => (
-            <SectionCard key={member.name} padding="compact">
+        <SectionCard padding="none">
+          {ranking.slice(0, 10).map((member, i, arr) => (
+            <div key={member.name} className={cn("p-3 sm:p-4", i < arr.length - 1 && "border-b border-border")}>
               <div className="flex items-center gap-3 mb-2">
-                <div className={`w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold tabular-nums shrink-0 ${
-                  i === 0 ? "bg-status-yellow/20 text-status-yellow" :
-                  i === 1 ? "bg-muted text-foreground" :
-                  i === 2 ? "bg-primary/10 text-primary" :
-                  "bg-muted text-muted-foreground"
-                }`}>
+                <span className="w-8 text-center text-sm font-semibold tabular-nums text-muted-foreground shrink-0">
                   {i + 1}º
-                </div>
+                </span>
                 <div className="flex-1 min-w-0">
                   <p className="text-sm font-medium text-foreground truncate">{shortName(member.name)}</p>
                   <p className="text-xs text-muted-foreground">{member.count} resultado{member.count !== 1 ? "s" : ""}</p>
@@ -97,9 +91,9 @@ export const ResultsRanking = ({ tasks, profileMap }: Props) => {
                 {member.results.slice(0, 3).map((r) => (
                   <div key={r.id} className="flex items-start gap-2 text-xs">
                     {r.result_type === "quantitative" ? (
-                      <TrendingUp className="h-3 w-3 text-status-green mt-0.5 shrink-0" aria-hidden />
+                      <TrendingUp className="h-3 w-3 text-muted-foreground mt-0.5 shrink-0" aria-hidden />
                     ) : (
-                      <MessageSquare className="h-3 w-3 text-status-blue mt-0.5 shrink-0" aria-hidden />
+                      <MessageSquare className="h-3 w-3 text-muted-foreground mt-0.5 shrink-0" aria-hidden />
                     )}
                     <div>
                       <span className="text-foreground">{r.description}</span>
@@ -115,10 +109,10 @@ export const ResultsRanking = ({ tasks, profileMap }: Props) => {
                   <p className="text-[11px] text-muted-foreground">+{member.results.length - 3} mais</p>
                 )}
               </div>
-            </SectionCard>
+            </div>
           ))}
-        </div>
+        </SectionCard>
       )}
-    </motion.div>
+    </div>
   );
 };

@@ -167,7 +167,7 @@ export const MemberBookingsManager = ({ libertyId, libertyName, onReportClick, o
         as="h3"
         title={
           <span className="inline-flex items-center gap-2">
-            <CalendarDays className="h-4 w-4 text-primary" aria-hidden /> Sessões do aluno
+            <CalendarDays className="h-4 w-4 text-muted-foreground" aria-hidden /> Sessões do aluno
           </span>
         }
         description="Adicionar, editar ou excluir sessões deste aluno."

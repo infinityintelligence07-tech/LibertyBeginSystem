@@ -20,26 +20,20 @@ import {
   type ToolPillar,
 } from "@/lib/diagnosticoBegin";
 import {
-  ArrowLeft, ArrowRight, Check, CheckCircle2, Loader2, Moon, PartyPopper,
+  ArrowLeft, ArrowRight, Check, CheckCircle2, Loader2, Moon,
   Radar as RadarIcon, Sun, Target, X,
 } from "lucide-react";
 import { useTheme } from "@/hooks/useTheme";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
-import { IconButton, SectionCard, TextAreaField, TextField } from "@/components/ds";
+import { Chip, IconButton, SectionCard, StatusPill, TextAreaField, TextField } from "@/components/ds";
 
 const PILLARS = DIAGNOSTICO_BEGIN_PILLARS;
 const TOTAL_QUESTIONS = PILLARS.reduce((a, p) => a + p.questions.length, 0);
 
 export const pillarAccent = (i: number) => `hsl(var(--pillar-${(i % 7) + 1}))`;
 
-const MICRO_REWARDS = [
-  "Boa! Seguimos.",
-  "Registrado.",
-  "Isso ajuda muito no diagnóstico.",
-  "Mais um passo dado.",
-  "Excelente, avançando.",
-];
+const MICRO_REWARDS = ["Resposta registrada"];
 
 const GOAL_EXAMPLES: Record<string, string[]> = {
   financeiro: [
@@ -205,17 +199,12 @@ export const ToolWizard = ({
   return (
     <div className="fixed inset-0 z-50 bg-background overflow-y-auto">
       {/* Topo */}
-      <div className="sticky top-0 z-20 bg-background/95 backdrop-blur border-b border-border">
+      <div className="sticky top-0 z-20 bg-background border-b border-border">
         <div
           className="max-w-3xl mx-auto px-4 sm:px-6 flex items-center gap-3"
           style={{ paddingTop: "calc(env(safe-area-inset-top) + 0.5rem)", paddingBottom: "0.5rem" }}
         >
-          <div
-            className="h-9 w-9 rounded-full flex items-center justify-center shrink-0"
-            style={{ background: `color-mix(in srgb, ${accent} 16%, transparent)` }}
-          >
-            <RadarIcon className="h-4 w-4" style={{ color: accent }} aria-hidden />
-          </div>
+          <RadarIcon className="h-5 w-5 text-muted-foreground shrink-0" aria-hidden />
           <div className="min-w-0 flex-1">
             <p className="text-sm font-semibold text-foreground truncate">{title}</p>
             <p className="text-xs text-muted-foreground truncate">
@@ -243,11 +232,9 @@ export const ToolWizard = ({
           aria-valuemax={100}
           aria-valuenow={view === "result" || view === "map" || view === "nextsteps" || view === "gift" ? 100 : progress}
         >
-          <motion.div
-            className="h-full"
-            style={{ background: accent }}
-            animate={{ width: `${view === "result" || view === "map" || view === "nextsteps" || view === "gift" ? 100 : progress}%` }}
-            transition={{ duration: 0.45 }}
+          <div
+            className="h-full bg-primary transition-[width] duration-ds-3 ease-ds-out"
+            style={{ width: `${view === "result" || view === "map" || view === "nextsteps" || view === "gift" ? 100 : progress}%` }}
           />
         </div>
       </div>
@@ -256,13 +243,15 @@ export const ToolWizard = ({
       <AnimatePresence>
         {reward && (
           <motion.div
-            initial={{ opacity: 0, y: -8, scale: 0.96 }}
-            animate={{ opacity: 1, y: 0, scale: 1 }}
-            exit={{ opacity: 0, y: -8, scale: 0.96 }}
-            className="fixed left-1/2 -translate-x-1/2 z-30 rounded-full px-4 py-2 text-xs font-medium shadow-lg border border-border bg-card text-foreground flex items-center gap-2"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            transition={{ duration: 0.15 }}
+            className="fixed left-1/2 -translate-x-1/2 z-30 rounded-ds px-4 py-2 text-xs font-medium shadow-ds-2 border border-border bg-card text-foreground flex items-center gap-2"
             style={{ top: "calc(env(safe-area-inset-top) + 4.5rem)" }}
+            role="status"
           >
-            <Check className="h-3.5 w-3.5" style={{ color: accent }} />
+            <Check className="h-3.5 w-3.5 text-muted-foreground" aria-hidden />
             {reward}
           </motion.div>
         )}
@@ -272,11 +261,11 @@ export const ToolWizard = ({
         <AnimatePresence mode="wait">
           {/* Capa */}
           {view === "cover" && (
-            <motion.div key="cover" initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -10 }} className="space-y-4">
+            <motion.div key="cover" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} transition={{ duration: 0.15 }} className="space-y-4">
               {/* Abertura */}
               <SectionCard className="sm:p-8">
-                <p className="ds-kicker" style={{ color: pillarAccent(0) }}>Ferramenta Begin</p>
-                <h1 className="text-[28px] md:text-[34px] font-bold text-foreground mt-2 leading-[1.15]">
+                <p className="ds-kicker">Ferramenta Begin</p>
+                <h1 className="text-[28px] md:text-[34px] font-semibold text-foreground mt-2 leading-[1.15]">
                   {title}
                 </h1>
                 <p className="text-sm sm:text-base text-muted-foreground mt-3 leading-relaxed max-w-xl">
@@ -298,14 +287,10 @@ export const ToolWizard = ({
                 ].map((s, i) => (
                   <li key={s.t}>
                     <SectionCard padding="compact" className="h-full">
-                      <span
-                        className="h-7 w-7 rounded-full flex items-center justify-center text-xs font-bold"
-                        style={{ background: `color-mix(in srgb, ${pillarAccent(i)} 16%, transparent)`, color: pillarAccent(i) }}
-                        aria-hidden
-                      >
+                      <span className="text-xs font-semibold tabular-nums text-muted-foreground" aria-hidden>
                         {i + 1}
                       </span>
-                      <p className="text-[15px] font-semibold text-foreground mt-2.5">{s.t}</p>
+                      <p className="text-[15px] font-semibold text-foreground mt-1.5">{s.t}</p>
                       <p className="text-xs text-muted-foreground leading-snug mt-1">{s.d}</p>
                     </SectionCard>
                   </li>
@@ -317,16 +302,16 @@ export const ToolWizard = ({
 
           {/* Trilha em bento vertical */}
           {view === "trail" && (
-            <motion.div key="trail" initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -10 }} className="space-y-4">
+            <motion.div key="trail" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} transition={{ duration: 0.15 }} className="space-y-4">
               <SectionCard padding="compact" className="flex items-center gap-4">
                 <div className="relative h-16 w-16 shrink-0" role="img" aria-label={`${progress}% concluído`}>
                   <svg viewBox="0 0 36 36" className="h-16 w-16 -rotate-90" aria-hidden>
                     <circle cx="18" cy="18" r="15.5" fill="none" stroke="hsl(var(--muted))" strokeWidth="4" />
-                    <motion.circle
-                      cx="18" cy="18" r="15.5" fill="none" stroke={accent} strokeWidth="4" strokeLinecap="round"
+                    <circle
+                      cx="18" cy="18" r="15.5" fill="none" stroke="hsl(var(--primary))" strokeWidth="4" strokeLinecap="round"
                       strokeDasharray={2 * Math.PI * 15.5}
-                      animate={{ strokeDashoffset: 2 * Math.PI * 15.5 * (1 - progress / 100) }}
-                      transition={{ duration: 0.6 }}
+                      strokeDashoffset={2 * Math.PI * 15.5 * (1 - progress / 100)}
+                      className="transition-[stroke-dashoffset] duration-ds-3 ease-ds-out"
                     />
                   </svg>
                   <span className="absolute inset-0 flex items-center justify-center text-sm font-semibold text-foreground tabular-nums">{progress}%</span>
@@ -356,21 +341,16 @@ export const ToolWizard = ({
                       onClick={() => openPillar(i)}
                       aria-label={`${p.name}: ${count} de ${p.questions.length} respostas`}
                       className="text-left h-full flex flex-col"
-                      style={{ borderColor: done ? `color-mix(in srgb, ${c} 55%, transparent)` : undefined }}
                     >
                       <div className="flex items-start gap-3">
-                        <span
-                          className="h-9 w-9 rounded-full text-xs font-bold flex items-center justify-center shrink-0"
-                          style={{ background: `color-mix(in srgb, ${c} 18%, transparent)`, color: c }}
-                          aria-hidden
-                        >
-                          {done ? <Check className="h-4 w-4" /> : i + 1}
+                        <span className="w-5 shrink-0 text-center text-sm font-semibold tabular-nums text-muted-foreground" aria-hidden>
+                          {done ? <Check className="h-5 w-5" /> : i + 1}
                         </span>
                         <div className="min-w-0 flex-1">
                           <p className="text-[15px] font-semibold text-foreground truncate">{p.name}</p>
                           <p className="text-xs text-muted-foreground leading-snug line-clamp-2 min-h-[2rem]">{p.description}</p>
-                          <div className="mt-2.5 h-1.5 rounded-full bg-muted overflow-hidden" aria-hidden>
-                            <motion.div className="h-full rounded-full" style={{ background: c }} animate={{ width: `${pct}%` }} transition={{ duration: 0.5 }} />
+                          <div className="mt-2.5 h-1 rounded-full bg-muted overflow-hidden" aria-hidden>
+                            <div className="h-full rounded-full transition-[width] duration-ds-3 ease-ds-out" style={{ background: c, width: `${pct}%` }} />
                           </div>
                           <p className="text-xs text-muted-foreground mt-1 tabular-nums">{count}/{p.questions.length} respostas</p>
                         </div>
@@ -393,11 +373,11 @@ export const ToolWizard = ({
 
           {/* Uma pergunta por tela */}
           {view === "question" && question && (
-            <motion.div key={question.id} initial={{ opacity: 0, x: 24 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -24 }} className="space-y-4">
+            <motion.div key={question.id} initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} transition={{ duration: 0.15 }} className="space-y-4">
               <div className="flex items-center gap-2 flex-wrap">
-                <span className="text-xs px-2.5 h-6 inline-flex items-center rounded-full font-semibold" style={{ background: `color-mix(in srgb, ${accent} 16%, transparent)`, color: accent }}>
+                <StatusPill tone="neutral" size="sm" withDot={false} className="text-foreground">
                   Etapa {pi + 1}/{PILLARS.length} · {pillar.short}
-                </span>
+                </StatusPill>
                 <span className="text-xs text-muted-foreground tabular-nums">
                   Pergunta {qi + 1} de {pillar.questions.length}
                 </span>
@@ -429,19 +409,13 @@ export const ToolWizard = ({
                     className="h-14 text-lg font-semibold tabular-nums placeholder:font-normal"
                   />
                   {question.allowUnknown && (
-                    <button
-                      type="button"
+                    <Chip
+                      active={answers[question.id] === "Não tem clareza"}
                       onClick={() => onChange(question.id, "Não tem clareza")}
-                      aria-pressed={answers[question.id] === "Não tem clareza"}
-                      className="rounded-full border px-3.5 h-8 text-xs font-medium transition-colors duration-ds-1 ease-ds focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 ring-offset-background"
-                      style={{
-                        borderColor: answers[question.id] === "Não tem clareza" ? accent : "hsl(var(--border))",
-                        background: answers[question.id] === "Não tem clareza" ? `color-mix(in srgb, ${accent} 14%, transparent)` : "transparent",
-                        color: answers[question.id] === "Não tem clareza" ? accent : "hsl(var(--muted-foreground))",
-                      }}
+                      className="border border-border"
                     >
                       Não tem clareza
-                    </button>
+                    </Chip>
                   )}
                 </div>
               ) : question.type === "text" ? (
@@ -456,35 +430,30 @@ export const ToolWizard = ({
                 />
               ) : (
                 <div className="space-y-2.5" role="group" aria-label={question.title}>
-                  {question.options.map((o, oi) => {
+                  {question.options.map((o) => {
                     const selected = answers[question.id] === o.key;
                     return (
-                      <motion.button
+                      <button
                         key={o.key}
                         type="button"
-                        initial={{ opacity: 0, y: 8 }}
-                        animate={{ opacity: 1, y: 0 }}
-                        transition={{ delay: oi * 0.04 }}
                         onClick={() => answerAndAdvance(o.key)}
                         aria-pressed={selected}
-                        className="w-full flex items-start gap-3 rounded-ds-lg border p-4 min-h-[56px] text-left transition-colors duration-ds-1 ease-ds focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 ring-offset-background"
-                        style={{
-                          borderColor: selected ? accent : "hsl(var(--border))",
-                          background: selected ? `color-mix(in srgb, ${accent} 12%, transparent)` : "hsl(var(--card))",
-                        }}
+                        className={cn(
+                          "w-full flex items-start gap-3 rounded-ds-lg border p-4 min-h-[56px] text-left transition-colors duration-ds-1 ease-ds focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 ring-offset-background",
+                          selected ? "border-foreground bg-accent" : "border-border bg-card hover:bg-accent/60",
+                        )}
                       >
                         <span
-                          className="h-7 w-7 shrink-0 rounded-full text-xs font-bold flex items-center justify-center"
-                          style={{
-                            background: selected ? accent : "hsl(var(--muted))",
-                            color: selected ? "hsl(var(--background))" : "hsl(var(--muted-foreground))",
-                          }}
+                          className={cn(
+                            "w-5 shrink-0 text-sm font-semibold tabular-nums",
+                            selected ? "text-foreground" : "text-muted-foreground",
+                          )}
                           aria-hidden
                         >
                           {o.key}
                         </span>
                         <span className="text-sm text-foreground leading-snug">{o.label}</span>
-                      </motion.button>
+                      </button>
                     );
                   })}
                 </div>
@@ -504,14 +473,9 @@ export const ToolWizard = ({
 
           {/* Etapa concluída */}
           {view === "stage" && (
-            <motion.div key="stage" initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }} className="py-6 space-y-4">
+            <motion.div key="stage" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} transition={{ duration: 0.15 }} className="py-6 space-y-4">
               <div className="text-center space-y-3">
-                <div
-                  className="mx-auto h-16 w-16 rounded-full flex items-center justify-center"
-                  style={{ background: `color-mix(in srgb, ${accent} 18%, transparent)` }}
-                >
-                  <PartyPopper className="h-8 w-8" style={{ color: accent }} aria-hidden />
-                </div>
+                <Check className="mx-auto h-6 w-6 text-muted-foreground" aria-hidden />
                 <div>
                   <h2 className="text-[22px] font-semibold text-foreground">Etapa concluída</h2>
                   <p className="text-sm text-muted-foreground mt-1">
@@ -561,7 +525,7 @@ export const ToolWizard = ({
                 <TextAreaField
                   label={
                     <span className="inline-flex items-center gap-2">
-                      <Target className="h-4 w-4" style={{ color: accent }} aria-hidden />
+                      <Target className="h-4 w-4 text-muted-foreground" aria-hidden />
                       Resuma em uma frase como está hoje o {pillar.short}
                     </span>
                   }
@@ -582,32 +546,16 @@ export const ToolWizard = ({
 
           {/* Processando */}
           {view === "processing" && (
-            <motion.div key="processing" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="py-20 text-center space-y-6" aria-live="polite" aria-busy="true">
-              <div
-                className="relative mx-auto h-20 w-20 rounded-full flex items-center justify-center"
-                style={{ background: `color-mix(in srgb, ${pillarAccent(procStep)} 18%, transparent)` }}
-              >
-                <Loader2 className="h-8 w-8 animate-spin" style={{ color: pillarAccent(procStep) }} aria-hidden />
-              </div>
+            <motion.div key="processing" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} transition={{ duration: 0.15 }} className="py-20 text-center space-y-6" aria-live="polite" aria-busy="true">
+              <Loader2 className="mx-auto h-6 w-6 animate-spin text-muted-foreground" aria-hidden />
               <div className="space-y-2">
                 <h2 className="text-[22px] font-semibold text-foreground">Processando o diagnóstico</h2>
-                <AnimatePresence mode="wait">
-                  <motion.p
-                    key={procStep}
-                    initial={{ opacity: 0, y: 6 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    exit={{ opacity: 0, y: -6 }}
-                    className="text-sm text-muted-foreground"
-                  >
-                    {PROCESSING_STEPS[procStep]}
-                  </motion.p>
-                </AnimatePresence>
+                <p className="text-sm text-muted-foreground">{PROCESSING_STEPS[procStep]}</p>
               </div>
-              <div className="mx-auto max-w-xs h-1.5 rounded-full bg-muted overflow-hidden" aria-hidden>
-                <motion.div
-                  className="h-full rounded-full bg-primary"
-                  animate={{ width: `${((procStep + 1) / PROCESSING_STEPS.length) * 100}%` }}
-                  transition={{ duration: 0.6 }}
+              <div className="mx-auto max-w-xs h-1 rounded-full bg-muted overflow-hidden" aria-hidden>
+                <div
+                  className="h-full rounded-full bg-primary transition-[width] duration-ds-3 ease-ds-out"
+                  style={{ width: `${((procStep + 1) / PROCESSING_STEPS.length) * 100}%` }}
                 />
               </div>
             </motion.div>
@@ -615,11 +563,9 @@ export const ToolWizard = ({
 
           {/* Resultado */}
           {view === "result" && (
-            <motion.div key="result" initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }} className="space-y-4">
-              <SectionCard tone="success" className="text-center">
-                <div className="mx-auto h-14 w-14 rounded-full bg-status-green/15 flex items-center justify-center">
-                  <CheckCircle2 className="h-7 w-7 text-status-green" aria-hidden />
-                </div>
+            <motion.div key="result" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} transition={{ duration: 0.15 }} className="space-y-4">
+              <SectionCard className="text-center">
+                <CheckCircle2 className="mx-auto h-6 w-6 text-muted-foreground" aria-hidden />
                 <h2 className="text-[22px] font-semibold text-foreground mt-3">Diagnóstico pronto</h2>
                 <p className="text-sm text-muted-foreground">
                   Maturidade geral <span className="font-semibold text-foreground tabular-nums">{total.toFixed(1)}/5</span> · {maturityLabel(total).label}
@@ -628,7 +574,7 @@ export const ToolWizard = ({
 
               <SectionCard className="space-y-4">
                 <div className="flex items-center gap-2">
-                  <Target className="h-4 w-4 text-primary" aria-hidden />
+                  <Target className="h-4 w-4 text-muted-foreground" aria-hidden />
                   <h3 className="text-[17px] font-semibold text-foreground">Radar da maturidade</h3>
                 </div>
                 <DiagnosticRadar scores={scores} label={resultLabel} />
@@ -684,14 +630,15 @@ export const ToolWizard = ({
         {(view === "question" || view === "stage") && (
           <motion.div
             key="trail-fab"
-            initial={{ opacity: 0, y: 12 }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: 12 }}
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            transition={{ duration: 0.15 }}
             className="fixed left-1/2 -translate-x-1/2 z-40"
             style={{ bottom: "calc(env(safe-area-inset-bottom) + 1rem)" }}
           >
-            <Button variant="outline" size="sm" className="rounded-full shadow-ds-2 bg-card" onClick={() => setView("trail")}>
-              <ArrowLeft className="h-3.5 w-3.5" style={{ color: accent }} aria-hidden />
+            <Button variant="outline" size="sm" className="shadow-ds-2 bg-card" onClick={() => setView("trail")}>
+              <ArrowLeft className="h-4 w-4" aria-hidden />
               Ver trilha
             </Button>
           </motion.div>

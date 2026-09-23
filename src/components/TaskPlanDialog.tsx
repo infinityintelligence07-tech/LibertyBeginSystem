@@ -51,7 +51,7 @@ export const TaskPlanDialog = ({ task, onOpenChange, invalidateKeys = [] }: Prop
     },
     onSuccess: async () => {
       await invalidateAll();
-      toast.success(dueDate ? "Prazo definido!" : "Prazo removido");
+      toast.success(dueDate ? "Prazo definido" : "Prazo removido");
       onOpenChange(false);
     },
     onError: () => toast.error("Erro ao salvar prazo"),

@@ -1,8 +1,6 @@
-import { motion } from "framer-motion";
 import { Users } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { shortName } from "@/lib/formatName";
-import { fadeUpItem } from "@/lib/animations";
 import { UserAvatar } from "@/components/UserAvatar";
 import { EmptyState, ListRow, ProgressBar, SectionCard, SectionHeader, StatusPill } from "@/components/ds";
 
@@ -26,7 +24,7 @@ export const MentorActiveStudents = ({ students }: Props) => {
   const total = 12;
 
   return (
-    <motion.section variants={fadeUpItem} className="space-y-3">
+    <section className="space-y-3">
       <SectionHeader
         title="Alunos ativos"
         description="Acompanhamento da jornada"
@@ -67,6 +65,6 @@ export const MentorActiveStudents = ({ students }: Props) => {
           })}
         </SectionCard>
       )}
-    </motion.section>
+    </section>
   );
 };

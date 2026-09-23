@@ -112,7 +112,7 @@ export const TaskChecklist = ({
     },
     onSuccess: (_d, vars) => {
       invalidateAll();
-      toast.success(vars.done ? "Enviada para validação do mentor!" : "Tarefa reaberta");
+      toast.success(vars.done ? "Enviada para validação do mentor" : "Tarefa reaberta");
     },
     onError: () => toast.error("Erro ao atualizar tarefa"),
   });
@@ -132,7 +132,7 @@ export const TaskChecklist = ({
     },
     onSuccess: () => {
       invalidateAll();
-      toast.success("Tarefa validada!");
+      toast.success("Tarefa validada");
     },
     onError: () => toast.error("Erro ao validar tarefa"),
   });
@@ -176,7 +176,7 @@ export const TaskChecklist = ({
       invalidateAll();
       setNewTaskText("");
       setAddingTask(false);
-      toast.success("Tarefa adicionada!");
+      toast.success("Tarefa adicionada");
     },
     onError: () => toast.error("Erro ao adicionar tarefa"),
   });
@@ -189,7 +189,7 @@ export const TaskChecklist = ({
     onSuccess: () => {
       invalidateAll();
       setEditingId(null);
-      toast.success("Tarefa editada!");
+      toast.success("Tarefa editada");
     },
     onError: () => toast.error("Erro ao editar tarefa"),
   });
@@ -202,7 +202,7 @@ export const TaskChecklist = ({
     onSuccess: () => {
       invalidateAll();
       setDeleteTaskId(null);
-      toast.success("Tarefa removida!");
+      toast.success("Tarefa removida");
     },
     onError: () => toast.error("Erro ao remover tarefa"),
   });
@@ -231,7 +231,7 @@ export const TaskChecklist = ({
       setResultValue("");
       setResultMetric("");
       setResultNotes("");
-      toast.success("Resultado registrado!");
+      toast.success("Resultado registrado");
     },
     onError: () => toast.error("Erro ao registrar resultado"),
   });
@@ -322,7 +322,7 @@ export const TaskChecklist = ({
         )}
         aria-hidden
       >
-        {inProgress && <PlayCircle className="h-3 w-3 text-status-blue" />}
+        {inProgress && <PlayCircle className="h-3 w-3 text-muted-foreground" />}
       </span>
     </button>
   );
@@ -405,13 +405,13 @@ export const TaskChecklist = ({
   );
 
   const renderInProgress = (task: Task) => (
-    <div key={task.id} className="flex items-center gap-3 px-3 py-2.5 min-h-[56px] rounded-ds border border-status-blue/25 bg-status-blue/5">
+    <div key={task.id} className="flex items-center gap-3 px-3 py-2.5 min-h-[56px] rounded-ds border border-border bg-card">
       {renderCheckbox(task, true)}
       {editingId === task.id ? (
         renderInlineEdit(task)
       ) : (
         <>
-          {renderLabel(task, <p className="text-xs text-status-blue mt-0.5">Em andamento</p>)}
+          {renderLabel(task, <p className="text-xs text-muted-foreground mt-0.5">Em andamento</p>)}
           {role === "liberty" && (
             <Button variant="secondary" size="sm" onClick={() => setPlanTaskId(task.id)} title="Definir data e responsável" className="shrink-0">
               <CalendarIcon className="h-3.5 w-3.5" /> Planejar
@@ -425,12 +425,12 @@ export const TaskChecklist = ({
 
 
   const renderAwaiting = (task: Task) => (
-    <div key={task.id} className="flex flex-col sm:flex-row sm:items-center gap-3 px-3 py-2.5 min-h-[56px] rounded-ds border border-status-yellow/25 bg-status-yellow/5">
+    <div key={task.id} className="flex flex-col sm:flex-row sm:items-center gap-3 px-3 py-2.5 min-h-[56px] rounded-ds border border-border bg-card">
       <div className="flex items-center gap-3 flex-1 min-w-0">
         <Clock className="h-5 w-5 text-status-yellow shrink-0" aria-hidden />
         <div className="flex-1 min-w-0">
           <p className="text-sm text-foreground break-words leading-snug">{task.description}</p>
-          <p className="text-xs text-status-yellow mt-0.5">
+          <p className="text-xs text-muted-foreground mt-0.5">
             O aluno marcou como concluída. Aguardando validação do mentor
           </p>
         </div>
@@ -568,7 +568,7 @@ export const TaskChecklist = ({
       {!hideAdd && isManager && (
         <>
           {addingTask ? (
-            <div className="flex items-center gap-2 px-3 py-2 rounded-ds border border-primary/25 bg-card">
+            <div className="flex items-center gap-2 px-3 py-2 rounded-ds border border-border bg-card">
               <Circle className="h-4 w-4 text-muted-foreground/40 shrink-0" aria-hidden />
               <TextField
                 aria-label="Nova tarefa"
@@ -594,7 +594,7 @@ export const TaskChecklist = ({
               </IconButton>
             </div>
           ) : (
-            <Button variant="ghost" size="sm" onClick={() => setAddingTask(true)} className="text-primary">
+            <Button variant="ghost" size="sm" onClick={() => setAddingTask(true)}>
               <Plus className="h-3.5 w-3.5" /> Adicionar tarefa
             </Button>
           )}

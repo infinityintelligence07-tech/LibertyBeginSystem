@@ -44,7 +44,7 @@ export const InstallAndNotify = ({ compact = false }: { compact?: boolean }) => 
     if (deferred) {
       await deferred.prompt();
       const { outcome } = await deferred.userChoice;
-      if (outcome === "accepted") toast.success("App instalado!");
+      if (outcome === "accepted") toast.success("App instalado");
       setDeferred(null);
       return;
     }
@@ -123,7 +123,7 @@ export const InstallAndNotify = ({ compact = false }: { compact?: boolean }) => 
         )}
         <IconButton aria-label={notifLabel} onClick={handleNotifications}>
           {notifState === "granted" ? (
-            <Check className="h-4 w-4 text-primary" aria-hidden />
+            <Check className="h-4 w-4" aria-hidden />
           ) : notifState === "denied" ? (
             <BellOff className="h-4 w-4" aria-hidden />
           ) : (

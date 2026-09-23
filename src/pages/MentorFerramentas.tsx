@@ -1,12 +1,10 @@
 import { useState, useMemo } from "react";
-import { motion } from "framer-motion";
 import { AppLayout } from "@/components/AppLayout";
 import { useNavigate } from "react-router-dom";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/hooks/useAuth";
 import { toast } from "sonner";
-import { staggerContainer, fadeUpItem } from "@/lib/animations";
 import { shortName } from "@/lib/formatName";
 import { DIAGNOSTICO_BEGIN_PILLARS, overallScore } from "@/lib/diagnosticoBegin";
 import { Radar as RadarIcon, Plus, Search, ChevronRight, Loader2, Wrench, Trash2 } from "lucide-react";
@@ -184,8 +182,8 @@ const MentorFerramentasPage = ({ role = "mentor" }: { role?: "mentor" | "admin" 
   return (
     <AppLayout role={role}>
       <PageContainer>
-      <motion.div variants={staggerContainer} initial="hidden" animate="show" className="space-y-6 lg:space-y-8">
-        <motion.div variants={fadeUpItem}>
+      <div className="space-y-6 lg:space-y-8">
+        <div>
           <PageHeader
             title="Ferramentas"
             description={
@@ -201,10 +199,10 @@ const MentorFerramentasPage = ({ role = "mentor" }: { role?: "mentor" | "admin" 
               ) : undefined
             }
           />
-        </motion.div>
+        </div>
 
         {/* Catálogo de ferramentas */}
-        <motion.section variants={fadeUpItem} className="space-y-3">
+        <section className="space-y-3">
           <SectionHeader title="Catálogo" description="Toque para ver o modelo completo e os pilares avaliados." />
           <div className="grid gap-3">
             {templates.map((t: any) => {
@@ -219,17 +217,15 @@ const MentorFerramentasPage = ({ role = "mentor" }: { role?: "mentor" | "admin" 
                   className="text-left"
                 >
                   <div className="flex flex-col sm:flex-row sm:items-center gap-4 sm:gap-5">
-                    <div className="h-12 w-12 rounded-[var(--ds-radius-md)] bg-primary/10 text-primary flex items-center justify-center shrink-0">
-                      <RadarIcon className="h-6 w-6" aria-hidden />
-                    </div>
+                    <RadarIcon className="h-5 w-5 text-muted-foreground shrink-0" aria-hidden />
                     <div className="min-w-0 flex-1">
-                      <p className="text-xs font-medium text-primary mb-0.5">Ferramenta</p>
+                      <p className="text-xs font-medium text-muted-foreground mb-0.5">Ferramenta</p>
                       <p className="text-base font-semibold text-foreground leading-tight">{t.name}</p>
                       <p className="text-sm text-muted-foreground leading-snug mt-1 max-w-xl">{t.description}</p>
                     </div>
                     <div className="flex items-center gap-5 sm:gap-6 sm:border-l sm:border-border sm:pl-6 shrink-0">
                       <Stat size="sm" label="Aplicações" value={count} />
-                      <Stat size="sm" label="Concluídas" value={done} tone="success" />
+                      <Stat size="sm" label="Concluídas" value={done} />
                       <Stat size="sm" label="Pilares" value={DIAGNOSTICO_BEGIN_PILLARS.length} />
                       <ChevronRight className="h-5 w-5 text-muted-foreground hidden sm:block" aria-hidden />
                     </div>
@@ -238,10 +234,10 @@ const MentorFerramentasPage = ({ role = "mentor" }: { role?: "mentor" | "admin" 
               );
             })}
           </div>
-        </motion.section>
+        </section>
 
         {/* Aplicações agrupadas por aluno */}
-        <motion.section variants={fadeUpItem} className="space-y-4">
+        <section className="space-y-4">
           <SectionHeader
             title="Aplicações"
             description={
@@ -293,7 +289,7 @@ const MentorFerramentasPage = ({ role = "mentor" }: { role?: "mentor" | "admin" 
                     Limpar filtros
                   </Button>
                 ) : !isAdmin ? (
-                  <Button size="sm" onClick={openNew}><Plus /> Aplicar ferramenta</Button>
+                  <Button size="sm" variant="outline" onClick={openNew}><Plus /> Aplicar ferramenta</Button>
                 ) : undefined
               }
             />
@@ -353,8 +349,8 @@ const MentorFerramentasPage = ({ role = "mentor" }: { role?: "mentor" | "admin" 
               ))}
             </div>
           )}
-        </motion.section>
-      </motion.div>
+        </section>
+      </div>
       </PageContainer>
 
       <ConfirmDialog

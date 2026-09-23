@@ -1,5 +1,4 @@
 import { useState, useMemo } from "react";
-import { motion } from "framer-motion";
 import { AppLayout } from "@/components/AppLayout";
 import { Calendar, Clock, ChevronLeft, ChevronRight, ExternalLink, Target, User } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -16,7 +15,6 @@ import {
   SectionCard,
   StatusPill,
 } from "@/components/ds";
-import { staggerContainer, fadeUpItem } from "@/lib/animations";
 import { useAuth } from "@/hooks/useAuth";
 import { supabase } from "@/integrations/supabase/client";
 import { useQuery } from "@tanstack/react-query";
@@ -152,8 +150,8 @@ const MemberAgendaPage = () => {
   return (
     <AppLayout role="liberty">
       <PageContainer>
-      <motion.div variants={staggerContainer} initial="hidden" animate="show" className="space-y-6">
-        <motion.div variants={fadeUpItem}>
+      <div className="space-y-6">
+        <div>
           <PageHeader
             title="Minha agenda"
             description="Próximas sessões de mentoria."
@@ -165,10 +163,10 @@ const MemberAgendaPage = () => {
               </Button>
             }
           />
-        </motion.div>
+        </div>
 
         {/* Navegação por mês + resumo */}
-        <motion.div variants={fadeUpItem} className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+        <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
           <div className="flex items-center gap-1">
             <IconButton
               aria-label="Mês anterior"
@@ -201,10 +199,10 @@ const MemberAgendaPage = () => {
               </span>
             )}
           </div>
-        </motion.div>
+        </div>
 
         {/* Lista de sessões */}
-        <motion.div variants={fadeUpItem}>
+        <div>
           {isError ? (
             <ErrorState
               compact
@@ -242,7 +240,7 @@ const MemberAgendaPage = () => {
                     active={booking.id === nextBookingId}
                     last={i === scheduledBookings.length - 1}
                     onPress={() => setExpandedBooking(booking.id)}
-                    leading={<DateBlock date={booking.scheduled_date} tone={booking.id === nextBookingId ? "brand" : "default"} />}
+                    leading={<DateBlock date={booking.scheduled_date} />}
                     title={sessionName}
                     subtitle={
                       <span className="inline-flex items-center gap-x-2 gap-y-1 flex-wrap">
@@ -264,8 +262,8 @@ const MemberAgendaPage = () => {
               })}
             </SectionCard>
           )}
-        </motion.div>
-      </motion.div>
+        </div>
+      </div>
       </PageContainer>
 
       {/* Detalhes da sessão */}

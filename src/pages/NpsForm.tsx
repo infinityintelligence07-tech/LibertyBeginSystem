@@ -187,7 +187,7 @@ const NpsForm = () => {
       });
       if (error) throw error;
       queryClient.invalidateQueries({ queryKey: ["pending-nps"] });
-      toast.success("Obrigado! Sua avaliação foi registrada.");
+      toast.success("Avaliação registrada");
       navigate("/dashboard");
     } catch (e: any) {
       toast.error("Erro ao enviar: " + (e?.message || "desconhecido"));
@@ -209,8 +209,8 @@ const NpsForm = () => {
         {loading ? (
           <LoadingState variant="cards" rows={3} />
         ) : alreadySent ? (
-          <SectionCard tone="success" className="text-center space-y-2">
-            <CheckCircle2 className="h-8 w-8 text-status-green mx-auto" aria-hidden />
+          <SectionCard className="text-center space-y-2">
+            <CheckCircle2 className="h-6 w-6 text-muted-foreground mx-auto" aria-hidden />
             <p className="text-[17px] font-semibold text-foreground">Você já respondeu essa avaliação</p>
             <p className="text-sm text-muted-foreground">Obrigado pelo feedback.</p>
             <div className="pt-2">
@@ -281,7 +281,7 @@ const NpsForm = () => {
               />
             </SectionCard>
 
-            <div className="fixed inset-x-0 bottom-0 z-30 border-t border-border bg-background/95 backdrop-blur px-4 pt-3 pb-[calc(env(safe-area-inset-bottom)+12px)] sm:static sm:border-0 sm:bg-transparent sm:p-0 sm:backdrop-blur-none">
+            <div className="fixed inset-x-0 bottom-0 z-30 border-t border-border bg-background px-4 pt-3 pb-[calc(env(safe-area-inset-bottom)+12px)] sm:static sm:border-0 sm:bg-transparent sm:p-0">
               <div className="mx-auto flex max-w-2xl flex-col-reverse gap-2 sm:flex-row sm:justify-end">
                 <Button type="button" variant="outline" size="lg" onClick={() => navigate(-1)}>
                   Voltar

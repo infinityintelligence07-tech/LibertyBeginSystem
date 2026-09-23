@@ -16,8 +16,14 @@ interface StatusBadgeProps {
 }
 
 const sizeClasses = {
-  sm: "text-[11px] px-2 h-[22px] gap-1.5",
-  md: "text-xs px-2.5 h-6 gap-1.5",
+  sm: "text-xs gap-1.5",
+  md: "text-[13px] gap-2",
+};
+
+/** Deriva a cor do ponto a partir da classe `text-*` da configuração legada. */
+const dotFromClasses = (classes: string) => {
+  const text = classes.split(/\s+/).find((c) => c.startsWith("text-"));
+  return text ? text.replace(/^text-/, "bg-") : "bg-muted-foreground";
 };
 
 export const StatusBadge = ({
@@ -36,19 +42,19 @@ export const StatusBadge = ({
       ? taskStatusConfig[status as TaskStatus] ?? fallback
       : bookingStatusConfig[status] ?? fallback;
 
-  const dotClass = "dot" in cfg && typeof cfg.dot === "string" ? cfg.dot : "bg-current";
+  const dotClass = "dot" in cfg && typeof cfg.dot === "string" ? cfg.dot : dotFromClasses(cfg.classes);
 
+  // HIG: status = ponto colorido + texto neutro. Sem pílula preenchida, sem borda.
   return (
     <span
       title={title}
       className={cn(
-        "inline-flex items-center rounded-full border font-medium tracking-tight whitespace-nowrap",
+        "inline-flex items-center font-medium whitespace-nowrap text-foreground/90",
         sizeClasses[size],
-        cfg.classes,
         className,
       )}
     >
-      {withDot && <span className={cn("h-1.5 w-1.5 rounded-full shrink-0", dotClass)} aria-hidden />}
+      {withDot && <span className={cn("h-2 w-2 rounded-full shrink-0", dotClass)} aria-hidden />}
       {label ?? cfg.label}
     </span>
   );

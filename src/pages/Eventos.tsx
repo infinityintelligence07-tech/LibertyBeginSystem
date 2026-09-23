@@ -84,7 +84,7 @@ const EventosPage = () => {
       if (status === "not_going" && previous === "going") return { ...p, [eventId]: Math.max(0, current - 1) };
       return p;
     });
-    toast.success(status === "going" ? "Presença confirmada!" : "Tudo bem, ficamos para a próxima.");
+    toast.success(status === "going" ? "Presença confirmada" : "Resposta registrada");
   };
 
   return (
@@ -130,13 +130,13 @@ const EventosPage = () => {
                       <dl className="mt-3 space-y-2 text-sm text-muted-foreground">
                         <div className="flex items-center gap-2">
                           <dt className="sr-only">Data</dt>
-                          <CalendarDays className="h-4 w-4 text-primary shrink-0" aria-hidden />
+                          <CalendarDays className="h-4 w-4 text-muted-foreground shrink-0" aria-hidden />
                           <dd>{format(parseISO(event.event_date), "dd 'de' MMMM 'de' yyyy", { locale: ptBR })}</dd>
                         </div>
                         {event.event_time && (
                           <div className="flex items-center gap-2">
                             <dt className="sr-only">Horário</dt>
-                            <Clock className="h-4 w-4 text-primary shrink-0" aria-hidden />
+                            <Clock className="h-4 w-4 text-muted-foreground shrink-0" aria-hidden />
                             <dd>{event.event_time}</dd>
                           </div>
                         )}
@@ -144,9 +144,9 @@ const EventosPage = () => {
                           <div className="flex items-start gap-2">
                             <dt className="sr-only">Local</dt>
                             {event.is_online ? (
-                              <Video className="h-4 w-4 text-primary shrink-0 mt-0.5" aria-hidden />
+                              <Video className="h-4 w-4 text-muted-foreground shrink-0 mt-0.5" aria-hidden />
                             ) : (
-                              <MapPin className="h-4 w-4 text-primary shrink-0 mt-0.5" aria-hidden />
+                              <MapPin className="h-4 w-4 text-muted-foreground shrink-0 mt-0.5" aria-hidden />
                             )}
                             <dd className="min-w-0">
                               <span className="break-words">{event.location || "Online"}</span>
@@ -166,7 +166,7 @@ const EventosPage = () => {
                         {going > 0 && (
                           <div className="flex items-center gap-2">
                             <dt className="sr-only">Confirmados</dt>
-                            <Users className="h-4 w-4 text-primary shrink-0" aria-hidden />
+                            <Users className="h-4 w-4 text-muted-foreground shrink-0" aria-hidden />
                             <dd className="tabular-nums">
                               {going} confirmado{going !== 1 ? "s" : ""}
                               {event.capacity ? ` de ${event.capacity} vagas` : ""}
