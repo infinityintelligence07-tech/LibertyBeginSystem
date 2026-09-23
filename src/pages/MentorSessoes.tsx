@@ -4,7 +4,6 @@ import { Calendar, Clock, CheckCircle2, ChevronLeft, ChevronRight, FileText, Ale
 import { Button } from "@/components/ui/button";
 import {
   BottomSheet,
-  Callout,
   Chip,
   DateBlock,
   ErrorState,
@@ -42,7 +41,6 @@ import {
 import { EmptyState } from "@/components/EmptyState";
 import { useBookingsRealtime } from "@/hooks/useBookingsRealtime";
 import {
-  MENTOR_PENDING_CONFIRMATION_HINT,
   MentorPendingActions,
   NotRealizedDialog,
   invalidateMentorBookingQueries,
@@ -50,9 +48,9 @@ import {
   useMentorBookingActions,
 } from "@/components/mentor/MentorBookingActions";
 
-type TabKey = "upcoming" | "to_confirm" | "pending" | "completed" | "not_realized" | "cancelled" | "all";
+type TabKey = "upcoming" | "pending" | "completed" | "not_realized" | "cancelled" | "all";
 
-const TAB_KEYS: TabKey[] = ["upcoming", "to_confirm", "pending", "completed", "not_realized", "cancelled", "all"];
+const TAB_KEYS: TabKey[] = ["upcoming", "pending", "completed", "not_realized", "cancelled", "all"];
 
 const MentorSessoesPage = () => {
   const { profile } = useAuth();
@@ -188,38 +186,28 @@ const MentorSessoesPage = () => {
     [bookings, monthStartStr, monthEndStr],
   );
 
-  // Pendências do mentor (todos os meses): sessões que passaram e ainda não foram fechadas,
-  // ou já marcadas como realizadas mas sem relatório.
-  const pendingActions = useMemo(
-    () => sortByScheduledDateDesc(bookings.filter((b) => getMentorPendingAction(b, reportBookingIds.has(b.id)) !== null)),
-    [bookings, reportBookingIds],
-  );
-
   const filtered = useMemo(() => {
     if (activeTab === "upcoming") return monthBookings.filter(isFutureScheduledBooking);
-    if (activeTab === "to_confirm") return pendingActions;
     if (activeTab === "pending") return monthBookings.filter((b) => getEffectiveBookingStatus(b) === "pending_approval");
     if (activeTab === "completed") return sortByScheduledDateDesc(monthBookings.filter(isRealizedSessionBooking));
     if (activeTab === "not_realized") return monthBookings.filter((b) => getEffectiveBookingStatus(b) === "not_realized");
     if (activeTab === "cancelled") return monthBookings.filter((b) => getEffectiveBookingStatus(b) === "cancelled");
     return monthBookings;
-  }, [monthBookings, activeTab, pendingActions]);
+  }, [monthBookings, activeTab]);
 
   const completedCount = monthBookings.filter(isRealizedSessionBooking).length;
   const scheduledCount = monthBookings.filter(isFutureScheduledBooking).length;
-  const pendingConfirmationCount = monthBookings.filter((b) => getEffectiveBookingStatus(b) === "pending_confirmation").length;
   const pendingCount = monthBookings.filter((b) => getEffectiveBookingStatus(b) === "pending_approval").length;
   const notRealizedCount = monthBookings.filter((b) => getEffectiveBookingStatus(b) === "not_realized").length;
   const cancelledCount = monthBookings.filter((b) => getEffectiveBookingStatus(b) === "cancelled").length;
 
-  const tabs: { key: TabKey; label: string; count: number; highlight?: boolean }[] = [
-    { key: "to_confirm", label: "Pendências", count: pendingActions.length, highlight: pendingActions.length > 0 },
+  const tabs: { key: TabKey; label: string; count: number }[] = [
     { key: "upcoming", label: "Próximas", count: scheduledCount },
-    { key: "completed", label: bookingStatusConfig.completed.label + "s", count: completedCount },
+    { key: "pending", label: "Aguardando", count: pendingCount },
+    { key: "completed", label: "Realizadas", count: completedCount },
+    { key: "not_realized", label: "Não realizadas", count: notRealizedCount },
+    { key: "cancelled", label: "Canceladas", count: cancelledCount },
     { key: "all", label: "Todas", count: monthBookings.length },
-    { key: "pending", label: bookingStatusConfig.pending_approval.label, count: pendingCount },
-    { key: "not_realized", label: bookingStatusConfig.not_realized.label + "s", count: notRealizedCount },
-    { key: "cancelled", label: bookingStatusConfig.cancelled.label + "s", count: cancelledCount },
   ];
 
   const releaseAvailability = async (availabilityId?: string | null) => {
@@ -272,9 +260,7 @@ const MentorSessoesPage = () => {
     await invalidateMentorBookingQueries(queryClient);
   };
 
-  const emptyCopy = activeTab === "to_confirm"
-    ? { title: "Nenhuma pendência", description: "Todas as suas sessões passadas estão confirmadas e com relatório." }
-    : { title: "Nenhuma sessão neste período", description: "Tente avançar para o próximo mês ou trocar o filtro acima." };
+  const emptyCopy = { title: "Nenhuma sessão neste período", description: "Tente avançar para o próximo mês ou trocar o filtro acima." };
 
   const detailBooking = detailBookingId ? bookings.find((b) => b.id === detailBookingId) ?? null : null;
   const memberNameOf = (b: BookingRow) => shortName((b.liberty_id ? libertyMap[b.liberty_id] : b.guest_name) || "Membro");
@@ -322,22 +308,12 @@ const MentorSessoesPage = () => {
               active={activeTab === tab.key}
               onClick={() => handleTabChange(tab.key)}
               count={tab.count}
-              className={tab.highlight && activeTab !== tab.key ? "border-status-yellow/40 text-foreground" : undefined}
             >
               {tab.label}
             </Chip>
           ))}
         </div>
-
-        {activeTab === "to_confirm" && (
-          <div>
-            <Callout tone="warning" icon={AlertCircle} title="Pendências de todos os meses">
-              {MENTOR_PENDING_CONFIRMATION_HINT}
-            </Callout>
-          </div>
-        )}
-
-        {/* Lista de sessões */}
+{/* Lista de sessões */}
         <div>
           {isError ? (
             <ErrorState title="Não foi possível carregar suas sessões" onRetry={() => refetch()} />
@@ -400,7 +376,7 @@ const MentorSessoesPage = () => {
                           booking={booking}
                           hasReport={hasReport}
                           busy={busy}
-                          withHint={activeTab === "to_confirm"}
+                          withHint={false}
                           onFillReport={() => openReport(booking.id)}
                           onMarkCompleted={() => markCompleted(booking.id)}
                           onMarkNotRealized={() => setNotRealizedTarget(booking.id)}

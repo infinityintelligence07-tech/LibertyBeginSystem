@@ -2,7 +2,7 @@ import { useState, useMemo } from "react";
 import { sessionFee } from "@/lib/mentorFees";
 import { AppLayout } from "@/components/AppLayout";
 import { GoogleCalendarBanner } from "@/components/GoogleCalendarBanner";
-import { Calendar, ClipboardList, AlertTriangle, ExternalLink, ChevronLeft, ChevronRight, ChevronDown, FileText, DollarSign, TrendingUp, Wallet, HelpCircle, CalendarDays } from "lucide-react";
+import { Calendar, ClipboardList, AlertTriangle, ExternalLink, ChevronLeft, ChevronRight, ChevronDown, FileText, DollarSign, TrendingUp, Wallet, CalendarDays } from "lucide-react";
 import { MentorClosingSoon, type ClosingStudent } from "@/components/mentor/MentorClosingSoon";
 import { MentorActiveStudents, type ActiveStudent } from "@/components/mentor/MentorActiveStudents";
 import { Button } from "@/components/ui/button";
@@ -26,8 +26,6 @@ import {
 import { cn } from "@/lib/utils";
 import { MentorActionBanner } from "@/components/mentor/MentorActionBanner";
 import {
-  MENTOR_PENDING_CONFIRMATION_HINT,
-  MentorPendingActions,
   NotRealizedDialog,
   useMentorBookingActions,
 } from "@/components/mentor/MentorBookingActions";
@@ -47,8 +45,6 @@ import {
   getEffectiveBookingStatus,
   getMentorPendingAction,
   isFutureScheduledBooking,
-  isPendingConfirmationBooking,
-  isPendingConfirmationOverdue,
   isRealizedSessionBooking,
   isVisibleSessionBooking,
   sortByScheduledDateAsc,
@@ -68,7 +64,7 @@ const MentorDashboardPage = () => {
   const [expandedMember, setExpandedMember] = useState<string | null>(null);
   const [viewMode, setViewMode] = useState<ViewMode>("month");
   const [notRealizedTarget, setNotRealizedTarget] = useState<string | null>(null);
-  const { actingId, markCompleted, markNotRealized } = useMentorBookingActions();
+  const { actingId, markNotRealized } = useMentorBookingActions();
 
   const monthStart = startOfMonth(currentMonth);
   const nextMonthStart = addMonths(monthStart, 1);
@@ -217,17 +213,17 @@ const MentorDashboardPage = () => {
 
   const rate = mentorRate ?? defaultRate;
 
-  // ============== STATS DO PERÍODO ==============
-  // Realizada = mentor fechou como realizada (com ou sem relatório). "A confirmar" NÃO conta.
+  // ============== STATS DO PERÍODO (mesmo trio que o mentor já usava) ==============
   const realized = sortByScheduledDateDesc(bookingsAll.filter(isRealizedSessionBooking));
   const scheduled = sortByScheduledDateAsc(bookingsAll.filter(isFutureScheduledBooking));
-  const pendingConfirmation = bookingsAll.filter((b) => isPendingConfirmationBooking(b));
-  // Pendências do mentor (todos os períodos): confirmar sessão passada ou preencher relatório
-  const pendingActions = useMemo(
-    () => sortByScheduledDateDesc(allVisible.filter((b) => getMentorPendingAction(b, reportSet.has(b.id)) !== null)),
+  // Relatórios pendentes: sessão já realizada (ou passada) que ainda exige relatório
+  const pendingReports = useMemo(
+    () =>
+      sortByScheduledDateDesc(
+        allVisible.filter((b) => getMentorPendingAction(b, reportSet.has(b.id)) === "report"),
+      ),
     [allVisible, reportSet],
   );
-  const pendingReports = pendingActions.filter((b) => getMentorPendingAction(b, reportSet.has(b.id)) === "report");
 
   // Mapeamento do Negócio (3h) = dobro do valor da sessão; mesma regra do admin (flag, duração ou nome)
   const feeOf = (b: { session_id: string }) => {
@@ -237,16 +233,14 @@ const MentorDashboardPage = () => {
   const sumFees = (list: { session_id: string }[]) => list.reduce((acc, b) => acc + feeOf(b), 0);
 
   const earnedThisPeriod = sumFees(realized);
-  // Previsto = realizadas + agendadas + a confirmar (estas últimas só entram no repasse após a confirmação)
-  const projectedThisPeriod = sumFees([...realized, ...scheduled, ...pendingConfirmation]);
+  const projectedThisPeriod = sumFees([...realized, ...scheduled]);
   const allTimeRealized = useMemo(() => allVisible.filter(isRealizedSessionBooking), [allVisible]);
   const totalEarnedAllTime = sumFees(allTimeRealized);
 
   const stats = [
     { label: "Sessões realizadas", value: realized.length, icon: ClipboardList, tone: "default" as const, tab: "completed", tooltip: "Ver sessões realizadas" },
     { label: "Sessões agendadas", value: scheduled.length, icon: Calendar, tone: "default" as const, tab: "upcoming", tooltip: "Ver sessões agendadas" },
-    { label: "A confirmar", value: pendingConfirmation.length, icon: HelpCircle, tone: "pending" as const, tab: "to_confirm", tooltip: "Sessões passadas que você ainda não confirmou" },
-    { label: "Relatórios pendentes", value: pendingReports.length, icon: AlertTriangle, tone: "default" as const, tab: "to_confirm", tooltip: "Sessões realizadas sem relatório" },
+    { label: "Relatórios pendentes", value: pendingReports.length, icon: AlertTriangle, tone: "default" as const, tab: "completed", tooltip: "Sessões sem relatório" },
   ];
 
   const greeting = (() => {
@@ -367,8 +361,8 @@ const MentorDashboardPage = () => {
       <div className="space-y-6 lg:space-y-8">
         <GoogleCalendarBanner />
 
-        {/* Saudação */}
-        <div>
+        {/* Saudação + filtro de mês (ordem familiar ao time) */}
+        <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3">
           <PageHeader
             eyebrow="Mentoria"
             title={`${greeting}, ${firstName}`}
@@ -378,75 +372,89 @@ const MentorDashboardPage = () => {
                 : `Você já impactou ${companiesImpacted} ${companiesImpacted === 1 ? "empresa" : "empresas"}.`
             }
           />
+          {periodControls}
         </div>
 
         {bookingsError && (
-          <div>
-            <ErrorState title="Não foi possível carregar suas sessões" onRetry={() => refetchBookings()} />
+          <ErrorState title="Não foi possível carregar suas sessões" onRetry={() => refetchBookings()} />
+        )}
+
+        {bookingsLoading ? (
+          <LoadingState variant="stats" rows={3} />
+        ) : (
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+            {stats.map((s) => (
+              <SectionCard
+                key={s.label}
+                as="button"
+                interactive
+                padding="compact"
+                onClick={() => navigate(`/mentor/sessoes?tab=${s.tab}`)}
+                aria-label={s.tooltip}
+              >
+                <Stat label={s.label} value={s.value} icon={s.icon} />
+              </SectionCard>
+            ))}
           </div>
+        )}
+
+        {!bookingsLoading && (
+          <SectionCard className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+            <Stat
+              size="sm"
+              icon={DollarSign}
+              label={viewMode === "month" ? "Faturamento no mês" : "Faturamento geral"}
+              value={money(viewMode === "overview" ? totalEarnedAllTime : earnedThisPeriod)}
+            />
+            <Stat
+              size="sm"
+              icon={TrendingUp}
+              label={viewMode === "month" ? "Previsto no mês" : "Previsto total"}
+              value={money(projectedThisPeriod)}
+            />
+            <Stat size="sm" icon={Wallet} label="Acumulado no programa" value={money(totalEarnedAllTime)} />
+          </SectionCard>
         )}
 
         <MentorActionBanner />
 
-        {/* Pendências: sessões passadas a confirmar ou sem relatório (todos os períodos) */}
-        {!bookingsLoading && pendingActions.length > 0 && (
-          <section className="space-y-3" aria-labelledby="mentor-pendencias">
-            <SectionHeader
-              title={<span id="mentor-pendencias">Pendências</span>}
-              description="Sessões passadas que ainda precisam do seu fechamento"
-            />
-            <Callout
-              tone="warning"
-              icon={AlertTriangle}
-              title={`Você tem ${pendingActions.length === 1 ? "1 sessão" : `${pendingActions.length} sessões`} para fechar`}
-            >
-              <p>{MENTOR_PENDING_CONFIRMATION_HINT}</p>
-              <ul className="mt-3 divide-y divide-border rounded-[var(--ds-radius-md)] border border-border bg-card">
-                {pendingActions.map((b) => {
-                  const hasReport = reportSet.has(b.id);
-                  const effectiveStatus = getEffectiveBookingStatus(b, { hasReport });
-                  const overdue = isPendingConfirmationOverdue(b);
-                  const memberName = shortName((b.liberty_id ? libertyName(b.liberty_id) : b.guest_name) || "Membro");
-                  return (
-                    <li key={b.id} className={cn("px-4 py-3 space-y-3", overdue && "bg-destructive/5")}>
-                      <div className="flex items-center gap-3">
-                        <DateBlock date={b.scheduled_date} />
-                        <div className="min-w-0 flex-1">
-                          {b.liberty_id ? (
-                            <Button variant="link" size="sm" className="h-auto p-0 text-sm font-medium text-foreground" onClick={() => navigate(`/mentor/alunos/${b.liberty_id}`)}>
-                              {memberName}
-                            </Button>
-                          ) : (
-                            <p className="text-sm font-medium text-foreground truncate">{memberName}</p>
-                          )}
-                          <p className="text-xs text-muted-foreground truncate">
-                            {sessionName(b.session_id)} · {b.start_time?.slice(0, 5) ?? "--:--"}
-                          </p>
-                        </div>
-                        <StatusPill status={effectiveStatus} />
-                      </div>
-                      <MentorPendingActions
-                        booking={b}
-                        hasReport={hasReport}
-                        busy={actingId === b.id}
-                        withHint
-                        onFillReport={() => navigate(`/mentor/sessoes/${b.id}/relatorio`)}
-                        onMarkCompleted={() => markCompleted(b.id)}
-                        onMarkNotRealized={() => setNotRealizedTarget(b.id)}
-                      />
-                    </li>
-                  );
-                })}
-              </ul>
-            </Callout>
-          </section>
+        <MentorClosingSoon students={closingSoon} />
+
+        {!bookingsLoading && pendingReports.length > 0 && (
+          <Callout
+            tone="warning"
+            icon={AlertTriangle}
+            title={
+              pendingReports.length === 1
+                ? "Você tem 1 sessão sem relatório"
+                : `Você tem ${pendingReports.length} sessões sem relatório`
+            }
+          >
+            <ul className="space-y-2 mt-1">
+              {pendingReports.slice(0, 8).map((b) => {
+                const memberName = shortName((b.liberty_id ? libertyName(b.liberty_id) : b.guest_name) || "Membro");
+                return (
+                  <li key={b.id} className="flex items-center justify-between gap-3">
+                    <div className="min-w-0">
+                      <p className="text-sm text-foreground truncate">{memberName}</p>
+                      <p className="text-xs text-muted-foreground truncate">
+                        {sessionName(b.session_id)} · {format(parseISO(b.scheduled_date), "dd MMM", { locale: ptBR })}
+                      </p>
+                    </div>
+                    <Button size="sm" variant="outline" onClick={() => navigate(`/mentor/sessoes/${b.id}/relatorio`)}>
+                      <FileText /> Preencher
+                    </Button>
+                  </li>
+                );
+              })}
+            </ul>
+          </Callout>
         )}
 
-        {/* Próximas sessões: sempre da lista completa do mentor */}
         <section className="space-y-3">
           <SectionHeader
-            title="Próximas sessões"
-            description={upcomingAll.length > 0 ? `${upcomingAll.length} agendada${upcomingAll.length !== 1 ? "s" : ""} no total` : undefined}
+            title="Próximas sessões agendadas"
+            description={upcomingAll.length > 0 ? `${upcomingAll.length} no total` : undefined}
             actions={
               <Button variant="ghost" size="sm" onClick={() => navigate("/mentor/sessoes")}>
                 Ver agenda <ChevronRight />
@@ -477,7 +485,6 @@ const MentorDashboardPage = () => {
                     chevron={false}
                     trailing={
                       <>
-                        <StatusPill status="scheduled" className="hidden sm:inline-flex" />
                         {b.zoom_join_url && (
                           <Button asChild size="sm" variant="outline">
                             <a href={b.zoom_join_url} target="_blank" rel="noopener noreferrer">
@@ -485,11 +492,9 @@ const MentorDashboardPage = () => {
                             </a>
                           </Button>
                         )}
-                        {b.liberty_id && (
-                          <IconButton aria-label={`Ver aluno ${shortName(memberName)}`} size="sm" onClick={() => navigate(`/mentor/alunos/${b.liberty_id}`)}>
-                            <ChevronRight className="h-4 w-4" />
-                          </IconButton>
-                        )}
+                        <Button size="sm" variant="outline" onClick={() => navigate(`/mentor/sessoes/${b.id}/relatorio`)}>
+                          <FileText /> Relatório
+                        </Button>
                       </>
                     }
                   />
@@ -499,54 +504,6 @@ const MentorDashboardPage = () => {
           )}
         </section>
 
-        {/* Impacto: números do período + financeiro */}
-        <section className="space-y-3">
-          <SectionHeader title="Impacto" description={<span className="capitalize">{periodLabel}</span>} actions={periodControls} />
-          {bookingsLoading ? (
-            <LoadingState variant="stats" rows={4} />
-          ) : (
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-              {stats.map((s) => (
-                <SectionCard
-                  key={s.label}
-                  as="button"
-                  interactive
-                  padding="compact"
-                  onClick={() => navigate(`/mentor/sessoes?tab=${s.tab}`)}
-                  aria-label={s.tooltip}
-                >
-                  <Stat label={s.label} value={s.value} icon={s.icon} tone={s.tone} />
-                </SectionCard>
-              ))}
-            </div>
-          )}
-          {!bookingsLoading && (
-            <SectionCard className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-              <Stat
-                size="sm"
-                icon={DollarSign}
-                label={viewMode === "month" ? "Faturamento no mês" : "Faturamento geral"}
-                value={money(viewMode === "overview" ? totalEarnedAllTime : earnedThisPeriod)}
-              />
-              <Stat
-                size="sm"
-                icon={TrendingUp}
-                label={viewMode === "month" ? "Previsto no mês" : "Previsto total"}
-                value={money(projectedThisPeriod)}
-                hint={pendingConfirmation.length > 0 ? `inclui ${pendingConfirmation.length} a confirmar` : undefined}
-              />
-              <Stat size="sm" icon={Wallet} label="Acumulado no programa" value={money(totalEarnedAllTime)} />
-            </SectionCard>
-          )}
-        </section>
-
-        {/* Alunos ativos */}
-        {!bookingsLoading && <MentorActiveStudents students={activeStudents} />}
-
-        {/* Encerramentos próximos */}
-        <MentorClosingSoon students={closingSoon} />
-
-        {/* Sessões realizadas (com ou sem relatório) e suas tarefas */}
         {!bookingsLoading && realized.length > 0 && (
           <section className="space-y-3">
             <SectionHeader title="Sessões realizadas" description={<span className="capitalize">{periodLabel}</span>} />
@@ -615,7 +572,8 @@ const MentorDashboardPage = () => {
           </section>
         )}
 
-        {/* Results ranking */}
+        {!bookingsLoading && <MentorActiveStudents students={activeStudents} />}
+
         <MentorResultsSection mentorId={profile?.id} />
       </div>
       </PageContainer>
