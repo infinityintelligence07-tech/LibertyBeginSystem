@@ -13,6 +13,7 @@ import {
   isVisibleSessionBooking,
   parsePlatformDateTime,
   sortByScheduledDateDesc,
+  todayPlatformDate,
 } from "@/lib/bookingStatus";
 import { BEGIN_JOURNEY_SESSIONS, buildSessionProgress } from "@/lib/sessionProgress";
 import { Button } from "@/components/ui/button";
@@ -89,10 +90,18 @@ const MentorAlunosPage = () => {
     ...allBookings.map((b) => b.mentor_id).filter(Boolean),
   ]), [mentorMarkerIds, allBookings]);
 
-  // Membros ativos que não são mentores (membro inativado não aparece, como no Dashboard)
+  // Membros do programa que o mentor pode acompanhar (D5: todos).
+  // Fora da lista: perfis de mentor, inativos e programa já encerrado.
+  const today = todayPlatformDate();
   const memberProfiles = useMemo(
-    () => allLiberties.filter((p) => !excludedMentorProfileIds.has(p.id) && p.is_active !== false),
-    [allLiberties, excludedMentorProfileIds],
+    () =>
+      allLiberties.filter((p) => {
+        if (excludedMentorProfileIds.has(p.id)) return false;
+        if (p.is_active === false) return false;
+        if (p.program_end_date && p.program_end_date < today) return false;
+        return true;
+      }),
+    [allLiberties, excludedMentorProfileIds, today],
   );
 
   const allLibertyIds = useMemo(() => memberProfiles.map((p) => p.id), [memberProfiles]);
@@ -158,8 +167,8 @@ const MentorAlunosPage = () => {
         completedTasks,
         withResults,
         journeyCompleted: journey.completedCount,
-        // Jornada concluída: 12 sessões distintas da jornada realizadas (mesma contagem das outras telas)
-        isGraduated: journey.completedCount >= BEGIN_JOURNEY_SESSIONS,
+        // Concluído: 12 sessões distintas realizadas (mesma regra histórica da jornada)
+        isGraduated: journey.completedCount >= BEGIN_JOURNEY_SESSIONS || completed >= BEGIN_JOURNEY_SESSIONS,
       };
     }).sort((a, b) => a.name.localeCompare(b.name));
   }, [allLibertyIds, allBookings, allTasks, profileMap, sessions]);

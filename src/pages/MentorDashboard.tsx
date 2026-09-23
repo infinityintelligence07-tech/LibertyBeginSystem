@@ -53,6 +53,7 @@ import {
   isVisibleSessionBooking,
   sortByScheduledDateAsc,
   sortByScheduledDateDesc,
+  todayPlatformDate,
 } from "@/lib/bookingStatus";
 
 type ViewMode = "month" | "overview";
@@ -268,15 +269,21 @@ const MentorDashboardPage = () => {
     return s.size;
   }, [allTimeRealized]);
 
-  // Encerramentos próximos (30 dias) entre alunos ativos com pelo menos 1 sessão
+  // Encerramentos próximos (30 dias) entre alunos ativos com jornada em curso
   const closingSoon: ClosingStudent[] = useMemo(() => {
     const now = new Date();
+    const today = todayPlatformDate();
     const studentIds = new Set<string>();
-    allVisible.forEach((b) => b.liberty_id && studentIds.add(b.liberty_id));
+    allVisible.forEach((b) => {
+      if (!b.liberty_id) return;
+      if (!isRealizedSessionBooking(b) && !isFutureScheduledBooking(b)) return;
+      studentIds.add(b.liberty_id);
+    });
     return [...studentIds]
       .map((id) => {
         const p = libertyProfileMap[id];
         if (!p || p.is_active === false || !p.program_end_date) return null;
+        if (p.program_end_date < today) return null;
         const end = parseISO(p.program_end_date);
         const days = differenceInDays(end, now);
         if (days < 0 || days > 30) return null;
@@ -291,14 +298,17 @@ const MentorDashboardPage = () => {
       .sort((a, b) => a.daysLeft - b.daysLeft);
   }, [allVisible, libertyProfileMap]);
 
-  // Alunos ativos (derivado das sessões já carregadas): progresso na jornada e próxima sessão
+  // Alunos ativos deste mentor: jornada em curso, perfil ativo e programa vigente.
+  // Não lista quem já concluiu as 12 sessões nem quem só tem histórico antigo.
   const activeStudents: ActiveStudent[] = useMemo(() => {
     const byStudent = new Map<string, ActiveStudent>();
     const nextIso = new Map<string, string>();
+    const today = todayPlatformDate();
     allVisible.forEach((b) => {
       if (!b.liberty_id) return;
       const p = libertyProfileMap[b.liberty_id];
       if (!p || p.is_active === false) return;
+      if (p.program_end_date && p.program_end_date < today) return;
       const entry = byStudent.get(b.liberty_id) ?? {
         id: b.liberty_id,
         full_name: p.full_name || "Membro",
@@ -312,12 +322,18 @@ const MentorDashboardPage = () => {
         const current = nextIso.get(b.liberty_id);
         if (!current || b.scheduled_date < current) {
           nextIso.set(b.liberty_id, b.scheduled_date);
-          entry.nextDate = format(parseISO(b.scheduled_date), "dd MMM", { locale: ptBR });
+          entry.nextDate = format(parseISO(b.scheduled_date), "dd/MM");
         }
       }
       byStudent.set(b.liberty_id, entry);
     });
-    return [...byStudent.values()].sort((a, b) => a.full_name.localeCompare(b.full_name, "pt-BR"));
+    return [...byStudent.values()]
+      .filter((s) => s.completedCount < 12)
+      .sort((a, b) => {
+        if (a.nextDate && !b.nextDate) return -1;
+        if (!a.nextDate && b.nextDate) return 1;
+        return b.completedCount - a.completedCount;
+      });
   }, [allVisible, libertyProfileMap]);
 
   const firstName = (profile?.full_name || "").split(" ")[0] || "mentor";

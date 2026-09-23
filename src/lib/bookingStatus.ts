@@ -2,11 +2,11 @@
  * Status efetivo de um agendamento (regra única da plataforma).
  *
  * - `scheduled`            → agendada, ainda vai acontecer
- * - `pending_confirmation` → já passou do horário, mas o mentor ainda NÃO fechou (nem relatório, nem "realizada",
- *                            nem "não realizada"). NÃO conta como realizada, NÃO entra em repasse. Aparece como "A confirmar".
- * - `awaiting_report`      → mentor marcou como realizada (status bruto `completed`) mas ainda não salvou o relatório.
- *                            Conta como realizada.
+ * - `awaiting_report`      → já passou (ou mentor marcou `completed`) e ainda falta o relatório.
+ *                            Conta como realizada na jornada (comportamento operacional histórico).
  * - `completed`            → realizada (com relatório, ou sem exigir relatório: mapeamento/retroativa)
+ * - `pending_confirmation` → reservado; não é mais atribuído automaticamente a sessões passadas
+ *                            (voltamos à regra anterior para não zerar jornadas dos mentores).
  * - `cancelled` / `not_realized` / `pending_approval` → status bruto do banco
  */
 export type EffectiveBookingStatus =
@@ -113,10 +113,16 @@ export const getEffectiveBookingStatus = (
     return "completed";
   }
   if (rawStatus === "pending_approval") return "pending_approval";
-  // scheduled / rescheduled: se já passou e o mentor não fechou, fica "A confirmar".
-  // Nunca vira "realizada" sozinha: uma sessão cancelada fora da plataforma não pode contar (nem ser paga).
+  // scheduled / rescheduled no passado: comportamento operacional histórico da plataforma.
+  // Conta como realizada (ou "realizada · sem relatório") para não zerar jornadas e listas
+  // de alunos que os mentores já acompanhavam. O fechamento explícito ("A confirmar")
+  // continua disponível via ações do mentor quando o status bruto ainda é scheduled.
   if ((rawStatus === "scheduled" || rawStatus === "rescheduled") && isBookingPast(booking, now)) {
-    return "pending_confirmation";
+    if (!requiresReport(booking)) return "completed";
+    if (options.hasReport === false) return "awaiting_report";
+    if (options.hasReport === true) return "completed";
+    // Sem informação de relatório: trata como aguardando relatório (como antes da auditoria).
+    return "awaiting_report";
   }
 
   if (rawStatus === "rescheduled") return "scheduled";
@@ -133,8 +139,8 @@ export const isCompletedSessionBooking = (booking: BookingTiming) =>
 
 /**
  * Regra única de "sessão realizada" em toda a plataforma:
- * o mentor (ou admin) fechou a sessão como realizada (`completed`), com ou sem relatório salvo.
- * Nunca inclui canceladas, não realizadas nem sessões que apenas passaram do horário ("A confirmar").
+ * concluída OU já ocorrida aguardando relatório (ou mapeamento/retroativa sem relatório).
+ * Nunca inclui canceladas nem não realizadas.
  */
 export const isRealizedSessionBooking = (booking: BookingTiming) => {
   const s = getEffectiveBookingStatus(booking);
