@@ -1,70 +1,54 @@
-# Deploy na VPS (Hostinger Ubuntu) — libertybegin.iamcontrol.com.br
+# Deploy Liberty Begin
 
-SPA Vite estática. Backend = Supabase (não roda Node na VPS).
+SPA Vite estática. Backend = Supabase. Domínio: **https://begin.libertymentoria.com.br**
 
-## 1. Cloudflare DNS
+## Deploy automático (GitHub Actions)
 
-No domínio `iamcontrol.com.br`:
+A cada push em `main`, o workflow `.github/workflows/deploy.yml` conecta na VPS e roda `/opt/libertybegin/deploy-vps.sh`.
 
-| Tipo | Nome | Conteúdo | Proxy |
-|------|------|----------|-------|
-| A | libertybegin | IP da VPS | Proxied (laranja) |
+### Secrets do repositório
 
-SSL/TLS no Cloudflare: **Full** (recomendado com Certbot ou Origin Cert no Nginx). Evite Flexible.
+GitHub → **Settings** → **Secrets and variables** → **Actions** → **New repository secret**:
 
-## 2. Setup na VPS (uma vez)
+| Secret | Valor |
+|--------|--------|
+| `VPS_HOST` | `187.77.195.178` |
+| `VPS_USER` | `root` |
+| `VPS_PORT` | `22` |
+| `VPS_SSH_KEY` | chave privada completa (`-----BEGIN OPENSSH PRIVATE KEY-----` …) |
+
+A chave já foi gerada e a pública está em `/root/.ssh/authorized_keys` na VPS. Cópia local da privada: `%USERPROFILE%\.ssh\libertybegin_vps_deploy`.
+
+### Pré-requisitos na VPS (já feitos)
+
+- Clone em `/opt/libertybegin`
+- `.env` com `VITE_SUPABASE_*` em `/opt/libertybegin/.env` (não versionado)
+- Script `deploy-vps.sh` e Nginx em `/var/www/libertybegin`
+
+### Deploy manual na VPS
 
 ```bash
-# No seu PC — enviar scripts
-scp -P PORTA deploy/nginx-libertybegin.conf deploy/setup-vps.sh USUARIO@IP:/tmp/
-
-# Na VPS
-ssh -p PORTA USUARIO@IP
-cd /tmp
-sudo bash setup-vps.sh
+bash /opt/libertybegin/deploy-vps.sh
 ```
 
-## 3. Deploy do site (a cada release)
+---
 
-No PC, na pasta do projeto (com `.env` preenchido):
+## DNS / SSL (referência)
+
+Domínio principal: `begin.libertymentoria.com.br` (A → IP da VPS).  
+Legado: `libertybegin.iamcontrol.com.br`.
+
+## Deploy local (opcional)
 
 ```bash
-# Git Bash / WSL / Linux / macOS
-export VPS_HOST=SEU_IP
-export VPS_USER=SEU_USUARIO
+export VPS_HOST=187.77.195.178
+export VPS_USER=root
 export VPS_PORT=22
-# export VPS_KEY=~/.ssh/id_rsa   # se usar chave
+export VPS_KEY=~/.ssh/libertybegin_vps_deploy
 bash deploy/deploy.sh
 ```
 
-No PowerShell (Windows), use WSL ou Git Bash; o script é bash.
+## Supabase Auth
 
-## 4. HTTPS
-
-**Opção A — Certbot (DNS Cloudflare DNS-only ou Full após cert):**
-
-```bash
-sudo apt install -y certbot python3-certbot-nginx
-sudo certbot --nginx -d libertybegin.iamcontrol.com.br
-```
-
-**Opção B — Cloudflare Origin Certificate** (Full Strict):
-
-1. Cloudflare → SSL/TLS → Origin Server → Create Certificate  
-2. Salvar em `/etc/ssl/cloudflare/libertybegin.pem` e `.key`  
-3. Descomentar o bloco HTTPS em `nginx-libertybegin.conf` e `nginx -t && systemctl reload nginx`
-
-## 5. Supabase Auth (obrigatório)
-
-Dashboard → Authentication → URL Configuration:
-
-- **Site URL:** `https://libertybegin.iamcontrol.com.br`
-- **Redirect URLs:**  
-  `https://libertybegin.iamcontrol.com.br/**`  
-  `http://localhost:8080/**` (dev)
-
-Sem isso, login / reset de senha falham.
-
-## 6. Firewall Hostinger
-
-Liberar portas **80** e **443** (e a SSH que você já usa).
+- **Site URL:** `https://begin.libertymentoria.com.br`
+- **Redirect URLs:** `https://begin.libertymentoria.com.br/**`
