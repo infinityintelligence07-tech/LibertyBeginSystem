@@ -1,10 +1,30 @@
 import { useQuery } from "@tanstack/react-query";
+import type { PostgrestError } from "@supabase/supabase-js";
 import { supabase } from "@/integrations/supabase/client";
-import { demoMembers, demoMentors, demoBookings } from "@/lib/demoData";
+import type { Tables } from "@/integrations/supabase/types";
 import { sessionFeeMultiplier } from "@/lib/mentorFees";
-import { getEffectiveBookingStatus, isVisibleSessionBooking, isScheduledSessionBooking, isFutureScheduledBooking, isAwaitingReportSessionBooking, isRealizedSessionBooking } from "@/lib/bookingStatus";
+import {
+  getEffectiveBookingStatus,
+  isVisibleSessionBooking,
+  isFutureScheduledBooking,
+  isRealizedSessionBooking,
+  isPendingConfirmationBooking,
+  isPendingConfirmationOverdue,
+  isBookingPast,
+} from "@/lib/bookingStatus";
 
-const isDemoOn = () => typeof window !== "undefined" && localStorage.getItem("lb_demo_data") === "1";
+/** Chaves react-query que precisam ser invalidadas após qualquer mutação em `bookings`. */
+export const ADMIN_BOOKING_QUERY_KEYS = [
+  "admin-members",
+  "admin-mentors",
+  "admin-bookings-all",
+  "agenda-bookings",
+  "agenda-pending-confirmation",
+  "agenda-pending-approvals",
+  "agenda-not-realized",
+] as const;
+
+const PAGE_SIZE = 1000;
 
 const chunkArray = <T,>(items: T[], size: number) => {
   const chunks: T[][] = [];
@@ -14,14 +34,87 @@ const chunkArray = <T,>(items: T[], size: number) => {
   return chunks;
 };
 
+type PageResult<T> = { data: T[] | null; error: PostgrestError | null };
+
+/**
+ * O PostgREST devolve no máximo 1000 linhas por requisição. Para tabelas que já passaram
+ * desse volume (bookings), buscamos em páginas com `.range()` até esgotar.
+ */
+const fetchAllRows = async <T,>(
+  buildPage: (from: number, to: number) => PromiseLike<PageResult<T>>,
+): Promise<T[]> => {
+  const rows: T[] = [];
+  for (let from = 0; ; from += PAGE_SIZE) {
+    const { data, error } = await buildPage(from, from + PAGE_SIZE - 1);
+    if (error) throw error;
+    const batch = data || [];
+    rows.push(...batch);
+    if (batch.length < PAGE_SIZE) break;
+  }
+  return rows;
+};
+
+type BookingRow = Tables<"bookings">;
+type SessionJoin = Pick<Tables<"sessions">, "name" | "order" | "is_kickoff" | "duration_minutes"> | null;
+type NameJoin = Pick<Tables<"profiles">, "full_name"> | null;
+
+/** Linha de booking com os joins necessários para a regra de status efetivo e para o financeiro. */
+export type AdminBookingRow = BookingRow & {
+  sessions: SessionJoin;
+  mentor: NameJoin;
+  liberty: NameJoin;
+};
+
+const ADMIN_BOOKING_SELECT =
+  '*, sessions(name, "order", is_kickoff, duration_minutes), mentor:profiles!bookings_mentor_id_fkey(full_name), liberty:profiles!bookings_liberty_id_fkey(full_name)';
+
+export const fetchAdminBookings = () =>
+  fetchAllRows<AdminBookingRow>((from, to) =>
+    supabase
+      .from("bookings")
+      .select(ADMIN_BOOKING_SELECT)
+      .order("scheduled_date", { ascending: true })
+      .order("id", { ascending: true })
+      .range(from, to) as unknown as PromiseLike<PageResult<AdminBookingRow>>,
+  );
+
+/** IDs de bookings que já têm relatório salvo (define `awaiting_report` vs `completed`). */
+export const fetchReportedBookingIds = async () => {
+  const rows = await fetchAllRows<{ booking_id: string }>((from, to) =>
+    supabase.from("booking_reports").select("booking_id").order("booking_id").range(from, to),
+  );
+  return new Set(rows.map((r) => r.booking_id));
+};
+
+const monthKeyOf = (b: { scheduled_date?: string | null }) => (b.scheduled_date || "").substring(0, 7);
+
+const countByMonth = <T extends { scheduled_date?: string | null }>(list: T[]) => {
+  const acc: Record<string, number> = {};
+  list.forEach((b) => {
+    const key = monthKeyOf(b);
+    if (!key) return;
+    acc[key] = (acc[key] || 0) + 1;
+  });
+  return acc;
+};
+
 export interface BookingDetail {
   session_name: string;
   session_id: string;
   booking_id: string;
   date: string;
+  start_time?: string | null;
+  end_time?: string | null;
   mentor_id: string | null;
   mentor_name: string;
+  /** Status EFETIVO (regra única): pode ser `awaiting_report` ou `pending_confirmation`, que não existem no banco. */
   status: string;
+  /** Status BRUTO gravado no banco (enum `booking_status`). Use este ao editar/persistir. */
+  raw_status?: string;
+  is_retroactive?: boolean;
+  report_required?: boolean;
+  is_kickoff?: boolean;
+  has_report?: boolean;
 }
 
 export interface MemberWithProgress {
@@ -34,22 +127,47 @@ export interface MemberWithProgress {
   member_tier: "begin" | "liberty";
   program_start_date: string | null;
   program_end_date: string | null;
+  /** Sessões de jornada realizadas (`completed` + `awaiting_report`). Não inclui "A confirmar". */
   total_completed: number;
+  /** Sessões de jornada agendadas para o futuro. */
   total_scheduled: number;
+  /** Sessões de jornada que já passaram e o mentor ainda não confirmou ("A confirmar"). Não contam como realizadas. */
+  total_pending_confirmation?: number;
+  /** Subconjunto de `total_pending_confirmation` há 7+ dias sem confirmação. */
+  total_pending_confirmation_overdue?: number;
   /** Sessões futuras já confirmadas pelo mentor. */
   total_future_confirmed: number;
   /** Sessões futuras aguardando confirmação do mentor. */
   total_pending_approval: number;
-  /** Tem próxima sessão (confirmada OU aguardando aprovação). */
+  /** Tem próxima sessão (confirmada OU aguardando aprovação), sempre no futuro. */
   has_next_session: boolean;
   completed_sessions: BookingDetail[];
   scheduled_sessions: BookingDetail[];
+  pending_confirmation_sessions?: BookingDetail[];
   monthly_counts: Record<string, number>; // "2026-01" -> 2
   monthly_scheduled_counts: Record<string, number>;
+  monthly_pending_confirmation_counts?: Record<string, number>;
   admin_note: string | null;
   is_active: boolean;
   pending_tasks_count: number;
   last_session_date: string | null;
+}
+
+/** Sessão de um mentor já com status efetivo e valor calculado (fonte única para linha, detalhe e PDF do Financeiro). */
+export interface MentorSessionDetail {
+  booking_id: string;
+  session_id: string;
+  session_name: string;
+  member_name: string;
+  liberty_id: string | null;
+  date: string;
+  start_time: string | null;
+  end_time: string | null;
+  /** Status efetivo: scheduled | pending_confirmation | awaiting_report | completed | pending_approval */
+  status: string;
+  is_kickoff: boolean;
+  is_retroactive: boolean;
+  fee_multiplier: number;
 }
 
 export interface MentorWithStats {
@@ -59,31 +177,40 @@ export interface MentorWithStats {
   email: string | null;
   phone: string | null;
   avatar_url: string | null;
+  /** Realizadas = `completed` + `awaiting_report`. Base do "A pagar". */
   total_completed: number;
+  /** Agendadas para o futuro. */
   total_scheduled: number;
+  /** Subconjunto das realizadas: status bruto `completed` sem relatório salvo. */
   total_awaiting_report: number;
+  /** Passaram do horário sem fechamento do mentor. NÃO entram no repasse até serem confirmadas. */
+  total_pending_confirmation: number;
   assigned_sessions: string[];
   members_served: number;
   monthly_completed: Record<string, number>;
   monthly_scheduled: Record<string, number>;
   monthly_awaiting_report: Record<string, number>;
-  /** Sessões de Mapeamento do Negócio (3h) — valor dobrado. */
+  monthly_pending_confirmation: Record<string, number>;
+  /** Sessões de Mapeamento do Negócio (3h) · valor dobrado. */
   total_kickoff_completed: number;
   total_kickoff_scheduled: number;
   total_kickoff_awaiting_report: number;
+  total_kickoff_pending_confirmation: number;
   monthly_kickoff_completed: Record<string, number>;
   monthly_kickoff_scheduled: Record<string, number>;
   monthly_kickoff_awaiting_report: Record<string, number>;
+  monthly_kickoff_pending_confirmation: Record<string, number>;
+  /** Todas as sessões remuneráveis do mentor (visíveis, fora Onboarding), já com status efetivo. */
+  sessions: MentorSessionDetail[];
   session_rate: number | null;
   is_active: boolean;
 }
 
 export const useMembers = () => {
-  const demo = isDemoOn();
   return useQuery({
-    queryKey: ["admin-members", demo],
+    queryKey: ["admin-members"],
     queryFn: async () => {
-      // Members = all profiles tagged as Begin or Liberty (mentors/admins excluded).
+      // Membros = perfis marcados como Begin ou Liberty (mentores/admins são excluídos abaixo).
       const { data: profilesRaw, error: pErr } = await supabase
         .from("profiles")
         .select("*")
@@ -91,183 +218,152 @@ export const useMembers = () => {
         .order("full_name");
 
       if (pErr) throw pErr;
+      const profileRows = profilesRaw || [];
 
-      // Exclude anyone who is a mentor / admin / super_admin — they are NOT members.
-      // Some privileged-role rows may be hidden by policies depending on who is viewing,
-      // so also exclude profiles that have mentor assignments, availability, or mentor bookings.
-      const candidateUserIds = (profilesRaw || [])
-        .map((p: any) => p.user_id)
-        .filter(Boolean);
-      const candidateProfileIds = (profilesRaw || []).map((p: any) => p.id).filter(Boolean);
-      let excludeUserIds = new Set<string>();
-      let excludeProfileIds = new Set<string>();
+      const [bookings, reportedIds] = await Promise.all([fetchAdminBookings(), fetchReportedBookingIds()]);
+
+      // Exclui quem é mentor/admin/super_admin. Como algumas linhas de role podem estar ocultas por RLS,
+      // também exclui perfis que aparecem como mentor em sessões atribuídas, disponibilidade ou bookings.
+      const candidateUserIds = profileRows.map((p) => p.user_id).filter((id): id is string => !!id);
+      const candidateProfileIds = profileRows.map((p) => p.id);
+      const excludeUserIds = new Set<string>();
+      const excludeProfileIds = new Set<string>();
+
       if (candidateUserIds.length > 0) {
-        const { data: staffRoles } = await supabase
-          .from("user_roles")
-          .select("user_id, role")
-          .in("user_id", candidateUserIds)
-          .in("role", ["mentor", "admin", "super_admin"]);
-        excludeUserIds = new Set((staffRoles || []).map((r: any) => r.user_id));
+        const roleChunks = await Promise.all(
+          chunkArray(candidateUserIds, 100).map((ids) =>
+            supabase
+              .from("user_roles")
+              .select("user_id, role")
+              .in("user_id", ids)
+              .in("role", ["mentor", "admin", "super_admin"]),
+          ),
+        );
+        roleChunks.forEach(({ data, error }) => {
+          if (error) throw error;
+          (data || []).forEach((r) => excludeUserIds.add(r.user_id));
+        });
       }
       if (candidateProfileIds.length > 0) {
-        const [mentorSessionsRes, availabilityRes, mentorBookingsRes] = await Promise.all([
-          supabase.from("mentor_sessions").select("mentor_id").in("mentor_id", candidateProfileIds),
-          supabase.from("mentor_availability").select("mentor_id").in("mentor_id", candidateProfileIds),
-          supabase.from("bookings").select("mentor_id").in("mentor_id", candidateProfileIds),
+        const candidateSet = new Set(candidateProfileIds);
+        bookings.forEach((b) => {
+          if (b.mentor_id && candidateSet.has(b.mentor_id)) excludeProfileIds.add(b.mentor_id);
+        });
+        const [mentorSessionChunks, availabilityChunks] = await Promise.all([
+          Promise.all(
+            chunkArray(candidateProfileIds, 100).map((ids) =>
+              supabase.from("mentor_sessions").select("mentor_id").in("mentor_id", ids),
+            ),
+          ),
+          Promise.all(
+            chunkArray(candidateProfileIds, 100).map((ids) =>
+              supabase.from("mentor_availability").select("mentor_id").in("mentor_id", ids),
+            ),
+          ),
         ]);
-        excludeProfileIds = new Set([
-          ...((mentorSessionsRes.data || []).map((r: any) => r.mentor_id)),
-          ...((availabilityRes.data || []).map((r: any) => r.mentor_id)),
-          ...((mentorBookingsRes.data || []).map((r: any) => r.mentor_id)),
-        ].filter(Boolean));
+        [...mentorSessionChunks, ...availabilityChunks].forEach(({ data, error }) => {
+          if (error) throw error;
+          (data || []).forEach((r) => {
+            if (r.mentor_id) excludeProfileIds.add(r.mentor_id);
+          });
+        });
       }
-      const profiles = (profilesRaw || []).filter(
-        (p: any) => (!p.user_id || !excludeUserIds.has(p.user_id)) && !excludeProfileIds.has(p.id),
+      const profiles = profileRows.filter(
+        (p) => (!p.user_id || !excludeUserIds.has(p.user_id)) && !excludeProfileIds.has(p.id),
       );
 
-      // Get all bookings with session and mentor info
-      const { data: bookings, error: bErr } = await supabase
-        .from("bookings")
-        .select("*, sessions(name, \"order\"), mentor:profiles!bookings_mentor_id_fkey(full_name)");
-
-      if (bErr) throw bErr;
-
-      // Pending tasks per member (status not 'completed')
-      const memberProfileIds = (profiles || []).map((p: any) => p.id);
+      // Tarefas pendentes por membro
+      const memberProfileIds = new Set(profiles.map((p) => p.id));
       const pendingTasksByMember: Record<string, number> = {};
-      if (memberProfileIds.length > 0) {
-        const bookingToMember = new Map(
-          (bookings || [])
-            .filter((b: any) => b.liberty_id && memberProfileIds.includes(b.liberty_id))
-            .map((b: any) => [b.id, b.liberty_id])
-        );
+      if (memberProfileIds.size > 0) {
+        const bookingToMember = new Map<string, string>();
+        bookings.forEach((b) => {
+          if (b.liberty_id && memberProfileIds.has(b.liberty_id)) bookingToMember.set(b.id, b.liberty_id);
+        });
         const bookingIds = Array.from(bookingToMember.keys());
-        const taskRows: any[] = [];
-        for (const ids of chunkArray(bookingIds, 40)) {
-          const { data, error } = await (supabase as any)
-            .from("session_tasks")
-            .select("booking_id, is_completed")
-            .in("booking_id", ids);
+        const taskChunks = await Promise.all(
+          chunkArray(bookingIds, 100).map((ids) =>
+            supabase.from("session_tasks").select("booking_id, is_completed").eq("is_completed", false).in("booking_id", ids),
+          ),
+        );
+        taskChunks.forEach(({ data, error }) => {
           if (error) throw error;
-          taskRows.push(...(data || []));
-        }
-        (taskRows || []).forEach((t: any) => {
-          const libertyId = bookingToMember.get(t.booking_id);
-          if (libertyId && !t.is_completed) {
-            pendingTasksByMember[libertyId] = (pendingTasksByMember[libertyId] || 0) + 1;
-          }
+          (data || []).forEach((t) => {
+            const libertyId = bookingToMember.get(t.booking_id);
+            if (libertyId) pendingTasksByMember[libertyId] = (pendingTasksByMember[libertyId] || 0) + 1;
+          });
         });
       }
 
-      // Onboarding sessions (order=0) are tracked separately and don't count toward the 12.
-      const isJourneyBooking = (b: any) => ((b.sessions?.order ?? 1) > 0);
+      // Onboarding (order = 0) é acompanhado à parte e não conta para as 12.
+      const isJourneyBooking = (b: AdminBookingRow) => (b.sessions?.order ?? 1) > 0;
+      const effectiveStatus = (b: AdminBookingRow) =>
+        getEffectiveBookingStatus(b, { hasReport: reportedIds.has(b.id) });
 
-      const members: MemberWithProgress[] = (profiles || []).map((p) => {
-        const memberBookings = (bookings || []).filter((b) => b.liberty_id === p.id && isVisibleSessionBooking(b));
-        // Regra única: "realizada" = concluída ou já ocorrida aguardando relatório.
-        const completed = memberBookings.filter((b) => isRealizedSessionBooking(b) && isJourneyBooking(b));
-        // "Agendada" = somente futuras, para não contar a mesma sessão duas vezes.
-        const scheduled = memberBookings.filter((b) => isFutureScheduledBooking(b) && isJourneyBooking(b));
-        // "Sem sessão" = sem nenhuma sessão futura confirmada nem aguardando confirmação do mentor.
+      const mapBooking = (b: AdminBookingRow): BookingDetail => ({
+        session_name: b.sessions?.name || "Sem dados",
+        session_id: b.session_id,
+        booking_id: b.id,
+        date: b.scheduled_date,
+        start_time: b.start_time,
+        end_time: b.end_time,
+        mentor_id: b.mentor_id || null,
+        mentor_name: b.mentor?.full_name || "Sem dados",
+        status: effectiveStatus(b),
+        raw_status: b.status,
+        is_retroactive: b.is_retroactive === true,
+        report_required: b.report_required !== false,
+        is_kickoff: b.sessions?.is_kickoff === true,
+        has_report: reportedIds.has(b.id),
+      });
+
+      const members: MemberWithProgress[] = profiles.map((p) => {
+        const memberBookings = bookings.filter((b) => b.liberty_id === p.id && isVisibleSessionBooking(b));
+        const journeyBookings = memberBookings.filter(isJourneyBooking);
+        // Regra única: "realizada" = mentor/admin fechou como realizada (com ou sem relatório).
+        const completed = journeyBookings.filter((b) => isRealizedSessionBooking(b));
+        // Passou do horário e ninguém fechou: ocupa vaga, mas NÃO conta como realizada.
+        const pendingConfirmation = journeyBookings.filter((b) => isPendingConfirmationBooking(b));
+        const pendingConfirmationOverdue = pendingConfirmation.filter((b) => isPendingConfirmationOverdue(b));
+        // "Agendada" = somente futuras.
+        const scheduled = journeyBookings.filter((b) => isFutureScheduledBooking(b));
+        // "Próxima sessão" considera qualquer sessão (inclusive Onboarding), sempre no futuro.
         const futureConfirmed = memberBookings.filter((b) => isFutureScheduledBooking(b));
         const pendingApproval = memberBookings.filter(
-          (b) => getEffectiveBookingStatus(b) === "pending_approval",
+          (b) => getEffectiveBookingStatus(b) === "pending_approval" && !isBookingPast(b),
         );
 
-        const monthly_counts: Record<string, number> = {};
-        completed.forEach((b) => {
-          const key = b.scheduled_date.substring(0, 7);
-          monthly_counts[key] = (monthly_counts[key] || 0) + 1;
-        });
-
-        const monthly_scheduled_counts: Record<string, number> = {};
-        scheduled.forEach((b) => {
-          const key = b.scheduled_date.substring(0, 7);
-          monthly_scheduled_counts[key] = (monthly_scheduled_counts[key] || 0) + 1;
-        });
-
-        const mapBooking = (b: any): BookingDetail => ({
-          session_name: b.sessions?.name || "Sem dados",
-          session_id: b.session_id,
-          booking_id: b.id,
-          date: b.scheduled_date,
-          mentor_id: b.mentor_id || null,
-          mentor_name: b.mentor?.full_name || "Sem dados",
-          status: getEffectiveBookingStatus(b),
-        });
-
-        const lastSession = completed
-          .map((b) => b.scheduled_date)
-          .sort()
-          .pop() || null;
+        const lastSession = completed.map((b) => b.scheduled_date).sort().pop() || null;
 
         return {
           id: p.id,
           full_name: p.full_name,
           email: p.email,
           phone: p.phone,
-          avatar_url: (p as any).avatar_url ?? null,
+          avatar_url: p.avatar_url ?? null,
           company_name: p.company_name,
-          member_tier: ((p as any).member_tier === "liberty" ? "liberty" : "begin"),
+          member_tier: p.member_tier === "liberty" ? "liberty" : "begin",
           program_start_date: p.program_start_date,
           program_end_date: p.program_end_date,
           total_completed: completed.length,
           total_scheduled: scheduled.length,
+          total_pending_confirmation: pendingConfirmation.length,
+          total_pending_confirmation_overdue: pendingConfirmationOverdue.length,
           total_future_confirmed: futureConfirmed.length,
           total_pending_approval: pendingApproval.length,
           has_next_session: futureConfirmed.length + pendingApproval.length > 0,
           completed_sessions: completed.map(mapBooking),
           scheduled_sessions: scheduled.map(mapBooking),
-          monthly_counts,
-          monthly_scheduled_counts,
-          admin_note: (p as any).admin_note ?? null,
-          is_active: (p as any).is_active !== false,
+          pending_confirmation_sessions: pendingConfirmation.map(mapBooking),
+          monthly_counts: countByMonth(completed),
+          monthly_scheduled_counts: countByMonth(scheduled),
+          monthly_pending_confirmation_counts: countByMonth(pendingConfirmation),
+          admin_note: p.admin_note ?? null,
+          is_active: p.is_active !== false,
           pending_tasks_count: pendingTasksByMember[p.id] || 0,
           last_session_date: lastSession,
         };
       });
-
-      if (demo) {
-        const fakeMembers: MemberWithProgress[] = demoMembers.map((dm) => {
-          const myBookings = demoBookings.filter((b) => b.liberty_id === dm.id && isVisibleSessionBooking(b));
-          const completed = myBookings.filter((b) => getEffectiveBookingStatus(b) === "completed");
-          const scheduled = myBookings.filter((b) => isScheduledSessionBooking(b));
-          const map = (b: any): BookingDetail => ({
-            session_name: b.session?.name || "Sem dados",
-            session_id: b.session_id,
-            booking_id: b.id,
-            date: b.scheduled_date,
-            mentor_id: b.mentor_id || null,
-            mentor_name: b.mentor?.full_name || "Sem dados",
-            status: getEffectiveBookingStatus(b),
-          });
-          return {
-            id: dm.id,
-            full_name: `${dm.full_name} (demo)`,
-            email: dm.email,
-            phone: dm.phone,
-            avatar_url: null,
-            company_name: dm.company_name,
-            member_tier: dm.member_tier,
-            program_start_date: dm.program_start_date,
-            program_end_date: null,
-            total_completed: completed.length,
-            total_scheduled: scheduled.length,
-            total_future_confirmed: scheduled.filter((b: any) => isFutureScheduledBooking(b)).length,
-            total_pending_approval: 0,
-            has_next_session: scheduled.length > 0,
-            completed_sessions: completed.map(map),
-            scheduled_sessions: scheduled.map(map),
-            monthly_counts: {},
-            monthly_scheduled_counts: {},
-            admin_note: null,
-            is_active: true,
-            pending_tasks_count: 0,
-            last_session_date: null,
-          };
-        });
-        return [...members, ...fakeMembers];
-      }
 
       return members;
     },
@@ -275,99 +371,85 @@ export const useMembers = () => {
 };
 
 export const useMentors = () => {
-  const demo = isDemoOn();
   return useQuery({
-    queryKey: ["admin-mentors", demo],
+    queryKey: ["admin-mentors"],
     queryFn: async () => {
-      // Get mentor profiles by role so mentor e-mails can be changed freely
+      // Perfis de mentor pela role (o e-mail do mentor pode mudar livremente)
       const { data: roleRows, error: rErr } = await supabase
         .from("user_roles")
         .select("user_id")
         .eq("role", "mentor");
       if (rErr) throw rErr;
-      const mentorUserIds = (roleRows || []).map((r: any) => r.user_id);
+      const mentorUserIds = (roleRows || []).map((r) => r.user_id);
 
       const { data: mentorProfiles, error: mpErr } = await supabase
         .from("profiles")
         .select("*")
         .in("user_id", mentorUserIds.length > 0 ? mentorUserIds : ["00000000-0000-0000-0000-000000000000"])
         .order("full_name");
-
       if (mpErr) throw mpErr;
 
-      // Get mentor_sessions assignments
       const { data: mentorSessions, error: msErr } = await supabase
         .from("mentor_sessions")
         .select("*, sessions(name)");
-
       if (msErr) throw msErr;
 
-      // Sessões de 3h (Mapeamento do Negócio) — repasse dobrado ao mentor
-      const { data: allSessions } = await supabase
-        .from("sessions")
-        .select("id, name, is_kickoff, duration_minutes");
-      const kickoffSessionIds = new Set(
-        (allSessions || [])
-          .filter((s: any) => sessionFeeMultiplier({ session_name: s.name, is_kickoff: s.is_kickoff, duration_minutes: s.duration_minutes }) > 1)
-          .map((s: any) => s.id),
-      );
-      // Sessões não remuneradas (Onboarding) — fora dos controles financeiros
-      const unpaidSessionIds = new Set(
-        (allSessions || [])
-          .filter((s: any) => sessionFeeMultiplier({ session_name: s.name, is_kickoff: s.is_kickoff, duration_minutes: s.duration_minutes }) === 0)
-          .map((s: any) => s.id),
-      );
+      const [bookings, reportedIds] = await Promise.all([fetchAdminBookings(), fetchReportedBookingIds()]);
 
-      // Get all bookings
-      const { data: bookings, error: bErr } = await supabase
-        .from("bookings")
-        .select("*");
-
-      if (bErr) throw bErr;
+      // Multiplicador por sessão a partir do catálogo que veio no join (Mapeamento = 2x, Onboarding = 0).
+      const feeMultiplierOf = (b: AdminBookingRow) =>
+        sessionFeeMultiplier({
+          session_name: b.sessions?.name,
+          is_kickoff: b.sessions?.is_kickoff,
+          duration_minutes: b.sessions?.duration_minutes,
+        });
+      const effectiveStatus = (b: AdminBookingRow) =>
+        getEffectiveBookingStatus(b, { hasReport: reportedIds.has(b.id) });
 
       const mentors: MentorWithStats[] = (mentorProfiles || []).map((m) => {
-        const mBookings = (bookings || []).filter(
-          (b) => b.mentor_id === m.id && isVisibleSessionBooking(b) && !unpaidSessionIds.has(b.session_id),
+        // Sessões não remuneradas (Onboarding) ficam fora de todos os controles financeiros.
+        const mBookings = bookings.filter(
+          (b) => b.mentor_id === m.id && isVisibleSessionBooking(b) && feeMultiplierOf(b) > 0,
         );
 
-        const completed = mBookings.filter((b) => getEffectiveBookingStatus(b) === "completed");
-        const scheduled = mBookings.filter((b) => isFutureScheduledBooking(b));
-        const awaiting = mBookings.filter((b) => isAwaitingReportSessionBooking(b));
+        const withStatus = mBookings.map((b) => ({ b, status: effectiveStatus(b) }));
+        // Realizadas (base do repasse) = completed + awaiting_report
+        const completed = withStatus.filter((x) => x.status === "completed" || x.status === "awaiting_report").map((x) => x.b);
+        const awaiting = withStatus.filter((x) => x.status === "awaiting_report").map((x) => x.b);
+        // Passou sem fechamento do mentor: não paga até confirmar
+        const pendingConfirmation = withStatus.filter((x) => x.status === "pending_confirmation").map((x) => x.b);
+        const scheduled = withStatus.filter((x) => x.status === "scheduled").map((x) => x.b);
+
         const assignedSessions = (mentorSessions || [])
           .filter((ms) => ms.mentor_id === m.id)
-          .map((ms) => (ms as any).sessions?.name || "Sem dados");
+          .map((ms) => (ms as typeof ms & { sessions: { name: string } | null }).sessions?.name || "Sem dados");
 
-        const uniqueMembers = new Set(mBookings.map((b) => b.liberty_id));
+        // Membros atendidos: só perfis reais (sem convidados) e sem pedidos apenas pendentes de aprovação.
+        const uniqueMembers = new Set(
+          withStatus
+            .filter((x) => x.b.liberty_id && x.status !== "pending_approval")
+            .map((x) => x.b.liberty_id as string),
+        );
 
-        const monthly_completed: Record<string, number> = {};
-        completed.forEach((b) => {
-          const key = b.scheduled_date.substring(0, 7);
-          monthly_completed[key] = (monthly_completed[key] || 0) + 1;
-        });
-        const monthly_scheduled: Record<string, number> = {};
-        scheduled.forEach((b) => {
-          const key = b.scheduled_date.substring(0, 7);
-          monthly_scheduled[key] = (monthly_scheduled[key] || 0) + 1;
-        });
-        const monthly_awaiting_report: Record<string, number> = {};
-        awaiting.forEach((b) => {
-          const key = b.scheduled_date.substring(0, 7);
-          monthly_awaiting_report[key] = (monthly_awaiting_report[key] || 0) + 1;
-        });
+        const isKick = (b: AdminBookingRow) => feeMultiplierOf(b) > 1;
 
-        // Sessões de Mapeamento do Negócio (3h) — repasse dobrado
-        const isKick = (b: any) => kickoffSessionIds.has(b.session_id);
-        const countByMonth = (list: any[]) => {
-          const acc: Record<string, number> = {};
-          list.filter(isKick).forEach((b) => {
-            const key = b.scheduled_date.substring(0, 7);
-            acc[key] = (acc[key] || 0) + 1;
-          });
-          return acc;
-        };
-        const monthly_kickoff_completed = countByMonth(completed);
-        const monthly_kickoff_scheduled = countByMonth(scheduled);
-        const monthly_kickoff_awaiting_report = countByMonth(awaiting);
+        const sessions: MentorSessionDetail[] = withStatus
+          .filter((x) => x.status !== "cancelled" && x.status !== "not_realized")
+          .map(({ b, status }) => ({
+            booking_id: b.id,
+            session_id: b.session_id,
+            session_name: b.sessions?.name || "Sem dados",
+            member_name: b.liberty?.full_name || b.guest_name || "Sem dados",
+            liberty_id: b.liberty_id ?? null,
+            date: b.scheduled_date,
+            start_time: b.start_time,
+            end_time: b.end_time,
+            status,
+            is_kickoff: isKick(b),
+            is_retroactive: b.is_retroactive === true,
+            fee_multiplier: feeMultiplierOf(b),
+          }))
+          .sort((a, b) => a.date.localeCompare(b.date) || (a.start_time || "").localeCompare(b.start_time || ""));
 
         return {
           id: m.id,
@@ -375,140 +457,59 @@ export const useMentors = () => {
           full_name: m.full_name,
           email: m.email,
           phone: m.phone,
-          avatar_url: (m as any).avatar_url ?? null,
+          avatar_url: m.avatar_url ?? null,
           total_completed: completed.length,
           total_scheduled: scheduled.length,
           total_awaiting_report: awaiting.length,
+          total_pending_confirmation: pendingConfirmation.length,
           assigned_sessions: assignedSessions,
           members_served: uniqueMembers.size,
-          monthly_completed,
-          monthly_scheduled,
-          monthly_awaiting_report,
+          monthly_completed: countByMonth(completed),
+          monthly_scheduled: countByMonth(scheduled),
+          monthly_awaiting_report: countByMonth(awaiting),
+          monthly_pending_confirmation: countByMonth(pendingConfirmation),
           total_kickoff_completed: completed.filter(isKick).length,
           total_kickoff_scheduled: scheduled.filter(isKick).length,
           total_kickoff_awaiting_report: awaiting.filter(isKick).length,
-          monthly_kickoff_completed,
-          monthly_kickoff_scheduled,
-          monthly_kickoff_awaiting_report,
-          session_rate: (m as any).session_rate ?? null,
-          is_active: (m as any).is_active !== false,
+          total_kickoff_pending_confirmation: pendingConfirmation.filter(isKick).length,
+          monthly_kickoff_completed: countByMonth(completed.filter(isKick)),
+          monthly_kickoff_scheduled: countByMonth(scheduled.filter(isKick)),
+          monthly_kickoff_awaiting_report: countByMonth(awaiting.filter(isKick)),
+          monthly_kickoff_pending_confirmation: countByMonth(pendingConfirmation.filter(isKick)),
+          sessions,
+          session_rate: m.session_rate ?? null,
+          is_active: m.is_active !== false,
         };
       });
 
-      if (demo) {
-        const fakeMentors: MentorWithStats[] = demoMentors.map((dm) => {
-          const myBookings = demoBookings.filter((b) => b.mentor_id === dm.id && isVisibleSessionBooking(b));
-          const completed = myBookings.filter((b) => getEffectiveBookingStatus(b) === "completed");
-          const scheduled = myBookings.filter((b) => isScheduledSessionBooking(b));
-          return {
-            id: dm.id,
-            user_id: dm.id,
-            full_name: `${dm.full_name} (demo)`,
-            email: dm.email,
-            phone: null,
-            avatar_url: null,
-            total_completed: completed.length,
-            total_scheduled: scheduled.length,
-            total_awaiting_report: 0,
-            assigned_sessions: ["Diagnóstico", "Posicionamento"],
-            members_served: new Set(myBookings.map((b) => b.liberty_id)).size,
-            monthly_completed: {},
-            monthly_scheduled: {},
-            monthly_awaiting_report: {},
-            total_kickoff_completed: 0,
-            total_kickoff_scheduled: 0,
-            total_kickoff_awaiting_report: 0,
-            monthly_kickoff_completed: {},
-            monthly_kickoff_scheduled: {},
-            monthly_kickoff_awaiting_report: {},
-            session_rate: dm.session_rate,
-            is_active: true,
-          };
-        });
-        return [...mentors, ...fakeMentors];
-      }
       return mentors;
     },
   });
 };
 
+/** Valor padrão por sessão quando `system_config.session_value` não existe ou é inválido. */
+export const DEFAULT_SESSION_VALUE = 300;
+
+/**
+ * Configurações globais usadas pelas telas financeiras.
+ * As demais métricas que este hook calculava não eram consumidas por nenhuma tela e foram removidas
+ * (membros/mentores/realizadas vêm de `useMembers`/`useMentors`, que aplicam a regra única de status).
+ */
 export const useAdminStats = () => {
-  const demo = isDemoOn();
   return useQuery({
-    queryKey: ["admin-stats", demo],
+    queryKey: ["admin-stats"],
     queryFn: async () => {
-      const now = new Date();
-      const monthKey = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
-      const monthStart = `${monthKey}-01`;
-      const nextMonth = new Date(now.getFullYear(), now.getMonth() + 1, 1);
-      const monthEnd = nextMonth.toISOString().split("T")[0];
-
-      // Members count — aligned with Members page (users with liberty role)
-      const { data: libertyRoles } = await supabase
-        .from("user_roles")
-        .select("user_id")
-        .eq("role", "liberty");
-      const libertyUserIds = (libertyRoles || []).map((r: any) => r.user_id);
-      let totalMembers = 0;
-      if (libertyUserIds.length > 0) {
-        const { count } = await supabase
-          .from("profiles")
-          .select("*", { count: "exact", head: true })
-          .in("user_id", libertyUserIds);
-        totalMembers = count || 0;
-      }
-
-      // Active mentors — role-based, not tied to the email domain
-      const { count: totalMentors } = await supabase
-        .from("user_roles")
-        .select("*", { count: "exact", head: true })
-        .eq("role", "mentor");
-
-      // This month's bookings
-      const { data: monthBookings } = await supabase
-        .from("bookings")
-        .select("*")
-        .gte("scheduled_date", monthStart)
-        .lt("scheduled_date", monthEnd);
-
-      const visibleMonthBookings = (monthBookings || []).filter(isVisibleSessionBooking);
-      const completedThisMonth = visibleMonthBookings.filter((b) => getEffectiveBookingStatus(b) === "completed").length;
-      const scheduledThisMonth = visibleMonthBookings.filter((b) => isScheduledSessionBooking(b)).length;
-
-      // Total completed ever — past sessions (regardless of stored status, except cancelled/rescheduled)
-      const { data: allBookings } = await supabase
-        .from("bookings")
-        .select("scheduled_date,end_time,status");
-      const totalCompleted = (allBookings || []).filter((b) => isVisibleSessionBooking(b) && getEffectiveBookingStatus(b) === "completed").length;
-
-      // Session value
-      const { data: configData } = await supabase
+      const { data: configData, error } = await supabase
         .from("system_config")
         .select("value")
         .eq("key", "session_value")
-        .single();
+        .maybeSingle();
+      if (error) throw error;
 
-      const sessionValue = parseFloat(configData?.value || "900");
+      const parsed = parseFloat(configData?.value ?? "");
+      const sessionValue = Number.isFinite(parsed) && parsed >= 0 ? parsed : DEFAULT_SESSION_VALUE;
 
-      const demoCompleted = demo ? demoBookings.filter((b) => isVisibleSessionBooking(b) && getEffectiveBookingStatus(b) === "completed").length : 0;
-      const demoScheduled = demo ? demoBookings.filter((b) => isVisibleSessionBooking(b) && isScheduledSessionBooking(b)).length : 0;
-      const demoMembersN = demo ? demoMembers.length : 0;
-      const demoMentorsN = demo ? demoMentors.length : 0;
-
-      const _completedThisMonth = completedThisMonth + demoCompleted;
-      const _scheduledThisMonth = scheduledThisMonth + demoScheduled;
-      const _totalCompleted = totalCompleted + demoCompleted;
-
-      return {
-        totalMembers: totalMembers + demoMembersN,
-        totalMentors: (totalMentors || 0) + demoMentorsN,
-        completedThisMonth: _completedThisMonth,
-        scheduledThisMonth: _scheduledThisMonth,
-        totalCompleted: _totalCompleted,
-        sessionValue,
-        estimatedMonthRevenue: _completedThisMonth * sessionValue,
-        totalEstimated: _totalCompleted * sessionValue,
-      };
+      return { sessionValue };
     },
   });
 };

@@ -1,27 +1,42 @@
 import { useState } from "react";
-import { motion } from "framer-motion";
 import { AppLayout } from "@/components/AppLayout";
 import { useSessionCatalog } from "@/hooks/useAdminData";
-import { staggerContainer, fadeUpItem } from "@/lib/animations";
-import { ClipboardList, Edit, Save, X, Plus, Trash2 } from "lucide-react";
-import { EmptyState } from "@/components/EmptyState";
+import { ClipboardList, Edit, Plus, Trash2, Star } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { SessionCoverUpload } from "@/components/SessionCoverUpload";
+import {
+  PageContainer,
+  PageHeader,
+  SectionCard,
+  ListRow,
+  StatusPill,
+  Chip,
+  IconButton,
+  BottomSheet,
+  ConfirmDialog,
+  TextField,
+  TextAreaField,
+  SelectField,
+  LoadingState,
+  EmptyState,
+  ErrorState,
+} from "@/components/ds";
 
 const pillars = ["Negócios", "Emocional", "Mentalidade", "Espiritual"];
 
 const AdminSessoesPage = () => {
-  const { data: sessions, isLoading } = useSessionCatalog();
+  const { data: sessions, isLoading, isError, refetch } = useSessionCatalog();
   const queryClient = useQueryClient();
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editData, setEditData] = useState<any>({});
   const [addOpen, setAddOpen] = useState(false);
   const [newSession, setNewSession] = useState({ name: "", description: "", duration_minutes: 90, pillar: "", order: 0 });
   const [saving, setSaving] = useState(false);
+  const [deleteTarget, setDeleteTarget] = useState<{ id: string; name: string } | null>(null);
+  const [deleting, setDeleting] = useState(false);
 
   const { data: mentorSessions } = useQuery({
     queryKey: ["mentor-sessions-all"],
@@ -71,7 +86,6 @@ const AdminSessoesPage = () => {
     });
   };
 
-
   const cancelEdit = () => { setEditingId(null); setEditData({}); };
 
   const saveEdit = async (sessionId: string) => {
@@ -119,16 +133,19 @@ const AdminSessoesPage = () => {
     }
   };
 
-  const handleDelete = async (id: string, name: string) => {
-    if (!confirm(`Excluir a sessão "${name}"? Isso pode afetar bookings existentes.`)) return;
+  const handleDelete = async (id: string) => {
+    setDeleting(true);
     try {
       await supabase.from("mentor_sessions").delete().eq("session_id", id);
       const { error } = await supabase.from("sessions").delete().eq("id", id);
       if (error) throw error;
       toast.success("Sessão excluída");
+      setDeleteTarget(null);
       queryClient.invalidateQueries({ queryKey: ["session-catalog"] });
     } catch (e: any) {
       toast.error("Erro: " + e.message);
+    } finally {
+      setDeleting(false);
     }
   };
 
@@ -151,213 +168,252 @@ const AdminSessoesPage = () => {
     }
   };
 
+  const editingSession = (sessions || []).find((s: any) => s.id === editingId) as any | undefined;
+  const refreshCover = () => queryClient.invalidateQueries({ queryKey: ["session-catalog"] });
+
+  const total = sessions?.length ?? 0;
+
   return (
     <AppLayout role="admin">
-      <motion.div variants={staggerContainer} initial="hidden" animate="show" className="space-y-6">
-        <motion.div variants={fadeUpItem} className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
-          <div>
-            <h1 className="text-2xl font-semibold text-foreground">Sessões da Jornada</h1>
-            <p className="text-muted-foreground text-sm mt-1">
-              {sessions?.length ?? 0} sessões · 12 sessões = jornada completa
-            </p>
-          </div>
-          <button onClick={() => setAddOpen(true)} className="btn-silver text-xs px-4 py-2.5 flex items-center gap-1.5 h-10 rounded-lg">
-            <Plus className="h-3.5 w-3.5" /> Nova sessão
-          </button>
-        </motion.div>
+      <PageContainer>
+        <PageHeader
+          title="Sessões da jornada"
+          description={isLoading ? "Carregando catálogo" : `${total} ${total === 1 ? "sessão" : "sessões"} · 12 sessões = jornada completa`}
+          actions={
+            <Button onClick={() => setAddOpen(true)}>
+              <Plus aria-hidden /> Nova sessão
+            </Button>
+          }
+        />
 
         {isLoading ? (
-          <div className="space-y-3">
-            {Array.from({ length: 6 }).map((_, i) => (
-              <div key={i} className="glass-card p-5 animate-pulse h-24" />
-            ))}
-          </div>
+          <LoadingState variant="list" rows={6} />
+        ) : isError ? (
+          <ErrorState title="Não foi possível carregar as sessões" onRetry={() => refetch()} />
         ) : !sessions || sessions.length === 0 ? (
           <EmptyState
             icon={ClipboardList}
             title="Nenhuma sessão cadastrada"
             description="Crie a primeira sessão para começar a estruturar a jornada."
             action={
-              <button onClick={() => setAddOpen(true)} className="btn-silver text-sm px-4 py-2 inline-flex items-center gap-2">
-                <Plus className="h-4 w-4" /> Criar sessão
-              </button>
+              <Button onClick={() => setAddOpen(true)}>
+                <Plus aria-hidden /> Criar sessão
+              </Button>
             }
           />
         ) : (
-          <motion.div variants={fadeUpItem} className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            {sessions.map((session) => {
-              const isEditing = editingId === session.id;
+          <SectionCard padding="none">
+            {sessions.map((session: any, index: number) => {
               const sessionMentors = getMentorsForSession(session.id);
-
-              const refreshCover = () => queryClient.invalidateQueries({ queryKey: ["session-catalog"] });
-
-              if (isEditing) {
-                return (
-                  <div key={session.id} className="glass-card p-5 border-primary/30 space-y-4">
-                    <SessionCoverUpload
-                      sessionId={session.id}
-                      sessionName={session.name}
-                      coverUrl={(session as any).cover_image_url || null}
-                      onChange={refreshCover}
-                    />
-                    <div className="space-y-4">
-                      <div className="flex items-center gap-3">
-                        {(session as any).is_kickoff && (
-                          <div className="w-9 h-9 rounded-lg bg-primary/15 border border-primary/30 flex items-center justify-center text-primary shrink-0" title="Sessão de Kickoff">
-                            ✦
-                          </div>
-                        )}
-                        <input value={editData.name} onChange={e => setEditData((p: any) => ({ ...p, name: e.target.value }))} className="input-begin text-sm h-10 flex-1" placeholder="Nome da sessão" />
-                      </div>
-
-                      <textarea value={editData.description} onChange={e => setEditData((p: any) => ({ ...p, description: e.target.value }))} className="input-begin text-sm w-full h-20 resize-none" placeholder="Descrição" />
-                      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-                        <div>
-                          <label className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider block mb-1">Duração (min)</label>
-                          <input type="number" value={editData.duration_minutes} onChange={e => setEditData((p: any) => ({ ...p, duration_minutes: parseInt(e.target.value) || 90 }))} className="input-begin text-sm h-10 w-full" />
-                        </div>
-                        <div>
-                          <label className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider block mb-1">Pilar</label>
-                          <select value={editData.pillar} onChange={e => setEditData((p: any) => ({ ...p, pillar: e.target.value }))} className="input-begin text-sm h-10 w-full">
-                            <option value="">Selecione</option>
-                            {pillars.map(p => <option key={p} value={p}>{p}</option>)}
-                          </select>
-                        </div>
-                        <div>
-                          <label className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider block mb-1">Status</label>
-                          <select value={editData.is_active ? "true" : "false"} onChange={e => setEditData((p: any) => ({ ...p, is_active: e.target.value === "true" }))} className="input-begin text-sm h-10 w-full">
-                            <option value="true">Ativa</option>
-                            <option value="false">Inativa</option>
-                          </select>
-                        </div>
-                        <div>
-                          <label className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider block mb-1">Kickoff</label>
-                          <select value={editData.is_kickoff ? "true" : "false"} onChange={e => setEditData((p: any) => ({ ...p, is_kickoff: e.target.value === "true" }))} className="input-begin text-sm h-10 w-full" title="Sessão obrigatória de abertura da jornada">
-                            <option value="false">Não</option>
-                            <option value="true">Sim (obrigatória e destacada)</option>
-                          </select>
-                        </div>
-                      </div>
-
-                      <div>
-                        <label className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider block mb-2">Mentores vinculados</label>
-                        <div className="flex flex-wrap gap-2">
-                          {(allMentors || []).map((m: any) => {
-                            const selected = editData.mentor_ids?.includes(m.id);
-                            return (
-                              <button key={m.id} onClick={() => toggleMentor(m.id)} className={`text-[10px] px-3 py-1.5 rounded-full border transition-colors ${selected ? "bg-primary text-primary-foreground border-primary/20" : "border-border text-muted-foreground hover:text-foreground hover:bg-muted"}`}>
-                                {m.full_name}
-                              </button>
-                            );
-                          })}
-                        </div>
-                      </div>
-                      <div className="flex gap-2">
-                        <button onClick={() => saveEdit(session.id)} className="btn-silver text-xs px-4 py-2 flex items-center gap-1.5 h-10"><Save className="h-3.5 w-3.5" /> Salvar</button>
-                        <button onClick={cancelEdit} className="text-xs px-4 py-2 border border-border rounded-lg text-muted-foreground hover:text-foreground transition-colors h-10 flex items-center gap-1.5"><X className="h-3.5 w-3.5" /> Cancelar</button>
-                      </div>
-                    </div>
-                  </div>
-                );
-              }
+              const isKickoff = !!session.is_kickoff;
+              const meta = [
+                `${session.duration_minutes} min`,
+                sessionMentors.length > 0
+                  ? `${sessionMentors.length} ${sessionMentors.length === 1 ? "mentor" : "mentores"}`
+                  : "Sem mentor vinculado",
+                session.description,
+              ].filter(Boolean).join(" · ");
 
               return (
-                <div key={session.id} className="glass-card p-5 space-y-4">
-                  <SessionCoverUpload
-                    sessionId={session.id}
-                    sessionName={session.name}
-                    coverUrl={(session as any).cover_image_url || null}
-                    onChange={refreshCover}
-                  />
-                  <div className="flex items-start gap-3">
-                    {(session as any).is_kickoff && (
-                      <div className="w-9 h-9 rounded-lg bg-primary/15 border border-primary/30 flex items-center justify-center text-primary shrink-0" title="Sessão de Kickoff">
-                        ✦
-                      </div>
-                    )}
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-center gap-2 flex-wrap">
-                        <h3 className="text-sm font-semibold text-foreground">{session.name}</h3>
-                        {(session as any).is_kickoff && (
-                          <span className="text-[10px] px-2 py-0.5 rounded-full bg-primary/15 text-primary border border-primary/30 font-semibold uppercase tracking-wider">
-                            Kickoff
-                          </span>
-                        )}
-                        <span className={`text-[10px] px-2 py-0.5 rounded-full border ${session.is_active ? "bg-status-green/10 text-status-green border-border" : "bg-muted text-muted-foreground border-border"}`}>
-                          {session.is_active ? "Ativa" : "Inativa"}
+                <ListRow
+                  key={session.id}
+                  last={index === sessions.length - 1}
+                  className={!session.is_active ? "opacity-70" : undefined}
+                  leading={
+                    <div
+                      className={`h-10 w-10 rounded-[var(--ds-radius-md)] flex items-center justify-center shrink-0 ${
+                        isKickoff ? "bg-primary text-primary-foreground" : "bg-muted text-foreground"
+                      }`}
+                      aria-label={isKickoff ? "Sessão de abertura (Mapeamento)" : `Ordem ${session.order}`}
+                    >
+                      {isKickoff ? <Star className="h-4 w-4" aria-hidden /> : <span className="text-[15px] font-bold tabular-nums">{session.order}</span>}
+                    </div>
+                  }
+                  title={
+                    <span className="flex items-center gap-2 min-w-0">
+                      <span className="truncate">{session.name}</span>
+                      {isKickoff && <StatusPill tone="brand" withDot={false}>Abertura</StatusPill>}
+                    </span>
+                  }
+                  subtitle={meta}
+                  trailing={
+                    <>
+                      {session.pillar && (
+                        <span className={`hidden md:inline-flex items-center rounded-full px-2 h-[22px] text-[11px] font-medium ${pillarClass(session.pillar)}`}>
+                          {session.pillar}
                         </span>
-                        {(session as any).pillar && (
-                          <span className={`text-[10px] px-2 py-0.5 rounded-full ${pillarClass((session as any).pillar)}`}>
-                            {(session as any).pillar}
-                          </span>
-                        )}
-                      </div>
-
-                      <div className="flex items-center gap-3 mt-1 text-[10px] text-muted-foreground">
-                        <span>{session.duration_minutes} min</span>
-                      </div>
-                      {session.description && <p className="text-xs text-muted-foreground mt-2">{session.description}</p>}
-                      {sessionMentors.length > 0 && (
-                        <div className="flex flex-wrap gap-1 mt-2">
-                          {sessionMentors.map((m: any) => (
-                            <span key={m.id} className="text-[10px] px-2 py-0.5 rounded-full bg-primary/10 text-primary border border-primary/20">
-                              {m.full_name}
-                            </span>
-                          ))}
-                        </div>
                       )}
-                    </div>
-                    <div className="flex items-center gap-1 shrink-0">
-                      <button onClick={() => startEdit(session)} className="p-2 rounded-lg hover:bg-muted transition-colors text-muted-foreground hover:text-foreground">
+                      {session.is_active ? (
+                        <StatusPill tone="success">Ativa</StatusPill>
+                      ) : (
+                        <StatusPill tone="neutral">Inativa</StatusPill>
+                      )}
+                      <IconButton aria-label={`Editar ${session.name}`} size="sm" onClick={() => startEdit(session)}>
                         <Edit className="h-4 w-4" />
-                      </button>
-                      <button onClick={() => handleDelete(session.id, session.name)} className="p-2 rounded-lg hover:bg-destructive/10 transition-colors text-muted-foreground hover:text-destructive">
+                      </IconButton>
+                      <IconButton
+                        aria-label={`Excluir ${session.name}`}
+                        size="sm"
+                        className="hover:text-destructive hover:bg-destructive/10"
+                        onClick={() => setDeleteTarget({ id: session.id, name: session.name })}
+                      >
                         <Trash2 className="h-4 w-4" />
-                      </button>
-                    </div>
-                  </div>
-                </div>
+                      </IconButton>
+                    </>
+                  }
+                />
               );
             })}
-          </motion.div>
+          </SectionCard>
         )}
-      </motion.div>
+      </PageContainer>
 
-      {/* Add Session Dialog */}
-      <Dialog open={addOpen} onOpenChange={setAddOpen}>
-        <DialogContent className="max-w-md">
-          <DialogHeader>
-            <DialogTitle className="text-lg">Nova sessão</DialogTitle>
-          </DialogHeader>
-          <div className="space-y-4">
-            <div>
-              <label className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider block mb-1.5">Nome *</label>
-              <input value={newSession.name} onChange={e => setNewSession(s => ({ ...s, name: e.target.value }))} className="input-begin text-sm h-10 w-full" placeholder="Nome da sessão" />
+      <BottomSheet
+        open={editingId !== null}
+        onOpenChange={(open) => !open && cancelEdit()}
+        title="Editar sessão"
+        description={editingSession?.name}
+        size="lg"
+        footer={
+          <>
+            <Button variant="ghost" onClick={cancelEdit}>Cancelar</Button>
+            <Button onClick={() => editingId && saveEdit(editingId)}>Salvar</Button>
+          </>
+        }
+      >
+        {editingSession && (
+          <div className="space-y-5">
+            <SessionCoverUpload
+              sessionId={editingSession.id}
+              sessionName={editingSession.name}
+              coverUrl={editingSession.cover_image_url || null}
+              onChange={refreshCover}
+            />
+            <TextField
+              label="Nome da sessão"
+              required
+              value={editData.name ?? ""}
+              onChange={e => setEditData((p: any) => ({ ...p, name: e.target.value }))}
+              placeholder="Nome da sessão"
+            />
+            <TextAreaField
+              label="Descrição"
+              value={editData.description ?? ""}
+              onChange={e => setEditData((p: any) => ({ ...p, description: e.target.value }))}
+              className="h-20 resize-none"
+              placeholder="Descrição"
+            />
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <TextField
+                label="Duração (min)"
+                type="number"
+                inputMode="numeric"
+                value={editData.duration_minutes ?? ""}
+                onChange={e => setEditData((p: any) => ({ ...p, duration_minutes: parseInt(e.target.value) || 90 }))}
+              />
+              <SelectField
+                label="Pilar"
+                value={editData.pillar ?? ""}
+                onChange={e => setEditData((p: any) => ({ ...p, pillar: e.target.value }))}
+              >
+                <option value="">Selecione</option>
+                {pillars.map(p => <option key={p} value={p}>{p}</option>)}
+              </SelectField>
+              <SelectField
+                label="Status"
+                value={editData.is_active ? "true" : "false"}
+                onChange={e => setEditData((p: any) => ({ ...p, is_active: e.target.value === "true" }))}
+              >
+                <option value="true">Ativa</option>
+                <option value="false">Inativa</option>
+              </SelectField>
+              <SelectField
+                label="Sessão de abertura"
+                hint="Obrigatória e destacada na jornada"
+                value={editData.is_kickoff ? "true" : "false"}
+                onChange={e => setEditData((p: any) => ({ ...p, is_kickoff: e.target.value === "true" }))}
+              >
+                <option value="false">Não</option>
+                <option value="true">Sim</option>
+              </SelectField>
             </div>
-            <div>
-              <label className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider block mb-1.5">Descrição</label>
-              <textarea value={newSession.description} onChange={e => setNewSession(s => ({ ...s, description: e.target.value }))} className="input-begin text-sm w-full h-20 resize-none" placeholder="Descrição" />
-            </div>
-            <div className="grid grid-cols-2 gap-3">
-              <div>
-                <label className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider block mb-1.5">Duração (min)</label>
-                <input type="number" value={newSession.duration_minutes} onChange={e => setNewSession(s => ({ ...s, duration_minutes: parseInt(e.target.value) || 90 }))} className="input-begin text-sm h-10 w-full" />
-              </div>
-              <div>
-                <label className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider block mb-1.5">Pilar</label>
-                <select value={newSession.pillar} onChange={e => setNewSession(s => ({ ...s, pillar: e.target.value }))} className="input-begin text-sm h-10 w-full">
-                  <option value="">Selecione</option>
-                  {pillars.map(p => <option key={p} value={p}>{p}</option>)}
-                </select>
-              </div>
+
+            <div className="space-y-2">
+              <p className="text-sm font-medium text-foreground">Mentores vinculados</p>
+              {(allMentors || []).length === 0 ? (
+                <p className="text-xs text-muted-foreground">Nenhum mentor ativo cadastrado.</p>
+              ) : (
+                <div className="flex flex-wrap gap-2">
+                  {(allMentors || []).map((m: any) => (
+                    <Chip key={m.id} active={editData.mentor_ids?.includes(m.id)} onClick={() => toggleMentor(m.id)}>
+                      {m.full_name}
+                    </Chip>
+                  ))}
+                </div>
+              )}
             </div>
           </div>
-          <DialogFooter>
-            <Button variant="ghost" size="sm" onClick={() => setAddOpen(false)}>Cancelar</Button>
-            <Button size="sm" onClick={handleAdd} disabled={saving}>{saving ? "Salvando..." : "Criar"}</Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+        )}
+      </BottomSheet>
+
+      <BottomSheet
+        open={addOpen}
+        onOpenChange={setAddOpen}
+        title="Nova sessão"
+        description="A ordem na jornada é definida automaticamente."
+        locked={saving}
+        footer={
+          <>
+            <Button variant="ghost" onClick={() => setAddOpen(false)} disabled={saving}>Cancelar</Button>
+            <Button onClick={handleAdd} disabled={saving}>{saving ? "Salvando..." : "Criar sessão"}</Button>
+          </>
+        }
+      >
+        <div className="space-y-4">
+          <TextField
+            label="Nome"
+            required
+            value={newSession.name}
+            onChange={e => setNewSession(s => ({ ...s, name: e.target.value }))}
+            placeholder="Nome da sessão"
+          />
+          <TextAreaField
+            label="Descrição"
+            value={newSession.description}
+            onChange={e => setNewSession(s => ({ ...s, description: e.target.value }))}
+            className="h-20 resize-none"
+            placeholder="Descrição"
+          />
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <TextField
+              label="Duração (min)"
+              type="number"
+              inputMode="numeric"
+              value={newSession.duration_minutes}
+              onChange={e => setNewSession(s => ({ ...s, duration_minutes: parseInt(e.target.value) || 90 }))}
+            />
+            <SelectField
+              label="Pilar"
+              value={newSession.pillar}
+              onChange={e => setNewSession(s => ({ ...s, pillar: e.target.value }))}
+            >
+              <option value="">Selecione</option>
+              {pillars.map(p => <option key={p} value={p}>{p}</option>)}
+            </SelectField>
+          </div>
+        </div>
+      </BottomSheet>
+
+      <ConfirmDialog
+        open={deleteTarget !== null}
+        onOpenChange={(open) => !open && setDeleteTarget(null)}
+        title="Excluir sessão?"
+        description={deleteTarget ? `"${deleteTarget.name}" será removida do catálogo. Isso pode afetar agendamentos existentes.` : undefined}
+        confirmLabel="Excluir"
+        destructive
+        loading={deleting}
+        onConfirm={() => deleteTarget && handleDelete(deleteTarget.id)}
+      />
     </AppLayout>
   );
 };

@@ -1,11 +1,11 @@
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect, useMemo, useRef } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { supabase } from "@/integrations/supabase/client";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { toast } from "sonner";
 import { AppLayout } from "@/components/AppLayout";
 import { useAuth } from "@/hooks/useAuth";
 import {
-  ArrowLeft,
   ArrowRight,
   Check,
   CheckCircle2,
@@ -17,11 +17,30 @@ import {
   ChevronLeft,
   ChevronRight,
   AlertTriangle,
+  Star,
 } from "lucide-react";
 import { staggerContainer, fadeUpItem } from "@/lib/animations";
 import { Link, useSearchParams } from "react-router-dom";
-import { buildSessionProgress } from "@/lib/sessionProgress";
-import { isKickoffRequiredError, isMonthlyBookingLimitError, isJourneyBookingLimitError } from "@/lib/bookingRules";
+import { canScheduleKickoff, isJourneySession, KICKOFF_NOT_ALLOWED_MESSAGE } from "@/lib/sessionProgress";
+import { isMonthlyBookingLimitError, isJourneyBookingLimitError } from "@/lib/bookingRules";
+import { parsePlatformDateTime, PENDING_CONFIRMATION_HINT } from "@/lib/bookingStatus";
+import { invalidateMemberBookingQueries, useJourneyProgress, type JourneySession } from "@/hooks/useJourneyProgress";
+import { Button } from "@/components/ui/button";
+import { cn } from "@/lib/utils";
+import {
+  Callout,
+  Chip,
+  ConfirmDialog,
+  EmptyState,
+  IconButton,
+  LoadingState,
+  PageContainer,
+  PageHeader,
+  ProgressBar,
+  SectionCard,
+  StatusPill,
+  TextAreaField,
+} from "@/components/ds";
 import {
   format,
   addDays,
@@ -38,6 +57,52 @@ import { ptBR } from "date-fns/locale";
 /* ───── Helpers ───── */
 
 const WEEKDAY_LABELS = ["Dom", "Seg", "Ter", "Qua", "Qui", "Sex", "Sáb"];
+
+/** Duração padrão quando a sessão não informa `duration_minutes`. */
+const DEFAULT_SESSION_MINUTES = 120;
+/** Slots de 3h (180min) são exclusivos do Mapeamento do Negócio. */
+const KICKOFF_SLOT_MINUTES = 180;
+/** Teto de agendamentos da jornada aceito pelo banco (12 + sessão bônus), contando só sessões com order > 0. */
+const JOURNEY_BOOKING_CAP = 13;
+
+const toMinutes = (time: string) => {
+  const [h, m] = time.slice(0, 5).split(":").map(Number);
+  return h * 60 + m;
+};
+
+const sessionMinutes = (session?: Pick<JourneySession, "duration_minutes"> | null) =>
+  session?.duration_minutes || DEFAULT_SESSION_MINUTES;
+
+/** Fim da sessão a partir do início: sempre pela duração da sessão (Mapeamento = 3h), nunca pelo tamanho do slot. */
+const endTimeFor = (startTime: string, minutes: number) => {
+  const total = toMinutes(startTime) + minutes;
+  return `${String(Math.floor(total / 60) % 24).padStart(2, "0")}:${String(total % 60).padStart(2, "0")}`;
+};
+
+/** Um slot serve a sessão se tiver tamanho compatível: >= 3h só para o Mapeamento; < 3h para as demais. */
+const slotFitsSession = (
+  slot: { start_time: string; end_time: string },
+  session: Pick<JourneySession, "duration_minutes" | "is_kickoff"> | null | undefined,
+) => {
+  const slotMinutes = toMinutes(slot.end_time) - toMinutes(slot.start_time);
+  if (session?.is_kickoff) return slotMinutes >= KICKOFF_SLOT_MINUTES;
+  return slotMinutes < KICKOFF_SLOT_MINUTES && slotMinutes >= sessionMinutes(session);
+};
+
+const formatDuration = (min?: number | null) => {
+  const m = min ?? DEFAULT_SESSION_MINUTES;
+  const h = Math.floor(m / 60);
+  const r = m % 60;
+  if (h === 0) return `${r}min`;
+  return r === 0 ? `${h}h` : `${h}h ${r}min`;
+};
+
+/** Erro do índice único (liberty_id, session_id): o membro já tem essa sessão agendada ou realizada. */
+const isDuplicateSessionError = (error: { code?: string; message?: string | null; details?: string | null }) =>
+  `${error.message ?? ""} ${error.details ?? ""}`.includes("bookings_unique_liberty_session_active");
+
+const isKickoffNotAllowedError = (error: { message?: string | null; details?: string | null }) =>
+  `${error.message ?? ""} ${error.details ?? ""}`.includes("KICKOFF_NOT_ALLOWED");
 
 const pillarLabels: Record<string, string> = {
   negocios: "Negócios",
@@ -62,6 +127,7 @@ const confirmSteps = [
 
 const AgendarSessaoPage = () => {
   const { profile, user } = useAuth();
+  const queryClient = useQueryClient();
   const [searchParams] = useSearchParams();
   const [step, setStep] = useState(1);
   const [selectedSessionId, setSelectedSessionId] = useState<string | null>(null);
@@ -76,71 +142,41 @@ const AgendarSessaoPage = () => {
   const [monthlyOverride, setMonthlyOverride] = useState(false);
   const [calendarMonth, setCalendarMonth] = useState(new Date());
 
-  // ── Fetch real sessions from DB ──
-  const { data: sessions = [] } = useQuery({
-    queryKey: ["agendar-sessions"],
-    queryFn: async () => {
-      // PostgREST conflict: filtering+ordering by column "order" collides on ?order=.
-      // Fetch all active and filter (order > 0) client-side.
-      const { data } = await supabase
-        .from("sessions")
-        .select("*")
-        .eq("is_active", true)
-        .order("order");
-      return (data || []).filter((s: any) => (s.order ?? 0) > 0);
-    },
-  });
+  // ── Sessões + agendamentos do membro (fonte única, com is_retroactive/report_required) ──
+  const {
+    sessions: allSessions,
+    activeSessions,
+    bookings,
+    progress: progressData,
+    kickoffSession,
+    kickoffAllowed,
+    isLoading: isJourneyLoading,
+  } = useJourneyProgress();
 
-  // ── Fetch member's real bookings ──
-  const { data: bookings = [] } = useQuery({
-    queryKey: ["agendar-bookings", profile?.id],
-    queryFn: async () => {
-      if (!profile?.id) return [];
-      const { data } = await supabase
-        .from("bookings")
-        .select("id, session_id, scheduled_date, start_time, end_time, status")
-        .eq("liberty_id", profile.id);
-      return data || [];
-    },
-    enabled: !!profile?.id,
-  });
-
-  const progressData = useMemo(() => buildSessionProgress(sessions, bookings), [sessions, bookings]);
+  /** Sessões agendáveis: ativas e da jornada (order > 0). Onboarding fica de fora. */
+  const sessions = useMemo(() => activeSessions.filter(isJourneySession), [activeSessions]);
   const bookingStatusBySession = progressData.statusMap;
 
-  // Kickoff (Mapeamento do Negócio): sessão de entrada — SUGERIDA, nunca bloqueante.
-  // O aluno pode agendar qualquer sessão; só mostramos um aviso quando o Mapeamento
-  // ainda não foi concluído (o limite de 2 sessões/mês continua valendo).
-  const kickoffSession = useMemo(() => sessions.find((s: any) => s.is_kickoff), [sessions]);
+  // Mapeamento do Negócio (kickoff): sugerido para o início, nunca obrigatório.
+  // D2: só pode ser agendado enquanto o membro tiver até 3 sessões realizadas (mesma regra do banco).
   const kickoffStatus = kickoffSession ? bookingStatusBySession.get(kickoffSession.id)?.status : undefined;
-  const kickoffDone = kickoffStatus === "completed";
-  const kickoffScheduled = kickoffStatus === "scheduled";
-  const kickoffPending = Boolean(kickoffSession) && !kickoffDone && !kickoffScheduled;
-  const kickoffRequired = false;
-  const hideKickoff = progressData.completedCount >= 4 || Boolean(kickoffStatus);
+  const kickoffPending = Boolean(kickoffSession) && !kickoffStatus;
+  const hideKickoff = !kickoffAllowed;
 
   const visibleSessions = useMemo(() => {
-    const pending = sessions.filter((session: any) => bookingStatusBySession.get(session.id)?.status !== "completed");
-    return hideKickoff ? pending.filter((session: any) => !session.is_kickoff) : pending;
+    const pending = sessions.filter((session) => bookingStatusBySession.get(session.id)?.status !== "completed");
+    return hideKickoff ? pending.filter((session) => !session.is_kickoff) : pending;
   }, [sessions, hideKickoff, bookingStatusBySession]);
-
-
-  const formatDuration = (min?: number | null) => {
-    const m = min ?? 120;
-    const h = Math.floor(m / 60);
-    const r = m % 60;
-    if (h === 0) return `${r}min`;
-    return r === 0 ? `${h}h` : `${h}h${r}min`;
-  };
 
 
   const { data: mentorSessions = [] } = useQuery({
     queryKey: ["agendar-mentor-sessions"],
     queryFn: async () => {
-      const { data } = await supabase
+      const { data, error } = await supabase
         .from("mentor_sessions")
         .select("mentor_id, session_id")
         .eq("is_active", true);
+      if (error) throw error;
       return data || [];
     },
   });
@@ -154,10 +190,11 @@ const AgendarSessaoPage = () => {
   const { data: allAvailability = [] } = useQuery({
     queryKey: ["mentor-availability-all"],
     queryFn: async () => {
-      const { data } = await supabase
+      const { data, error } = await supabase
         .from("mentor_availability")
         .select("*")
         .eq("is_booked", false);
+      if (error) throw error;
       return data || [];
     },
   });
@@ -167,49 +204,37 @@ const AgendarSessaoPage = () => {
     if (!selectedSessionId) return [];
     if (selectedSessionMentorIds.size === 0) return [];
 
-    // A slot only serves this session if it is long enough to hold it (2h vs 3h diagnóstico)
-    // Regra: slots de 3h (180min) são EXCLUSIVOS do Mapeamento do Negócio (diagnóstico).
-    // Slots de 2h atendem apenas as demais sessões atribuídas ao mentor.
+    // Um slot só serve esta sessão se tiver tamanho compatível (2h vs 3h do Mapeamento).
     const selectedSession = sessions.find((s) => s.id === selectedSessionId);
-    const neededMinutes = selectedSession?.duration_minutes || 120;
-    const selectedIsKickoff = Boolean((selectedSession as any)?.is_kickoff);
-    const toMin = (t: string) => {
-      const [h, m] = t.slice(0, 5).split(":").map(Number);
-      return h * 60 + m;
-    };
-    const fits = (av: any) => {
-      const slotMinutes = toMin(av.end_time) - toMin(av.start_time);
-      if (selectedIsKickoff) return slotMinutes >= 180;
-      return slotMinutes < 180 && slotMinutes >= neededMinutes;
-    };
-
 
     const slots: { date: Date; startTime: string; endTime: string }[] = [];
-    const today = new Date();
-    
+    const now = new Date();
+    // Horários de hoje que já passaram não podem ser oferecidos (comparação no fuso da plataforma).
+    const isStillAhead = (date: Date, startTime: string) => {
+      const start = parsePlatformDateTime(format(date, "yyyy-MM-dd"), startTime);
+      return start ? start.getTime() > now.getTime() : false;
+    };
+
     allAvailability.forEach((av) => {
       if (!selectedSessionMentorIds.has(av.mentor_id)) return;
-      if (!fits(av)) return;
-
+      if (!slotFitsSession(av, selectedSession)) return;
+      const startTime = av.start_time.slice(0, 5);
+      const endTime = av.end_time.slice(0, 5);
 
       if (av.specific_date) {
         const d = new Date(av.specific_date + "T00:00:00");
-        if (!isBefore(d, today) || isToday(d)) {
-          slots.push({ date: d, startTime: av.start_time.slice(0, 5), endTime: av.end_time.slice(0, 5) });
+        if ((!isBefore(d, now) || isToday(d)) && isStillAhead(d, startTime)) {
+          slots.push({ date: d, startTime, endTime });
         }
       } else if (av.is_recurring) {
         // Generate next 5 weeks of recurring slots
         for (let w = 0; w < 5; w++) {
-          const baseDate = addDays(today, w * 7);
+          const baseDate = addDays(now, w * 7);
           for (let d = 0; d < 7; d++) {
             const candidate = addDays(baseDate, d);
             const dow = getDay(candidate); // 0=Sun, 1=Mon...
-            if (dow === av.day_of_week && (!isBefore(candidate, today) || isToday(candidate))) {
-              slots.push({
-                date: candidate,
-                startTime: av.start_time.slice(0, 5),
-                endTime: av.end_time.slice(0, 5),
-              });
+            if (dow === av.day_of_week && (!isBefore(candidate, now) || isToday(candidate)) && isStillAhead(candidate, startTime)) {
+              slots.push({ date: candidate, startTime, endTime });
             }
           }
         }
@@ -219,48 +244,59 @@ const AgendarSessaoPage = () => {
     return slots;
   }, [selectedSessionId, allAvailability, selectedSessionMentorIds, sessions]);
 
-  // Auto-select session from URL param (sessionId=uuid), and optionally date/time (skip to step 4)
+  // Auto-select session from URL param (sessionId=uuid), and optionally date/time (skip to step 4).
+  // Roda uma única vez, depois que sessões e agendamentos carregaram (senão a regra do
+  // Mapeamento seria avaliada com a lista de agendamentos ainda vazia).
+  const preselectHandledRef = useRef(false);
   useEffect(() => {
+    if (preselectHandledRef.current || isJourneyLoading) return;
     const sessionId = searchParams.get("sessionId");
+    if (!sessionId || selectedSessionId || sessions.length === 0) return;
+    preselectHandledRef.current = true;
+
     const dateParam = searchParams.get("date"); // yyyy-MM-dd
     const timeParam = searchParams.get("time"); // HH:mm
-    if (sessionId && !selectedSessionId && sessions.length > 0) {
-      const match = sessions.find((s) => s.id === sessionId);
-      if (match) {
-        const status = bookingStatusBySession.get(match.id)?.status;
-        if (status !== "completed" && status !== "scheduled") {
-          setSelectedSessionId(match.id);
-          if (dateParam && timeParam) {
-            const d = new Date(dateParam + "T00:00:00");
-            if (!isNaN(d.getTime())) {
-              setSelectedDate(d);
-              setCalendarMonth(new Date(d.getFullYear(), d.getMonth(), 1));
-              const dur = match.duration_minutes || 120;
-              const [hh, mm] = timeParam.split(":").map(Number);
-              const endMin = hh * 60 + mm + dur;
-              const eh = String(Math.floor(endMin / 60) % 24).padStart(2, "0");
-              const em = String(endMin % 60).padStart(2, "0");
-              setSelectedSlot({ startTime: timeParam, endTime: `${eh}:${em}` });
-              setStep(4);
-              return;
-            }
-          }
-          setStep(2);
-        }
+    const match = sessions.find((s) => s.id === sessionId);
+    if (!match) return;
+
+    // D2: o link direto (?sessionId=) não pode contornar a regra do Mapeamento.
+    if (match.is_kickoff && !kickoffAllowed) {
+      toast.error(KICKOFF_NOT_ALLOWED_MESSAGE);
+      setStep(1);
+      return;
+    }
+    // Sessão já realizada, agendada ou "a confirmar": o banco não aceita um 2º agendamento.
+    const status = bookingStatusBySession.get(match.id)?.status;
+    if (status) {
+      toast.error(
+        status === "completed"
+          ? "Você já realizou esta sessão. Escolha outra sessão da jornada."
+          : "Esta sessão já está agendada. Escolha outra sessão da jornada.",
+      );
+      setStep(1);
+      return;
+    }
+
+    setSelectedSessionId(match.id);
+    if (dateParam && timeParam) {
+      const d = new Date(dateParam + "T00:00:00");
+      if (!isNaN(d.getTime())) {
+        setSelectedDate(d);
+        setCalendarMonth(new Date(d.getFullYear(), d.getMonth(), 1));
+        setSelectedSlot({ startTime: timeParam, endTime: endTimeFor(timeParam, sessionMinutes(match)) });
+        setStep(4);
+        return;
       }
     }
-  }, [searchParams, sessions, bookingStatusBySession]);
+    setStep(2);
+  }, [searchParams, sessions, bookingStatusBySession, kickoffAllowed, isJourneyLoading, selectedSessionId]);
 
 
   const selectedSession = sessions.find((s) => s.id === selectedSessionId);
 
   // End time always follows the session duration, not the size of the mentor's slot
-  const endForSession = (startTime: string) => {
-    const dur = selectedSession?.duration_minutes || 120;
-    const [h, m] = startTime.slice(0, 5).split(":").map(Number);
-    const total = h * 60 + m + dur;
-    return `${String(Math.floor(total / 60) % 24).padStart(2, "0")}:${String(total % 60).padStart(2, "0")}`;
-  };
+  const endForSession = (startTime: string) => endTimeFor(startTime, sessionMinutes(selectedSession));
+  const durationLabel = formatDuration(selectedSession?.duration_minutes);
 
 
   // Available dates for calendar
@@ -302,45 +338,50 @@ const AgendarSessaoPage = () => {
   // 48h de antecedência. Com 48h ou mais a sessão é confirmada automaticamente.
   const isSameDayBooking = useMemo(() => {
     if (!selectedDate || !selectedSlot) return false;
-    const start = new Date(`${format(selectedDate, "yyyy-MM-dd")}T${selectedSlot.startTime}:00`);
+    // Horário da plataforma (São Paulo), independente do fuso do navegador.
+    const start = parsePlatformDateTime(format(selectedDate, "yyyy-MM-dd"), `${selectedSlot.startTime}:00`);
+    if (!start) return false;
     const hours = (start.getTime() - Date.now()) / 3_600_000;
     return hours < 48;
   }, [selectedDate, selectedSlot]);
-
-
-  // "Sessão repetida": existe booking concluído para a mesma sessão
-  const previousCompletion = useMemo(() => {
-    if (!selectedSessionId) return null;
-    const past = bookings
-      .filter((b) => b.session_id === selectedSessionId && b.status === "completed")
-      .sort((a, b) => (a.scheduled_date < b.scheduled_date ? 1 : -1));
-    return past[0] || null;
-  }, [bookings, selectedSessionId]);
 
   // Confirm flow — now persists to database
   const handleConfirm = async (skipMonthlyWarning = false) => {
     if (isConfirming) return; // evita duplicidade em cliques repetidos
     if (!profile?.id || !selectedSessionId || !selectedDate || !selectedSlot) return;
+    const sessionToBook = sessions.find((s) => s.id === selectedSessionId);
+    if (!sessionToBook) return;
+
+    // D2: revalida a regra do Mapeamento com os dados mais recentes antes de gravar.
+    if (sessionToBook.is_kickoff && !canScheduleKickoff(allSessions, bookings)) {
+      toast.error(KICKOFF_NOT_ALLOWED_MESSAGE);
+      setSelectedSessionId(null);
+      setSelectedDate(null);
+      setSelectedSlot(null);
+      setStep(1);
+      return;
+    }
+    // O banco não aceita um 2º agendamento ativo da mesma sessão.
+    if (bookingStatusBySession.get(sessionToBook.id)) {
+      toast.error("Você já tem essa sessão agendada ou realizada. Escolha outra sessão da jornada.");
+      setStep(1);
+      return;
+    }
 
     const dateStr = format(selectedDate, "yyyy-MM-dd");
     const selectedMonth = dateStr.slice(0, 7);
 
-    // Limite real: sessões da jornada já utilizadas (12 + a sessão bônus).
-    const journeyUsed = bookings.filter(
-      (booking) => booking.status !== "cancelled" && booking.status !== "not_realized",
-    ).length;
-    if (journeyUsed >= 13) {
+    // Limite real (mesmo critério do banco): agendamentos ativos em sessões da jornada (order > 0).
+    // `bookings` já exclui cancelados e não realizados.
+    const journeySessionIds = new Set(allSessions.filter(isJourneySession).map((s) => s.id));
+    const journeyBookings = bookings.filter((booking) => journeySessionIds.has(booking.session_id));
+    if (journeyBookings.length >= JOURNEY_BOOKING_CAP) {
       setShowJourneyLimitModal(true);
       return;
     }
 
     // 2 por mês é apenas o ritmo recomendado — avisa uma vez, sem bloquear.
-    const monthlyCount = bookings.filter(
-      (booking) =>
-        booking.scheduled_date.startsWith(selectedMonth) &&
-        booking.status !== "cancelled" &&
-        booking.status !== "not_realized",
-    ).length;
+    const monthlyCount = journeyBookings.filter((booking) => booking.scheduled_date.startsWith(selectedMonth)).length;
     if (monthlyCount >= 2 && !skipMonthlyWarning && !monthlyOverride) {
       setShowLimitModal(true);
       return;
@@ -349,18 +390,18 @@ const AgendarSessaoPage = () => {
     setIsConfirming(true);
     setConfirmStep(0);
 
-    // Find a matching availability to link
+    // Disponibilidade correspondente: mesmo mentor da sessão, mesmo horário e tamanho compatível com a sessão.
     const matchingAvail = allAvailability.find((av) => {
       if (!selectedSessionMentorIds.has(av.mentor_id)) return false;
-      if (av.specific_date === dateStr && av.start_time.slice(0, 5) === selectedSlot.startTime) return true;
-      if (av.is_recurring && getDay(selectedDate) === av.day_of_week && av.start_time.slice(0, 5) === selectedSlot.startTime) return true;
-      return false;
+      if (!slotFitsSession(av, sessionToBook)) return false;
+      if (av.start_time.slice(0, 5) !== selectedSlot.startTime) return false;
+      if (av.specific_date === dateStr) return true;
+      return Boolean(av.is_recurring) && getDay(selectedDate) === av.day_of_week;
     });
 
     const mentorId = matchingAvail?.mentor_id;
     if (!mentorId) {
       setIsConfirming(false);
-      const { toast } = await import("sonner");
       toast.error("Esse horário não está mais disponível para esta sessão.");
       return;
     }
@@ -368,7 +409,9 @@ const AgendarSessaoPage = () => {
     // Menos de 48h: precisa de aprovação do administrador.
     // 48h ou mais: confirmada automaticamente na agenda.
     const needsApproval = isSameDayBooking;
-    const bookingStatus = isSameDayBooking ? "pending_approval" : ("scheduled" as const);
+    const bookingStatus: "pending_approval" | "scheduled" = needsApproval ? "pending_approval" : "scheduled";
+    // Fim sempre pela duração da sessão escolhida (Mapeamento = 3h), nunca pelo tamanho do slot.
+    const endTime = endTimeFor(selectedSlot.startTime, sessionMinutes(sessionToBook));
 
     const { data: created, error } = await supabase.from("bookings").insert({
       liberty_id: profile.id,
@@ -376,10 +419,9 @@ const AgendarSessaoPage = () => {
       session_id: selectedSessionId,
       scheduled_date: dateStr,
       start_time: selectedSlot.startTime + ":00",
-      end_time: selectedSlot.endTime + ":00",
-      status: bookingStatus as any,
+      end_time: endTime + ":00",
+      status: bookingStatus,
       approval_required: needsApproval,
-
       observations: notes || null,
       availability_id: matchingAvail?.id || null,
       created_by: user?.id ?? null,
@@ -388,26 +430,37 @@ const AgendarSessaoPage = () => {
     if (error) {
       console.error("Booking error:", error);
       setIsConfirming(false);
-      const { toast } = await import("sonner");
-      // 23505 = índice único do banco: alguém reservou esse horário primeiro
       if (isJourneyBookingLimitError(error)) {
         setShowJourneyLimitModal(true);
       } else if (isMonthlyBookingLimitError(error)) {
         setShowLimitModal(true);
-      } else if (isKickoffRequiredError(error)) {
-        toast.error("Conclua o Mapeamento do Negócio antes de agendar outra sessão.");
+      } else if (isKickoffNotAllowedError(error)) {
+        toast.error(KICKOFF_NOT_ALLOWED_MESSAGE);
+        setStep(1);
+      } else if (isDuplicateSessionError(error)) {
+        toast.error("Você já tem essa sessão agendada ou realizada. Escolha outra sessão da jornada.");
+        setStep(1);
       } else if (error.code === "23505") {
+        // Índice único de horário do mentor: alguém reservou esse horário primeiro.
         toast.error("Esse horário acabou de ser reservado. Escolha outro horário.");
+        setSelectedSlot(null);
+        setStep(3);
       } else {
         toast.error("Erro ao agendar sessão. Tente novamente.");
       }
+      // Recarrega agendamentos e disponibilidade para a tela refletir o estado real.
+      void invalidateMemberBookingQueries(queryClient);
       return;
     }
 
     // Mark the slot as booked so it disappears from every other session/member
     // (mentor can only do one session at that time, even if pending approval).
     if (matchingAvail) {
-      await supabase.from("mentor_availability").update({ is_booked: true }).eq("id", matchingAvail.id);
+      const { error: availError } = await supabase
+        .from("mentor_availability")
+        .update({ is_booked: true })
+        .eq("id", matchingAvail.id);
+      if (availError) console.error("Availability update error:", availError);
     }
 
     // Confirmada automaticamente → já cria o evento no Google Agenda.
@@ -418,7 +471,8 @@ const AgendarSessaoPage = () => {
         .catch(() => {});
     }
 
-
+    // Dashboard, Jornada, Agenda e visão geral precisam refletir o novo agendamento na hora.
+    void invalidateMemberBookingQueries(queryClient);
   };
 
   useEffect(() => {
@@ -455,285 +509,265 @@ const AgendarSessaoPage = () => {
   if (profile && profile.is_active === false) {
     return (
       <AppLayout role="liberty">
-        <div className="max-w-xl mx-auto mt-16">
-          <div className="glass-card p-8 text-center space-y-3">
-            <h1 className="text-xl font-semibold text-foreground">Programa encerrado</h1>
-            <p className="text-sm text-muted-foreground">
+        <PageContainer variant="narrow">
+          <PageHeader title="Programa encerrado" back="/jornada" />
+          <Callout tone="info" icon={Info} className="mt-6">
+            <p>
               Seu programa foi finalizado, então novas sessões não podem mais ser agendadas.
               Você continua com acesso aos seus materiais, relatórios e histórico.
             </p>
-            <p className="text-xs text-muted-foreground">Quer voltar a agendar? Fale com nosso suporte.</p>
-          </div>
-        </div>
+            <p className="mt-2 text-xs text-muted-foreground">Quer voltar a agendar? Fale com nosso suporte.</p>
+          </Callout>
+        </PageContainer>
       </AppLayout>
     );
   }
 
+  const goBack = () => {
+    if (step === 2 && hasPreselection) {
+      // Volta para a jornada em vez do passo 1
+      window.history.back();
+      return;
+    }
+    if (step === 3) { setSelectedDate(null); setSelectedSlot(null); }
+    if (step === 4) setSelectedSlot(null);
+    setStep(step - 1);
+  };
+
+  const stepTitle =
+    step === 1 ? "Qual sessão você quer fazer?"
+    : step === 2 ? "Escolha uma data"
+    : step === 3 ? "Escolha um horário"
+    : "Confirmar agendamento";
+
   return (
     <AppLayout role="liberty">
+      <PageContainer variant="narrow" className={step === 4 && !confirmed && !isConfirming ? "pb-28 sm:pb-0" : undefined}>
       <motion.div
         variants={staggerContainer}
         initial="hidden"
         animate="show"
-        className="max-w-2xl mx-auto space-y-6"
+        className="space-y-6"
       >
-        {/* Header */}
+        {/* Cabeçalho */}
         {!confirmed && !isConfirming && (
-          <motion.div variants={fadeUpItem} className="flex items-center gap-3">
-            {step > 1 && (
-              <button
-                onClick={() => {
-                  if (step === 2 && hasPreselection) {
-                    // Go back to journey instead of step 1
-                    window.history.back();
-                    return;
-                  }
-                  if (step === 3) { setSelectedDate(null); setSelectedSlot(null); }
-                  if (step === 4) setSelectedSlot(null);
-                  setStep(step - 1);
-                }}
-                className="p-2 rounded-lg hover:bg-muted transition-colors"
-              >
-                <ArrowLeft className="h-4 w-4 text-muted-foreground" />
-              </button>
-            )}
-            <div>
-              <h1 className="text-2xl font-semibold text-foreground">
-                {selectedSession && step >= 2 ? `Agendar: ${selectedSession.name}` : "Agendar Sessão"}
-              </h1>
-              <p className="text-muted-foreground text-sm">Etapa {displayStep} de {totalSteps}</p>
-            </div>
-          </motion.div>
-        )}
-
-        {/* Progress bar */}
-        {!confirmed && !isConfirming && (
-          <motion.div variants={fadeUpItem} className="w-full h-1.5 bg-muted rounded-full overflow-hidden">
-            <motion.div
-              className="h-full rounded-full bg-gradient-to-r from-primary/60 to-primary"
-              animate={{ width: `${(displayStep / totalSteps) * 100}%` }}
-              transition={{ duration: 0.4 }}
+          <motion.div variants={fadeUpItem} className="space-y-4">
+            <PageHeader
+              eyebrow={`Passo ${displayStep} de ${totalSteps}`}
+              title={stepTitle}
+              description={selectedSession && step >= 2 ? selectedSession.name : "Agende sua próxima sessão de mentoria."}
+              back={step > 1 ? goBack : undefined}
             />
+            <ProgressBar value={displayStep} max={totalSteps} tone="brand" label={`Passo ${displayStep} de ${totalSteps}`} />
           </motion.div>
         )}
 
         <AnimatePresence mode="wait">
-          {/* ═══════ CONFIRMING ANIMATION ═══════ */}
+          {/* ═══════ CONFIRMANDO ═══════ */}
           {isConfirming && (
             <motion.div
               key="confirming"
-              initial={{ opacity: 0, scale: 0.95 }}
-              animate={{ opacity: 1, scale: 1 }}
-              exit={{ opacity: 0, scale: 0.95 }}
-              className="glass-card p-10 text-center space-y-8"
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
             >
-              <div className="space-y-6">
-                {confirmSteps.map((cs, i) => {
-                  const StepIcon = cs.icon;
-                  const isDone = confirmStep > i;
-                  const isActive = confirmStep === i;
-                  return (
-                    <motion.div
-                      key={i}
-                      initial={{ opacity: 0, x: -20 }}
-                      animate={{ opacity: i <= confirmStep ? 1 : 0.3, x: 0 }}
-                      transition={{ delay: i * 0.15, duration: 0.3 }}
-                      className={`flex items-center gap-4 ${
-                        isDone ? "text-status-green" : isActive ? "text-primary" : "text-muted-foreground"
-                      }`}
-                    >
-                      <div
-                        className={`w-10 h-10 rounded-full flex items-center justify-center border transition-all ${
-                          isDone ? "bg-status-green/15 border-status-green"
-                            : isActive ? "bg-primary/10 border-primary/20"
-                            : "border-border"
-                        }`}
+              <SectionCard aria-live="polite" aria-busy="true">
+                <ol className="space-y-5 list-none m-0 p-0">
+                  {confirmSteps.map((cs, i) => {
+                    const StepIcon = cs.icon;
+                    const isDone = confirmStep > i;
+                    const isActive = confirmStep === i;
+                    return (
+                      <li
+                        key={i}
+                        className={cn(
+                          "flex items-center gap-4 transition-opacity duration-ds-2 ease-ds",
+                          i > confirmStep && "opacity-40",
+                        )}
                       >
-                        {isDone ? <Check className="h-4 w-4" /> : isActive ? <Loader2 className="h-4 w-4 animate-spin" /> : <StepIcon className="h-4 w-4" />}
-                      </div>
-                      <span className={`text-sm font-medium ${isDone ? "text-status-green" : isActive ? "text-foreground" : ""}`}>
-                        {cs.label}
-                      </span>
-                    </motion.div>
-                  );
-                })}
-              </div>
+                        <div
+                          className={cn(
+                            "w-10 h-10 rounded-full flex items-center justify-center border shrink-0",
+                            isDone ? "bg-status-green/15 border-status-green/30 text-status-green"
+                              : isActive ? "bg-primary/10 border-primary/20 text-primary"
+                              : "border-border text-muted-foreground",
+                          )}
+                        >
+                          {isDone ? <Check className="h-4 w-4" aria-hidden /> : isActive ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden /> : <StepIcon className="h-4 w-4" aria-hidden />}
+                        </div>
+                        <span className={cn("text-sm font-medium", isDone ? "text-status-green" : isActive ? "text-foreground" : "text-muted-foreground")}>
+                          {cs.label}
+                        </span>
+                      </li>
+                    );
+                  })}
+                </ol>
+              </SectionCard>
             </motion.div>
           )}
 
           {/* ═══════ SUCCESS SCREEN ═══════ */}
           {confirmed && (
-            <motion.div key="confirmed" initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="space-y-6 text-center">
-              <motion.div
-                initial={{ scale: 0, opacity: 0 }}
-                animate={{ scale: 1, opacity: 1 }}
-                transition={{ type: "spring", stiffness: 160, damping: 14, delay: 0.1 }}
-                className="relative mx-auto w-24 h-24"
-              >
-                <motion.div initial={{ scale: 0 }} animate={{ scale: [0, 1.3, 1] }} transition={{ duration: 0.6, delay: 0.15 }} className="absolute inset-0 rounded-full bg-primary/10" />
-                <motion.div initial={{ scale: 0 }} animate={{ scale: 1 }} transition={{ type: "spring", stiffness: 200, delay: 0.3 }} className="absolute inset-2 rounded-full bg-status-green/15 border border-status-green/15 flex items-center justify-center">
-                  <Check className="h-10 w-10 text-status-green" />
-                </motion.div>
-              </motion.div>
-
-              <motion.div initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.5 }}>
-                <h2 className="text-2xl font-semibold text-foreground">Solicitação enviada ✦</h2>
-                <p className="text-muted-foreground text-sm mt-2">
-                  Seu horário está reservado e aguardando a confirmação do mentor. Você será notificado assim que ele responder.
-                </p>
-              </motion.div>
-
-              <motion.div initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.65 }} className="glass-card p-6 text-left max-w-sm mx-auto" style={{ transform: "none" }}>
-                <p className="text-xs text-muted-foreground uppercase tracking-wider mb-4 font-medium">✦ Confirmação de Sessão</p>
-                <div className="space-y-3 text-sm">
-                  <div className="flex justify-between">
-                    <span className="text-muted-foreground">Sessão</span>
-                    <span className="text-foreground font-medium">{selectedSession?.name}</span>
-                  </div>
-                  <div className="border-t border-border" />
-                  <div className="flex justify-between">
-                    <span className="text-muted-foreground">Data</span>
-                    <span className="text-foreground font-medium">{selectedDate && format(selectedDate, "EEEE, dd 'de' MMMM", { locale: ptBR })}</span>
-                  </div>
-                  <div className="border-t border-border" />
-                  <div className="flex justify-between">
-                    <span className="text-muted-foreground">Horário</span>
-                    <span className="text-foreground font-medium tabular-nums">{selectedSlot?.startTime} – {selectedSlot?.endTime}</span>
-                  </div>
-                  <div className="border-t border-border" />
-                  <div className="flex justify-between">
-                    <span className="text-muted-foreground">Duração</span>
-                    <span className="text-foreground font-medium">{selectedSession?.duration_minutes ? `${Math.floor(selectedSession.duration_minutes / 60)}h ${selectedSession.duration_minutes % 60}min` : "1h 30min"}</span>
-                  </div>
-                  <div className="border-t border-border" />
-                  <div className="flex justify-between">
-                    <span className="text-muted-foreground">Formato</span>
-                    <span className="text-foreground font-medium">Online via Zoom</span>
-                  </div>
+            <motion.div key="confirmed" initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} className="space-y-6">
+              <div className="text-center space-y-4">
+                <div className="mx-auto w-16 h-16 rounded-full bg-status-green/15 flex items-center justify-center">
+                  <Check className="h-8 w-8 text-status-green" aria-hidden />
                 </div>
-              </motion.div>
+                <PageHeader
+                  title={isSameDayBooking ? "Solicitação enviada" : "Sessão agendada"}
+                  description={
+                    isSameDayBooking
+                      ? "Como o horário começa em menos de 48 horas, a sessão aguarda a aprovação da equipe. Você será avisado assim que for confirmada."
+                      : "Seu horário está confirmado na agenda do mentor. O link do Zoom chega por e-mail e fica disponível na sua agenda."
+                  }
+                  className="justify-center text-center"
+                />
+              </div>
 
-              <motion.div initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.8 }} className="flex flex-col gap-3 max-w-sm mx-auto">
-                <Link to="/jornada" className="btn-silver text-sm flex items-center justify-center gap-2">
-                  Ver minha jornada <ArrowRight className="h-3.5 w-3.5" />
-                </Link>
-                <a href={googleCalendarUrl} target="_blank" rel="noopener noreferrer" className="py-3 border border-border rounded-lg text-sm text-muted-foreground hover:text-foreground hover:border-primary/30 transition-colors flex items-center justify-center gap-2">
-                  <CalendarIcon className="h-4 w-4" /> Adicionar ao Google Agenda
-                </a>
-              </motion.div>
+              <SectionCard tone="brand">
+                <p className="ds-kicker mb-4">Resumo da sessão</p>
+                <dl className="space-y-3 text-sm">
+                  <div className="flex justify-between gap-4">
+                    <dt className="text-muted-foreground">Sessão</dt>
+                    <dd className="text-foreground font-medium text-right">{selectedSession?.name}</dd>
+                  </div>
+                  <div className="border-t border-border" />
+                  <div className="flex justify-between gap-4">
+                    <dt className="text-muted-foreground">Data</dt>
+                    <dd className="text-foreground font-medium text-right first-letter:uppercase">{selectedDate && format(selectedDate, "EEEE, dd 'de' MMMM", { locale: ptBR })}</dd>
+                  </div>
+                  <div className="border-t border-border" />
+                  <div className="flex justify-between gap-4">
+                    <dt className="text-muted-foreground">Horário</dt>
+                    <dd className="text-foreground font-medium tabular-nums">{selectedSlot?.startTime} às {selectedSlot?.endTime}</dd>
+                  </div>
+                  <div className="border-t border-border" />
+                  <div className="flex justify-between gap-4">
+                    <dt className="text-muted-foreground">Duração</dt>
+                    <dd className="text-foreground font-medium">{durationLabel}</dd>
+                  </div>
+                  <div className="border-t border-border" />
+                  <div className="flex justify-between gap-4">
+                    <dt className="text-muted-foreground">Formato</dt>
+                    <dd className="text-foreground font-medium">Online via Zoom</dd>
+                  </div>
+                </dl>
+              </SectionCard>
+
+              <div className="flex flex-col gap-3">
+                <Button asChild size="lg" className="w-full">
+                  <Link to="/jornada">
+                    Ver minha jornada <ArrowRight className="h-4 w-4" aria-hidden />
+                  </Link>
+                </Button>
+                <Button asChild variant="outline" size="lg" className="w-full">
+                  <a href={googleCalendarUrl} target="_blank" rel="noopener noreferrer">
+                    <CalendarIcon className="h-4 w-4" aria-hidden /> Adicionar ao Google Agenda
+                  </a>
+                </Button>
+              </div>
             </motion.div>
           )}
 
           {/* ═══════ STEP 1 — Choose Session ═══════ */}
           {!isConfirming && !confirmed && step === 1 && (
-            <motion.div key="step1" initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -20 }} className="space-y-4">
-              <h2 className="text-lg font-medium text-foreground">Qual sessão você quer fazer?</h2>
-
-              {kickoffPending && kickoffSession && !hideKickoff && (
-                <div className="rounded-xl border border-primary/30 bg-primary/5 p-4 text-xs text-foreground/90">
-                  {kickoffRequired ? (
-                    <>
-                      <p className="font-semibold text-primary mb-1">
-                        {kickoffScheduled ? "✦ Mapeamento do Negócio agendado" : "✦ Comece pelo Mapeamento do Negócio"}
-                      </p>
-                      <p className="text-muted-foreground">
-                        {kickoffScheduled
-                          ? "As demais sessões serão liberadas assim que o Mapeamento do Negócio for concluído."
-                          : "Essa sessão de kickoff (3h) mapeia todos os setores da sua empresa e é a primeira etapa obrigatória da jornada. Ela precisa ser concluída para liberar as demais sessões."}
-                      </p>
-                    </>
-                  ) : (
-                    <>
-                      <p className="font-semibold text-primary mb-1">✦ Mapeamento do Negócio disponível</p>
-                      <p className="text-muted-foreground">
-                        Você já avançou na jornada, então pode agendar qualquer sessão livremente.
-                      </p>
-                    </>
-                  )}
-                </div>
+            <motion.div key="step1" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="space-y-4">
+              {kickoffPending && kickoffSession && kickoffAllowed && (
+                <Callout tone="brand" icon={Star} title="Mapeamento do Negócio: recomendado para o início da jornada">
+                  Sessão de 3h que mapeia todos os setores da sua empresa. Pode ser agendada até a 3ª sessão realizada.
+                  Você também pode escolher qualquer outra sessão.
+                </Callout>
               )}
 
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              {isJourneyLoading && visibleSessions.length === 0 && (
+                <LoadingState variant="cards" rows={4} />
+              )}
+
+              {!isJourneyLoading && visibleSessions.length === 0 && (
+                <EmptyState
+                  icon={CalendarIcon}
+                  title="Nenhuma sessão disponível para agendar"
+                  description="Todas as sessões da sua jornada já foram agendadas ou realizadas."
+                  action={
+                    <Button asChild variant="outline">
+                      <Link to="/jornada">Ver minha jornada</Link>
+                    </Button>
+                  }
+                />
+              )}
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3" role="list">
                 {visibleSessions.map((session) => {
                   const status = bookingStatusBySession.get(session.id)?.status;
                   const isCompleted = status === "completed";
-                  const isScheduled = status === "scheduled";
-                  const isKickoff = Boolean((session as any).is_kickoff);
-                  const lockedByKickoff = kickoffRequired && !isKickoff;
+                  // Agendada ou "A confirmar": ocupa a vaga, o banco não aceita um 2º agendamento.
+                  const isScheduled = status === "scheduled" || status === "pending_confirmation";
+                  const isKickoff = Boolean(session.is_kickoff);
 
-                  const isDisabled = isCompleted || isScheduled || lockedByKickoff;
+                  const isDisabled = isCompleted || isScheduled;
 
                   return (
-                    <button
+                    <SectionCard
                       key={session.id}
-                      disabled={isDisabled}
+                      as="button"
+                      interactive={!isDisabled}
+                      tone={isKickoff && !isDisabled ? "brand" : "default"}
+                      padding="none"
+                      role="listitem"
+                      aria-disabled={isDisabled}
+                      tabIndex={isDisabled ? -1 : undefined}
                       onClick={() => {
+                        if (isDisabled) return;
                         setSelectedSessionId(session.id);
                         setSelectedDate(null);
                         setSelectedSlot(null);
                         setStep(2);
                       }}
-                      className={`dark glass-card text-left relative transition-all overflow-hidden bg-card text-card-foreground ${
-                        isKickoff ? "sm:col-span-2 border-primary/50 ring-1 ring-primary/30 shadow-[0_0_24px_-8px_rgba(74,122,184,0.35)]" : ""
-                      } ${
-                        isDisabled ? "opacity-50 cursor-not-allowed hover:transform-none hover:border-border hover:shadow-none" : "cursor-pointer"
-                      }`}
+                      className={cn(
+                        "text-left overflow-hidden",
+                        isKickoff && "sm:col-span-2",
+                        isDisabled && "opacity-60 cursor-not-allowed",
+                      )}
                     >
                       {session.cover_image_url && (
-                        <div className="relative h-20 w-full overflow-hidden">
-                          <img src={session.cover_image_url} alt={session.name} className="w-full h-full object-cover" />
-                          <div className="absolute inset-0 bg-gradient-to-t from-background via-background/40 to-transparent" />
+                        <div className="relative h-24 w-full overflow-hidden">
+                          <img src={session.cover_image_url} alt="" className="w-full h-full object-cover" />
                         </div>
                       )}
-                      <div className="p-5">
-                        {isCompleted && <div className="absolute top-0 left-0 right-0 h-0.5 bg-status-green/50" />}
-                        {isKickoff && !isCompleted && !isScheduled && (
-                          <div className="absolute top-0 left-0 right-0 h-0.5 bg-gradient-to-r from-primary/40 via-primary to-primary/40" />
-                        )}
-
-                        <div className="flex items-start justify-between mb-3 gap-2 flex-wrap">
-                          {isCompleted ? (
-                            <span className="status-badge bg-status-green/15 text-status-green border border-border text-[10px]">
-                              <Check className="h-3 w-3" /> Concluída
-                            </span>
-                          ) : isScheduled ? (
-                            <span className="status-badge bg-status-blue/15 text-status-blue border border-border text-[10px]">
-                              <Clock className="h-3 w-3" /> Agendada
-                            </span>
-                          ) : lockedByKickoff ? (
-                            <span className="status-badge bg-muted text-muted-foreground border border-border text-[10px]">
-                              🔒 Faça o Mapeamento primeiro
+                      <div className="p-4 sm:p-5">
+                        <div className="flex items-start justify-between mb-2 gap-2 flex-wrap">
+                          {status ? (
+                            <span title={status === "pending_confirmation" ? PENDING_CONFIRMATION_HINT : undefined} className="inline-flex">
+                              <StatusPill status={status} size="sm" />
                             </span>
                           ) : (
-                            <span className="status-badge bg-status-green/10 text-status-green border border-border text-[10px]">
-                              Disponível
-                            </span>
+                            <StatusPill tone="success" size="sm">Disponível</StatusPill>
                           )}
                           {isKickoff && (
-                            <span className="text-[10px] px-2 py-0.5 rounded-full bg-primary/15 text-primary border border-primary/30 font-semibold uppercase tracking-wider">
-                              ✦ Kickoff · Comece por aqui
-                            </span>
+                            <StatusPill tone="brand" size="sm" withDot={false}>
+                              <Star className="h-3 w-3" aria-hidden /> Mapeamento · recomendado
+                            </StatusPill>
                           )}
                         </div>
 
-                        <h3 className={`font-medium text-foreground mb-1 ${isKickoff ? "text-base" : "text-sm"}`}>{session.name}</h3>
-                        <div className="flex items-center gap-2 mb-2">
+                        <h3 className="text-[17px] font-semibold text-foreground leading-tight mb-1">{session.name}</h3>
+                        <div className="flex items-center gap-2 mb-2 flex-wrap">
                           {session.pillar && (
-                            <span className={`text-[10px] px-2 py-0.5 rounded-full ${pillarClass[session.pillar] || "bg-muted text-muted-foreground"}`}>
+                            <span className={cn("text-xs px-2 h-[22px] inline-flex items-center rounded-full", pillarClass[session.pillar] || "bg-muted text-muted-foreground")}>
                               {pillarLabels[session.pillar] || session.pillar}
                             </span>
                           )}
-                          <span className="text-[10px] text-muted-foreground flex items-center gap-1">
-                            <Clock className="h-2.5 w-2.5" /> {formatDuration(session.duration_minutes)}
+                          <span className="text-xs text-muted-foreground inline-flex items-center gap-1">
+                            <Clock className="h-3 w-3" aria-hidden /> {formatDuration(session.duration_minutes)}
                           </span>
                         </div>
                         {session.description && (
-                          <p className="text-xs text-muted-foreground leading-relaxed line-clamp-3">
+                          <p className="text-sm text-muted-foreground leading-relaxed line-clamp-3">
                             {session.description}
                           </p>
                         )}
                       </div>
-                    </button>
+                    </SectionCard>
                   );
                 })}
               </div>
@@ -743,259 +777,227 @@ const AgendarSessaoPage = () => {
 
           {/* ═══════ STEP 2 — Choose Date ═══════ */}
           {!isConfirming && !confirmed && step === 2 && (
-            <motion.div key="step2" initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -20 }} className="space-y-4">
-              <div>
-                <h2 className="text-lg font-medium text-foreground">Escolha uma data</h2>
-                <p className="text-xs text-muted-foreground mt-1">
-                  {selectedSession?.name} · Dias com horários disponíveis estão destacados
+            <motion.div key="step2" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="space-y-4">
+              {selectedSession?.description && (
+                <p className="text-sm text-muted-foreground leading-relaxed">
+                  {selectedSession.description}
                 </p>
-                {selectedSession?.description && (
-                  <p className="text-xs text-muted-foreground/90 mt-2 leading-relaxed max-w-2xl">
-                    {selectedSession.description}
-                  </p>
-                )}
-              </div>
+              )}
 
-              <div className="glass-card p-5" style={{ transform: "none" }}>
-                <div className="flex items-center justify-between mb-4">
-                  <button onClick={() => setCalendarMonth(new Date(calendarMonth.getFullYear(), calendarMonth.getMonth() - 1, 1))} className="p-1.5 rounded-lg hover:bg-muted transition-colors">
-                    <ChevronLeft className="h-4 w-4 text-muted-foreground" />
-                  </button>
-                  <span className="text-sm font-semibold text-foreground capitalize">{format(calendarMonth, "MMMM yyyy", { locale: ptBR })}</span>
-                  <button onClick={() => setCalendarMonth(new Date(calendarMonth.getFullYear(), calendarMonth.getMonth() + 1, 1))} className="p-1.5 rounded-lg hover:bg-muted transition-colors">
-                    <ChevronRight className="h-4 w-4 text-muted-foreground" />
-                  </button>
+              <SectionCard padding="compact">
+                <div className="flex items-center justify-between mb-3">
+                  <IconButton
+                    aria-label="Mês anterior"
+                    onClick={() => setCalendarMonth(new Date(calendarMonth.getFullYear(), calendarMonth.getMonth() - 1, 1))}
+                  >
+                    <ChevronLeft className="h-4 w-4" />
+                  </IconButton>
+                  <span className="text-sm font-semibold text-foreground first-letter:uppercase" aria-live="polite">
+                    {format(calendarMonth, "MMMM yyyy", { locale: ptBR })}
+                  </span>
+                  <IconButton
+                    aria-label="Próximo mês"
+                    onClick={() => setCalendarMonth(new Date(calendarMonth.getFullYear(), calendarMonth.getMonth() + 1, 1))}
+                  >
+                    <ChevronRight className="h-4 w-4" />
+                  </IconButton>
                 </div>
 
-                <div className="grid grid-cols-7 gap-1.5 mb-1">
+                <div className="grid grid-cols-7 gap-1 mb-1" aria-hidden>
                   {WEEKDAY_LABELS.map((w) => (
-                    <div key={w} className="text-[10px] text-muted-foreground text-center font-medium py-1">{w}</div>
+                    <div key={w} className="text-xs text-muted-foreground text-center font-medium py-1">{w}</div>
                   ))}
                 </div>
 
-                <div className="grid grid-cols-7 gap-1.5">
+                <div className="grid grid-cols-7 gap-1" role="grid" aria-label="Dias do mês">
                   {calendarDays.map((day, i) => {
                     if (!day) return <div key={`e-${i}`} className="aspect-square" />;
 
                     const hasAvail = availableDates.has(day.toDateString());
                     const isPast = isBefore(day, new Date()) && !isToday(day);
                     const isClickable = hasAvail && !isPast;
-                    const isSelected = selectedDate && isSameDay(day, selectedDate);
+                    const isSelected = Boolean(selectedDate && isSameDay(day, selectedDate));
 
                     return (
                       <button
                         key={day.toISOString()}
+                        type="button"
                         disabled={!isClickable}
+                        aria-pressed={isSelected}
+                        aria-label={`${format(day, "EEEE, dd 'de' MMMM", { locale: ptBR })}${isClickable ? ", com horários" : ", indisponível"}`}
                         onClick={() => {
                           setSelectedDate(day);
                           setSelectedSlot(null);
                           setStep(3);
                         }}
-                        className={`aspect-square rounded-lg text-xs font-medium relative flex items-center justify-center transition-all ${
-                          isSelected ? "bg-primary text-primary-foreground ring-2 ring-primary/40"
-                            : isClickable ? "bg-primary/8 text-foreground hover:bg-primary/15 cursor-pointer"
-                            : "text-muted-foreground/40 cursor-not-allowed"
-                        }`}
+                        className={cn(
+                          "aspect-square min-h-[44px] rounded-ds text-sm font-medium relative flex items-center justify-center transition-colors duration-ds-1 ease-ds",
+                          "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 ring-offset-background",
+                          isSelected ? "bg-primary text-primary-foreground"
+                            : isClickable ? "bg-primary/10 text-foreground hover:bg-primary/15"
+                            : "text-muted-foreground/40 cursor-not-allowed",
+                        )}
                       >
                         {day.getDate()}
                         {hasAvail && !isSelected && (
-                          <span className="absolute bottom-1 left-1/2 -translate-x-1/2 w-1 h-1 rounded-full bg-primary" />
+                          <span aria-hidden className="absolute bottom-1.5 left-1/2 -translate-x-1/2 w-1 h-1 rounded-full bg-primary" />
                         )}
                       </button>
                     );
                   })}
                 </div>
 
-                <div className="flex items-center gap-4 mt-4 text-[10px] text-muted-foreground">
-                  <div className="flex items-center gap-1.5"><span className="w-2 h-2 rounded-full bg-primary/30" /> Com horários</div>
-                  <div className="flex items-center gap-1.5"><span className="w-2 h-2 rounded-full bg-muted" /> Indisponível</div>
+                <div className="flex items-center gap-4 mt-4 text-xs text-muted-foreground">
+                  <div className="flex items-center gap-1.5"><span aria-hidden className="w-2.5 h-2.5 rounded-full bg-primary/30" /> Com horários</div>
+                  <div className="flex items-center gap-1.5"><span aria-hidden className="w-2.5 h-2.5 rounded-full bg-muted" /> Indisponível</div>
                 </div>
-              </div>
+              </SectionCard>
             </motion.div>
           )}
 
-          {/* ═══════ STEP 3 — Choose Time ═══════ */}
+          {/* ═══════ PASSO 3: horário ═══════ */}
           {!isConfirming && !confirmed && step === 3 && selectedDate && (
-            <motion.div key="step3" initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -20 }} className="space-y-4">
-              <div>
-                <h2 className="text-lg font-medium text-foreground">Escolha um horário</h2>
-                <p className="text-sm text-muted-foreground capitalize">{format(selectedDate, "EEEE, dd 'de' MMMM 'de' yyyy", { locale: ptBR })}</p>
-              </div>
+            <motion.div key="step3" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="space-y-4">
+              <p className="text-sm text-muted-foreground first-letter:uppercase">
+                {format(selectedDate, "EEEE, dd 'de' MMMM 'de' yyyy", { locale: ptBR })} · {durationLabel} · Zoom
+              </p>
 
-              <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
-                {slotsForDate.map((slot, i) => {
-                  const isSelected = selectedSlot?.startTime === slot.startTime;
-                  return (
-                    <button
-                      key={i}
-                      onClick={() => {
-                        setSelectedSlot({ startTime: slot.startTime, endTime: endForSession(slot.startTime) });
-                        setStep(4);
-                      }}
-                      className={`p-4 rounded-xl border text-center transition-all ${
-                        isSelected ? "bg-primary text-primary-foreground border-primary/20" : "bg-card border-border hover:border-primary/30"
-                      }`}
-                    >
-                      <span className="text-sm font-semibold tabular-nums">{slot.startTime} – {slot.endTime}</span>
-                      <p className={`text-[10px] mt-1 ${isSelected ? "text-primary-foreground/70" : "text-muted-foreground"}`}>
-                        {selectedSession?.duration_minutes ? `${Math.floor(selectedSession.duration_minutes / 60)}h ${selectedSession.duration_minutes % 60}min` : "1h 30min"} · Zoom
-                      </p>
-                    </button>
-                  );
-                })}
-              </div>
-
-              {slotsForDate.length === 0 && (
-                <div className="glass-card p-8 text-center" style={{ transform: "none" }}>
-                  <p className="text-sm text-muted-foreground">Nenhum horário disponível neste dia</p>
+              {slotsForDate.length > 0 ? (
+                <div className="flex flex-wrap gap-2" role="group" aria-label="Horários disponíveis">
+                  {slotsForDate.map((slot, i) => {
+                    const isSelected = selectedSlot?.startTime === slot.startTime;
+                    return (
+                      <Chip
+                        key={i}
+                        active={isSelected}
+                        className="h-11 px-4 text-sm tabular-nums"
+                        onClick={() => {
+                          setSelectedSlot({ startTime: slot.startTime, endTime: endForSession(slot.startTime) });
+                          setStep(4);
+                        }}
+                      >
+                        {slot.startTime} às {endForSession(slot.startTime)}
+                      </Chip>
+                    );
+                  })}
                 </div>
+              ) : (
+                <EmptyState
+                  compact
+                  icon={Clock}
+                  title="Nenhum horário disponível neste dia"
+                  description="Escolha outra data no calendário."
+                  action={
+                    <Button variant="outline" size="sm" onClick={goBack}>Escolher outra data</Button>
+                  }
+                />
               )}
             </motion.div>
           )}
 
           {/* ═══════ STEP 4 — Confirm ═══════ */}
           {!isConfirming && !confirmed && step === 4 && (
-            <motion.div key="step4" initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -20 }} className="space-y-5">
-              <h2 className="text-lg font-medium text-foreground">Confirmar agendamento</h2>
-
-              <div className="rounded-lg border border-status-yellow/30 bg-status-yellow/5 p-4 flex gap-3">
-                <AlertTriangle className="h-5 w-5 text-status-yellow flex-shrink-0 mt-0.5" />
-                <div className="text-xs space-y-1">
-                  <p className="font-semibold text-status-yellow">Requer confirmação do mentor</p>
-                  <p className="text-muted-foreground leading-relaxed">
-                    O horário fica reservado no seu nome e o mentor recebe a solicitação na hora. Assim que ele confirmar,
-                    a sessão passa para <strong className="text-foreground">confirmada</strong> e entra na sua agenda.
-                    {isSameDayBooking && " Como este horário começa em menos de 48 horas, ele precisa de aprovação do administrador antes de ser confirmado."}
-                  </p>
-                </div>
-              </div>
-
-              {previousCompletion && (
-                <div className="rounded-lg border border-status-blue/30 bg-status-blue/5 p-4 flex gap-3">
-                  <Info className="h-5 w-5 text-status-blue flex-shrink-0 mt-0.5" />
-                  <div className="text-xs space-y-1">
-                    <p className="font-semibold text-status-blue">Sessão repetida</p>
-                    <p className="text-muted-foreground leading-relaxed">
-                      Você já realizou esta sessão em{" "}
-                      <strong className="text-foreground">
-                        {format(new Date(previousCompletion.scheduled_date + "T00:00:00"), "dd/MM/yyyy")}
-                      </strong>
-                      . Você pode repeti-la. Combine com seu mentor o novo foco deste encontro.
-                    </p>
-                  </div>
-                </div>
+            <motion.div key="step4" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="space-y-5">
+              {isSameDayBooking ? (
+                <Callout tone="warning" icon={AlertTriangle} title="Requer aprovação da equipe">
+                  Este horário começa em menos de 48 horas. Ele fica reservado no seu nome e a sessão passa para{" "}
+                  <strong className="text-foreground">confirmada</strong> assim que a equipe aprovar.
+                </Callout>
+              ) : (
+                <Callout tone="info" icon={Info} title="Confirmação automática">
+                  Com 48 horas ou mais de antecedência, a sessão entra confirmada na sua agenda e na do mentor.
+                  O link do Zoom chega por e-mail.
+                </Callout>
               )}
 
+              <SectionCard tone="brand">
+                <p className="ds-kicker mb-4">Resumo da sessão</p>
+                <dl className="space-y-3 text-sm">
+                  <div className="flex justify-between gap-4">
+                    <dt className="text-muted-foreground">Sessão</dt>
+                    <dd className="text-foreground font-medium text-right">{selectedSession?.name}</dd>
+                  </div>
+                  <div className="border-t border-border" />
+                  <div className="flex justify-between gap-4">
+                    <dt className="text-muted-foreground">Data</dt>
+                    <dd className="text-foreground font-medium text-right first-letter:uppercase">{selectedDate && format(selectedDate, "EEEE, dd 'de' MMMM", { locale: ptBR })}</dd>
+                  </div>
+                  <div className="border-t border-border" />
+                  <div className="flex justify-between gap-4">
+                    <dt className="text-muted-foreground">Horário</dt>
+                    <dd className="text-foreground font-medium tabular-nums">{selectedSlot?.startTime} às {selectedSlot?.endTime}</dd>
+                  </div>
+                  <div className="border-t border-border" />
+                  <div className="flex justify-between gap-4">
+                    <dt className="text-muted-foreground">Duração</dt>
+                    <dd className="text-foreground font-medium">{durationLabel}</dd>
+                  </div>
+                  <div className="border-t border-border" />
+                  <div className="flex justify-between gap-4">
+                    <dt className="text-muted-foreground">Formato</dt>
+                    <dd className="text-foreground font-medium">Online via Zoom</dd>
+                  </div>
+                </dl>
+              </SectionCard>
 
-              <div className="glass-card p-6 relative overflow-hidden" style={{ transform: "none" }}>
-                <div className="absolute top-0 left-0 right-0 h-0.5 bg-gradient-to-r from-primary/40 via-primary to-primary/40" />
-                <p className="text-xs text-muted-foreground uppercase tracking-wider mb-5 font-medium">✦ Confirmação de Sessão</p>
-                <div className="space-y-4 text-sm">
-                  <div className="flex justify-between">
-                    <span className="text-muted-foreground">Sessão</span>
-                    <span className="text-foreground font-medium">{selectedSession?.name}</span>
-                  </div>
-                  <div className="border-t border-border" />
-                  <div className="flex justify-between">
-                    <span className="text-muted-foreground">Data</span>
-                    <span className="text-foreground font-medium capitalize">{selectedDate && format(selectedDate, "EEEE, dd 'de' MMMM", { locale: ptBR })}</span>
-                  </div>
-                  <div className="border-t border-border" />
-                  <div className="flex justify-between">
-                    <span className="text-muted-foreground">Horário</span>
-                    <span className="text-foreground font-medium tabular-nums">{selectedSlot?.startTime} – {selectedSlot?.endTime}</span>
-                  </div>
-                  <div className="border-t border-border" />
-                  <div className="flex justify-between">
-                    <span className="text-muted-foreground">Duração</span>
-                    <span className="text-foreground font-medium">{selectedSession?.duration_minutes ? `${Math.floor(selectedSession.duration_minutes / 60)}h ${selectedSession.duration_minutes % 60}min` : "1h 30min"}</span>
-                  </div>
-                  <div className="border-t border-border" />
-                  <div className="flex justify-between">
-                    <span className="text-muted-foreground">Formato</span>
-                    <span className="text-foreground font-medium">Online via Zoom</span>
-                  </div>
-                </div>
-              </div>
-
-              <div>
-                <label className="text-xs text-muted-foreground block mb-1.5">
-                  Deixe uma observação para o mentor <span className="text-muted-foreground/50">(opcional)</span>
-                </label>
-                <textarea
-                  value={notes}
-                  onChange={(e) => setNotes(e.target.value.slice(0, 300))}
-                  placeholder="Escreva aqui suas dúvidas ou pontos que gostaria de abordar..."
-                  className="w-full bg-card border border-border rounded-lg p-3 text-sm text-foreground placeholder:text-muted-foreground focus:border-primary/20 focus:outline-none resize-none h-24"
-                />
-                <p className="text-[10px] text-muted-foreground text-right mt-1 tabular-nums">{notes.length}/300</p>
-              </div>
+              <TextAreaField
+                label="Observação para o mentor (opcional)"
+                value={notes}
+                onChange={(e) => setNotes(e.target.value.slice(0, 300))}
+                placeholder="Escreva aqui suas dúvidas ou pontos que gostaria de abordar..."
+                rows={4}
+                className="resize-none"
+                hint={<span className="tabular-nums">{notes.length}/300</span>}
+              />
 
               <p className="text-xs text-muted-foreground text-center">
-                Após enviar, o mentor confirma a sessão e você recebe o link do Zoom por e-mail.
+                {isSameDayBooking
+                  ? "Após enviar, a equipe aprova a sessão e você recebe o link do Zoom por e-mail."
+                  : "Após confirmar, a sessão entra na sua agenda e você recebe o link do Zoom por e-mail."}
               </p>
 
-              <div className="flex flex-col gap-3">
-                <button onClick={() => handleConfirm()} className="btn-silver w-full text-sm">
-                  ENVIAR PARA CONFIRMAÇÃO
-                </button>
-                <button onClick={() => setStep(3)} className="py-3 border border-border rounded-lg text-sm text-muted-foreground hover:text-foreground transition-colors">Voltar</button>
+              {/* Ações: fixas na base no mobile, inline no desktop */}
+              <div className="fixed inset-x-0 bottom-0 z-30 border-t border-border bg-background/95 backdrop-blur px-4 pt-3 pb-[calc(env(safe-area-inset-bottom)+12px)] sm:static sm:border-0 sm:bg-transparent sm:backdrop-blur-0 sm:p-0">
+                <div className="mx-auto w-full max-w-2xl flex flex-col gap-2 sm:flex-row-reverse">
+                  <Button size="lg" className="w-full sm:w-auto" onClick={() => handleConfirm()}>
+                    {isSameDayBooking ? "Enviar para aprovação" : "Confirmar agendamento"}
+                  </Button>
+                  <Button variant="outline" size="lg" className="w-full sm:w-auto" onClick={() => setStep(3)}>
+                    Voltar
+                  </Button>
+                </div>
               </div>
             </motion.div>
           )}
         </AnimatePresence>
 
-        {/* ═══════ AVISO DE RITMO (2 por mês) — não bloqueia ═══════ */}
-        <AnimatePresence>
-          {showLimitModal && (
-            <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="fixed inset-0 bg-background/80 backdrop-blur-sm z-50 flex items-center justify-center p-4" onClick={() => setShowLimitModal(false)}>
-              <motion.div initial={{ scale: 0.9, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} exit={{ scale: 0.9, opacity: 0 }} onClick={(e) => e.stopPropagation()} className="glass-card p-6 max-w-sm w-full space-y-4" style={{ transform: "none" }}>
-                <div className="flex items-center gap-3 text-status-yellow">
-                  <AlertTriangle className="h-5 w-5" />
-                  <h3 className="text-sm font-semibold text-foreground">Você já tem 2 sessões neste mês</h3>
-                </div>
-                <p className="text-sm text-muted-foreground">
-                  O ritmo recomendado é de 2 sessões por mês, mas você ainda tem sessões disponíveis na sua jornada.
-                  Pode seguir com este agendamento se preferir.
-                </p>
-                <div className="flex flex-col gap-2">
-                  <button
-                    onClick={() => {
-                      setShowLimitModal(false);
-                      setMonthlyOverride(true);
-                      handleConfirm(true);
-                    }}
-                    className="btn-silver w-full text-sm"
-                  >
-                    Agendar mesmo assim
-                  </button>
-                  <button onClick={() => setShowLimitModal(false)} className="py-2.5 border border-border rounded-lg text-sm text-muted-foreground hover:text-foreground transition-colors">
-                    Escolher outra data
-                  </button>
-                </div>
-              </motion.div>
-            </motion.div>
-          )}
-        </AnimatePresence>
+        {/* ═══════ AVISO DE RITMO (2 por mês): não bloqueia ═══════ */}
+        <ConfirmDialog
+          open={showLimitModal}
+          onOpenChange={setShowLimitModal}
+          title="Você já tem 2 sessões neste mês"
+          description="O ritmo recomendado é de 2 sessões por mês, mas você ainda tem sessões disponíveis na sua jornada. Pode seguir com este agendamento se preferir."
+          confirmLabel="Agendar mesmo assim"
+          cancelLabel="Escolher outra data"
+          onConfirm={() => {
+            setShowLimitModal(false);
+            setMonthlyOverride(true);
+            handleConfirm(true);
+          }}
+        />
 
         {/* ═══════ JORNADA COMPLETA ═══════ */}
-        <AnimatePresence>
-          {showJourneyLimitModal && (
-            <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="fixed inset-0 bg-background/80 backdrop-blur-sm z-50 flex items-center justify-center p-4" onClick={() => setShowJourneyLimitModal(false)}>
-              <motion.div initial={{ scale: 0.9, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} exit={{ scale: 0.9, opacity: 0 }} onClick={(e) => e.stopPropagation()} className="glass-card p-6 max-w-sm w-full space-y-4" style={{ transform: "none" }}>
-                <div className="flex items-center gap-3 text-status-yellow">
-                  <AlertTriangle className="h-5 w-5" />
-                  <h3 className="text-sm font-semibold text-foreground">Jornada completa</h3>
-                </div>
-                <p className="text-sm text-muted-foreground">
-                  Todas as sessões da sua jornada já foram utilizadas. Fale com nosso suporte para liberar sessões extras.
-                </p>
-                <button onClick={() => setShowJourneyLimitModal(false)} className="btn-silver w-full text-sm">Entendi</button>
-              </motion.div>
-            </motion.div>
-          )}
-        </AnimatePresence>
+        <ConfirmDialog
+          open={showJourneyLimitModal}
+          onOpenChange={setShowJourneyLimitModal}
+          title="Jornada completa"
+          description="Todas as sessões da sua jornada já foram utilizadas. Fale com nosso suporte para liberar sessões extras."
+          confirmLabel="Entendi"
+          cancelLabel="Fechar"
+          onConfirm={() => setShowJourneyLimitModal(false)}
+        />
       </motion.div>
+      </PageContainer>
     </AppLayout>
   );
 };

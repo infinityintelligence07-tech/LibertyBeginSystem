@@ -22,7 +22,7 @@ export const EmptyState = ({
   return (
     <div
       className={cn(
-        "flex flex-col items-center justify-center text-center rounded-xl border border-dashed border-border bg-card/40",
+        "flex flex-col items-center justify-center text-center rounded-ds-lg border border-dashed border-border bg-card",
         compact ? "px-4 py-8 gap-2" : "px-6 py-12 gap-3",
         className,
       )}
@@ -30,19 +30,19 @@ export const EmptyState = ({
       {Icon && (
         <div
           className={cn(
-            "rounded-full bg-muted/60 text-muted-foreground flex items-center justify-center",
+            "rounded-full bg-muted text-muted-foreground flex items-center justify-center",
             compact ? "h-9 w-9" : "h-12 w-12",
           )}
         >
-          <Icon className={compact ? "h-4 w-4" : "h-5 w-5"} />
+          <Icon className={compact ? "h-4 w-4" : "h-5 w-5"} aria-hidden />
         </div>
       )}
       <div className="space-y-1">
-        <p className={cn("font-semibold text-foreground", compact ? "text-sm" : "text-base")}>
+        <p className={cn("font-semibold text-foreground", compact ? "text-sm" : "text-[17px]")}>
           {title}
         </p>
         {description && (
-          <p className="text-xs text-muted-foreground max-w-sm leading-relaxed">{description}</p>
+          <p className={cn("text-muted-foreground max-w-sm leading-relaxed", compact ? "text-xs" : "text-sm")}>{description}</p>
         )}
       </div>
       {action && <div className="pt-1">{action}</div>}

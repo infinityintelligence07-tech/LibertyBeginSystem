@@ -3,8 +3,10 @@ import { useLocation, useNavigate, useParams } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
-import { Loader2 } from "lucide-react";
+import { FileQuestion } from "lucide-react";
 import { AppLayout } from "@/components/AppLayout";
+import { Button } from "@/components/ui/button";
+import { EmptyState, LoadingState, PageContainer } from "@/components/ds";
 import { ToolWizard } from "@/components/tools/ToolWizard";
 import { shortName } from "@/lib/formatName";
 import { computeScores, type Answers } from "@/lib/diagnosticoBegin";
@@ -90,12 +92,14 @@ const FerramentaAplicacaoPage = ({ role = "mentor" }: { role?: "mentor" | "admin
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [dirty, answers]);
 
+  const backPath = role === "admin" ? "/admin/ferramentas" : "/mentor/ferramentas";
+
   if (isLoading) {
     return (
       <AppLayout role={role}>
-        <div className="flex justify-center py-24">
-          <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
-        </div>
+        <PageContainer variant="narrow">
+          <LoadingState variant="page" />
+        </PageContainer>
       </AppLayout>
     );
   }
@@ -103,7 +107,16 @@ const FerramentaAplicacaoPage = ({ role = "mentor" }: { role?: "mentor" | "admin
   if (!application) {
     return (
       <AppLayout role={role}>
-        <p className="text-sm text-muted-foreground">Aplicação não encontrada.</p>
+        <PageContainer variant="narrow">
+          <EmptyState
+            icon={FileQuestion}
+            title="Aplicação não encontrada"
+            description="O diagnóstico pode ter sido removido ou o link está incorreto."
+            action={
+              <Button variant="outline" onClick={() => navigate(backPath)}>Voltar para ferramentas</Button>
+            }
+          />
+        </PageContainer>
       </AppLayout>
     );
   }
@@ -128,7 +141,7 @@ const FerramentaAplicacaoPage = ({ role = "mentor" }: { role?: "mentor" | "admin
         if (dirty) persist({ silent: true });
       }}
       onFinish={() => persist({ complete: true, silent: true })}
-      onExit={() => navigate(role === "admin" ? "/admin/ferramentas" : "/mentor/ferramentas")}
+      onExit={() => navigate(backPath)}
     />
   );
 };

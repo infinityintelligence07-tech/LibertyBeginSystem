@@ -40,23 +40,23 @@ export const AdminMemberNote = ({ memberId, initialNote }: Props) => {
   return (
     <div
       onClick={(e) => e.stopPropagation()}
-      className="relative mt-2 rounded-lg border border-amber-400/40 bg-amber-200/10 dark:bg-amber-300/5 px-3 py-2 shadow-sm"
-      style={{ boxShadow: "0 2px 6px hsl(45 90% 50% / 0.08)" }}
+      className="relative rounded-ds border border-status-yellow/30 bg-status-yellow/5 px-3 py-2"
     >
       <div className="flex items-start gap-2">
-        <StickyNote className="h-3.5 w-3.5 text-amber-500 shrink-0 mt-0.5" />
+        <StickyNote className="h-4 w-4 text-status-yellow shrink-0 mt-0.5" aria-hidden />
         <textarea
           value={value}
           onChange={(e) => setValue(e.target.value)}
           onBlur={save}
           onClick={(e) => e.stopPropagation()}
-          placeholder="Observação rápida sobre este membro…"
+          aria-label="Observação do administrador"
+          placeholder="Observação rápida sobre este membro"
           rows={1}
-          className="flex-1 bg-transparent text-[13px] text-foreground placeholder:text-muted-foreground/60 resize-none outline-none leading-snug font-medium font-sans"
+          className="flex-1 bg-transparent text-[13px] text-foreground placeholder:text-muted-foreground resize-none outline-none focus-visible:ring-2 focus-visible:ring-ring rounded-sm leading-snug font-medium"
         />
-        <div className="shrink-0 w-4 h-4 flex items-center justify-center">
-          {saving && <Loader2 className="h-3 w-3 animate-spin text-amber-500" />}
-          {savedFlash && !saving && <Check className="h-3 w-3 text-status-green" />}
+        <div className="shrink-0 w-4 h-4 flex items-center justify-center" aria-live="polite">
+          {saving && <Loader2 className="h-3.5 w-3.5 animate-spin text-muted-foreground" aria-label="Salvando" />}
+          {savedFlash && !saving && <Check className="h-3.5 w-3.5 text-status-green" aria-label="Salvo" />}
         </div>
       </div>
     </div>

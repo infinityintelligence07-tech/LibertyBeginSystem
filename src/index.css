@@ -1,4 +1,15 @@
-@import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&display=swap');
+/*
+ * Liberty Begin · fundação visual
+ *
+ * Design System no molde das Human Interface Guidelines da Apple (clareza, deferência, profundidade),
+ * mantendo a identidade de cores da plataforma: obsidiana + prata (Begin), dourado (Liberty) e o tema claro.
+ *
+ * Camadas:
+ *  1. Cores da marca (HSL, consumidas pelo Tailwind via hsl(var(--x)))  → :root / .theme-liberty / .light
+ *  2. Tokens do design system (--ds-*)                                   → tipografia, espaço, raio, controle, movimento, elevação
+ *     Os tokens de cor --ds-* APONTAM para as cores da marca; nunca inventam paleta paralela.
+ *  3. Componentes canônicos (.glass-card, .btn-*, .input-begin, .status-badge) e regras base (foco, reduced-motion).
+ */
 
 @tailwind base;
 @tailwind components;
@@ -6,6 +17,91 @@
 
 @layer base {
   :root {
+    /* ——— Fonte: SF Pro nos aparelhos Apple (via sistema); Inter / Segoe / Roboto nos demais ——— */
+    --ds-font:
+      -apple-system, BlinkMacSystemFont, "SF Pro Text", "SF Pro Display", "SF Pro", system-ui,
+      "Helvetica Neue", Inter, "Segoe UI", Roboto, sans-serif;
+    --ds-font-mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+
+    /* ——— Escala tipográfica (peso tamanho/altura) ——— */
+    --ds-text-large-title: 700 34px/1.15 var(--ds-font);
+    --ds-text-display: 600 28px/1.2 var(--ds-font);
+    --ds-text-title: 700 22px/1.25 var(--ds-font);
+    --ds-text-title-sm: 600 17px/1.3 var(--ds-font);
+    --ds-text-headline: 600 15px/1.35 var(--ds-font);
+    --ds-text-body: 400 14px/1.45 var(--ds-font);
+    --ds-text-body-strong: 600 14px/1.45 var(--ds-font);
+    --ds-text-callout: 400 13px/1.4 var(--ds-font);
+    --ds-text-footnote: 400 12px/1.4 var(--ds-font);
+    --ds-text-caption: 500 11px/1.35 var(--ds-font);
+    --ds-tracking-large-title: -0.022em;
+    --ds-tracking-display: -0.02em;
+    --ds-tracking-title: -0.015em;
+    --ds-tracking-title-sm: -0.01em;
+    --ds-tracking-body: -0.003em;
+    --ds-tracking-caption: 0.004em;
+    --ds-tracking-kicker: 0.012em;
+
+    /* ——— Espaço (base 4) ——— */
+    --ds-space-1: 4px;
+    --ds-space-2: 8px;
+    --ds-space-3: 12px;
+    --ds-space-4: 16px;
+    --ds-space-5: 20px;
+    --ds-space-6: 24px;
+    --ds-space-8: 32px;
+    --ds-space-10: 40px;
+    --ds-space-12: 48px;
+
+    /* ——— Raios ——— */
+    --ds-radius-xs: 6px;
+    --ds-radius-sm: 8px;
+    --ds-radius-md: 10px;
+    --ds-radius-lg: 14px;
+    --ds-radius-xl: 18px;
+    --ds-radius-2xl: 22px;
+    --ds-radius-pill: 999px;
+
+    /* ——— Controles e alvo de toque ——— */
+    --ds-control-h: 40px;
+    --ds-control-h-sm: 32px;
+    --ds-control-h-lg: 44px;
+    --ds-hit-min: 44px;
+
+    /* ——— Movimento ——— */
+    --ds-ease: cubic-bezier(0.25, 0.1, 0.25, 1);
+    --ds-ease-out: cubic-bezier(0.2, 0.8, 0.2, 1);
+    --ds-ease-spring: cubic-bezier(0.34, 1.3, 0.64, 1);
+    --ds-dur-1: 120ms;
+    --ds-dur-2: 200ms;
+    --ds-dur-3: 320ms;
+
+    /* ——— Cores do sistema: apontam para a marca (definida abaixo) ——— */
+    --ds-bg: hsl(var(--background));
+    --ds-surface: hsl(var(--card));
+    --ds-surface-2: hsl(var(--bg-surface-2));
+    --ds-label: hsl(var(--foreground));
+    --ds-label-2: hsl(var(--muted-foreground));
+    --ds-label-3: hsl(var(--muted-foreground) / 0.7);
+    --ds-separator: hsl(var(--border));
+    --ds-separator-strong: hsl(var(--stroke-focus));
+    --ds-tint: hsl(var(--primary));
+    --ds-tint-soft: hsl(var(--primary) / 0.1);
+    --ds-tint-soft-2: hsl(var(--primary) / 0.16);
+    --ds-on-tint: hsl(var(--primary-foreground));
+    --ds-scrim: rgba(0, 0, 0, 0.6);
+    --ds-green: hsl(var(--status-green));
+    --ds-yellow: hsl(var(--status-yellow));
+    --ds-orange: hsl(var(--status-orange));
+    --ds-red: hsl(var(--status-red));
+    --ds-blue: hsl(var(--status-blue));
+    --ds-focus: hsl(var(--ring));
+
+    /* ——— Elevação (escuro por padrão; o tema claro redefine) ——— */
+    --ds-shadow-1: 0 0 0 1px hsl(var(--foreground) / 0.06);
+    --ds-shadow-2: 0 4px 14px rgba(0, 0, 0, 0.4), 0 0 0 1px hsl(var(--foreground) / 0.05);
+    --ds-shadow-3: 0 18px 50px rgba(0, 0, 0, 0.6), 0 0 0 1px hsl(var(--foreground) / 0.06);
+
     --background: 40 11% 3%;
     --foreground: 40 25% 91%;
 
@@ -36,7 +132,8 @@
     --stroke-focus: 214 12% 63% / 0.22;
     --ring: 214 12% 63%;
 
-    --radius: 0.75rem;
+    /* Raio base do shadcn: rounded-lg = 14px (card), md = 12px, sm = 10px (botão) */
+    --radius: 0.875rem;
 
     /* Begin custom tokens */
     --bg-obsidian: 40 11% 3%;
@@ -52,6 +149,7 @@
     --status-yellow: 38 78% 60%;
     --status-red: 6 65% 60%;
     --status-blue: 214 62% 62%;
+    --status-orange: 24 85% 60%;
 
     /* Acentos por pilar (trilha das ferramentas) */
     --pillar-1: 199 78% 58%;
@@ -125,6 +223,11 @@
     --stroke-focus: 220 16% 30% / 0.40;
     --ring: 220 16% 30%;
 
+    --ds-scrim: rgba(0, 0, 0, 0.32);
+    --ds-shadow-1: 0 1px 2px rgba(0, 0, 0, 0.04), 0 0 0 1px rgba(60, 60, 67, 0.06);
+    --ds-shadow-2: 0 4px 14px rgba(0, 0, 0, 0.06), 0 1px 3px rgba(0, 0, 0, 0.04);
+    --ds-shadow-3: 0 14px 40px rgba(0, 0, 0, 0.14), 0 2px 8px rgba(0, 0, 0, 0.06);
+
     --bg-obsidian: 210 22% 97%;
     --bg-surface: 0 0% 100%;
     --bg-surface-2: 210 18% 94%;
@@ -138,6 +241,7 @@
     --status-yellow: 35 85% 42%;
     --status-red: 8 72% 46%;
     --status-blue: 214 68% 42%;
+    --status-orange: 24 90% 42%;
 
     --pillar-1: 205 72% 40%;
     --pillar-2: 265 52% 48%;
@@ -196,88 +300,257 @@
     @apply border-border;
   }
 
-  body {
-    @apply bg-background text-foreground antialiased;
-    font-family: 'Plus Jakarta Sans', sans-serif;
+  html {
+    font-family: var(--ds-font);
+    letter-spacing: var(--ds-tracking-body);
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    text-rendering: optimizeLegibility;
+    font-feature-settings: "kern" 1;
   }
 
-  h1, h2, h3 {
-    font-family: 'Plus Jakarta Sans', sans-serif;
-    @apply font-semibold tracking-tight;
+  body {
+    @apply bg-background text-foreground antialiased;
+    font: var(--ds-text-body);
+  }
+
+  /* Hierarquia: título de página / seção / card. Tracking negativo nos grandes, como o SF pede. */
+  h1 { font: var(--ds-text-display); letter-spacing: var(--ds-tracking-display); }
+  h2 { font: var(--ds-text-title); letter-spacing: var(--ds-tracking-title); }
+  h3 { font: var(--ds-text-title-sm); letter-spacing: var(--ds-tracking-title-sm); }
+  h4, h5, h6 { font: var(--ds-text-headline); }
+
+  /* Números alinhados em tabelas, KPIs e ranking (figuras tabulares). */
+  strong, th, td, time, [data-numeric] {
+    font-variant-numeric: tabular-nums;
+  }
+
+  /* Foco visível igual em toda a plataforma: anel na cor de destaque, só para teclado. */
+  :focus-visible {
+    outline: 3px solid var(--ds-focus);
+    outline-offset: 2px;
+  }
+  :focus:not(:focus-visible) {
+    outline: none;
+  }
+
+  /* Placeholder é texto: fica no secundário, não no terciário. */
+  ::placeholder {
+    color: var(--ds-label-2);
+    opacity: 1;
+  }
+
+  ::selection {
+    background: var(--ds-tint-soft-2);
+  }
+
+  /* Movimento curto e com desaceleração em todos os controles. */
+  button, a, input, select, textarea, [role="button"] {
+    transition-timing-function: var(--ds-ease);
+  }
+
+  /* Campos em mobile ≥ 16px evitam o zoom automático do iOS. */
+  @media (max-width: 767px) {
+    input, select, textarea {
+      font-size: max(16px, 1em);
+    }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after {
+      animation-duration: 0.01ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.01ms !important;
+      scroll-behavior: auto !important;
+    }
   }
 }
 
 @layer components {
-  .silver-gradient-text {
+  /* Título com gradiente: reservado a títulos grandes (saudação, login). */
+  .silver-gradient-text,
+  .ds-gradient-title {
+    color: hsl(var(--foreground));
     background: linear-gradient(180deg, hsl(var(--foreground)) 0%, hsl(var(--silver)) 100%);
     -webkit-background-clip: text;
     -webkit-text-fill-color: transparent;
     background-clip: text;
+    display: inline-block;
+    padding-right: 0.06em;
   }
 
+  /* ——— Cartão: uma superfície, uma resposta. Sem levitar no hover. ——— */
   .glass-card {
-    @apply bg-card border border-border rounded-xl overflow-hidden;
-    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    @apply bg-card text-card-foreground overflow-hidden;
+    border: 1px solid var(--ds-separator);
+    border-radius: var(--ds-radius-lg);
+    box-shadow: var(--ds-shadow-1);
+    transition: border-color var(--ds-dur-2) var(--ds-ease), box-shadow var(--ds-dur-2) var(--ds-ease);
   }
 
   :root .glass-card {
     background-image: linear-gradient(135deg, hsl(var(--primary) / 0.025) 0%, transparent 55%);
   }
 
-  .dark .glass-card {
+  .light .glass-card {
     background-image: none;
   }
 
-  .glass-card:hover {
-    border-color: hsl(var(--stroke-focus));
-    box-shadow: 0 8px 32px hsl(var(--foreground) / 0.06);
-    transform: translateY(-2px);
+  /* Só cartões clicáveis reagem ao hover (borda mais forte), sem deslocamento. */
+  .glass-card:where(a, button, [role="button"], .is-interactive):hover {
+    border-color: var(--ds-separator-strong);
+    box-shadow: var(--ds-shadow-2);
   }
 
-  .btn-silver {
-    @apply bg-primary text-primary-foreground font-semibold rounded-lg px-6 py-3 transition-all;
+  /* ——— Botões ———
+     btn-primary / btn-silver: ação principal (prata no Begin, dourado no Liberty via --primary)
+     btn-secondary: ação secundária (fill translúcido)
+     btn-ghost: ação terciária (sem fundo)
+     btn-danger: ação destrutiva
+     btn-gold: alias histórico de btn-primary (o tema Liberty já troca --primary para dourado) */
+  .btn-primary,
+  .btn-silver,
+  .btn-gold,
+  .btn-secondary,
+  .btn-ghost,
+  .btn-danger {
+    @apply inline-flex items-center justify-center gap-2 whitespace-nowrap select-none disabled:pointer-events-none disabled:opacity-50;
+    height: var(--ds-control-h);
+    min-height: var(--ds-control-h);
+    padding: 0 var(--ds-space-4);
+    border-radius: var(--ds-radius-md);
+    font: var(--ds-text-body-strong);
+    letter-spacing: var(--ds-tracking-body);
+    border: 1px solid transparent;
+    transition: background-color var(--ds-dur-1) var(--ds-ease), border-color var(--ds-dur-1) var(--ds-ease), color var(--ds-dur-1) var(--ds-ease), opacity var(--ds-dur-1) var(--ds-ease);
   }
 
-  .btn-silver:hover {
-    background-color: hsl(214 14% 81%);
-    box-shadow: 0 0 20px hsl(214 12% 63% / 0.15);
+  .btn-primary,
+  .btn-silver,
+  .btn-gold {
+    background: var(--ds-tint);
+    color: var(--ds-on-tint);
+  }
+  .btn-primary:hover,
+  .btn-silver:hover,
+  .btn-gold:hover {
+    background: hsl(var(--primary) / 0.9);
+  }
+  .btn-primary:active,
+  .btn-silver:active,
+  .btn-gold:active {
+    background: hsl(var(--primary) / 0.82);
   }
 
+  .btn-secondary {
+    background: var(--ds-tint-soft);
+    color: hsl(var(--foreground));
+    border-color: var(--ds-separator);
+  }
+  .btn-secondary:hover {
+    background: var(--ds-tint-soft-2);
+  }
+
+  .btn-ghost {
+    background: transparent;
+    color: hsl(var(--foreground));
+  }
+  .btn-ghost:hover {
+    background: hsl(var(--accent));
+  }
+
+  .btn-danger {
+    background: hsl(var(--destructive));
+    color: hsl(var(--destructive-foreground));
+  }
+  .btn-danger:hover {
+    background: hsl(var(--destructive) / 0.9);
+  }
+
+  .btn-sm {
+    height: var(--ds-control-h-sm);
+    min-height: var(--ds-control-h-sm);
+    padding: 0 var(--ds-space-3);
+    font: var(--ds-text-callout);
+    font-weight: 600;
+    border-radius: var(--ds-radius-sm);
+  }
+
+  .btn-lg {
+    height: var(--ds-control-h-lg);
+    min-height: var(--ds-control-h-lg);
+    padding: 0 var(--ds-space-6);
+  }
+
+  /* Botão de ícone: alvo de toque 44px mesmo quando o ícone é pequeno. */
+  .btn-icon {
+    @apply inline-flex items-center justify-center rounded-full select-none disabled:pointer-events-none disabled:opacity-50;
+    width: var(--ds-control-h);
+    height: var(--ds-control-h);
+    color: hsl(var(--muted-foreground));
+    transition: background-color var(--ds-dur-1) var(--ds-ease), color var(--ds-dur-1) var(--ds-ease);
+  }
+  .btn-icon:hover {
+    background: hsl(var(--accent));
+    color: hsl(var(--foreground));
+  }
+
+  /* ——— Campo de formulário ——— */
   .input-begin {
-    @apply bg-card border border-input rounded-lg px-4 py-3 text-foreground placeholder:text-muted-foreground transition-colors focus:outline-none focus:border-primary;
+    @apply w-full bg-card text-foreground placeholder:text-muted-foreground disabled:cursor-not-allowed disabled:opacity-50;
+    min-height: var(--ds-control-h-lg);
+    padding: 0 var(--ds-space-4);
+    border: 1px solid hsl(var(--input));
+    border-radius: var(--ds-radius-md);
+    font: var(--ds-text-body);
+    transition: border-color var(--ds-dur-1) var(--ds-ease), box-shadow var(--ds-dur-1) var(--ds-ease);
+  }
+  textarea.input-begin {
+    padding-top: var(--ds-space-3);
+    padding-bottom: var(--ds-space-3);
+    min-height: calc(var(--ds-control-h-lg) * 2);
+  }
+  .input-begin:focus {
+    outline: none;
+    border-color: var(--ds-separator-strong);
+    box-shadow: 0 0 0 3px var(--ds-tint-soft);
+  }
+  .input-begin[aria-invalid="true"] {
+    border-color: hsl(var(--destructive));
   }
 
+  /* ——— Pill de status: caixa normal, sem caps ——— */
   .status-badge {
-    @apply inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-medium tracking-wide uppercase;
+    @apply inline-flex items-center gap-1.5 whitespace-nowrap;
+    height: 22px;
+    padding: 0 var(--ds-space-2);
+    border-radius: var(--ds-radius-pill);
+    font: var(--ds-text-caption);
+    letter-spacing: var(--ds-tracking-kicker);
+  }
+
+  /* ——— Rótulo pequeno acima de blocos (kicker): Primeira maiúscula, sem caixa alta ——— */
+  .ds-kicker {
+    font: var(--ds-text-caption);
+    letter-spacing: var(--ds-tracking-kicker);
+    color: hsl(var(--muted-foreground));
+  }
+
+  /* ——— Contêiner de página e cabeçalho ——— */
+  .ds-page {
+    width: 100%;
+    max-width: 1120px;
+    margin: 0 auto;
+    padding: var(--ds-space-4);
+  }
+  @media (min-width: 768px) {
+    .ds-page { padding: var(--ds-space-6); }
   }
 
   .pillar-negocios { @apply bg-status-blue/10 text-status-blue; }
   .pillar-emocional { @apply bg-status-red/10 text-status-red; }
   .pillar-mentalidade { @apply bg-status-yellow/10 text-status-yellow; }
   .pillar-espiritual { @apply bg-status-green/10 text-status-green; }
-}
-
-@layer utilities {
-  :where([class~="border"], [class*=" border-"], [class^="border-"]):not(.border-transparent):not(.border-t-transparent):not(.border-r-transparent):not(.border-b-transparent):not(.border-l-transparent):not(.border-0):not(.border-none) {
-    border-color: hsl(var(--stroke-subtle)) !important;
-  }
-
-  :where(.border-2, .border-t-2, .border-r-2, .border-b-2, .border-l-2, .border-\[1\.5px\], .border-\[2px\]) {
-    border-width: 1px !important;
-  }
-
-  :where([class*="hover:border-"]:hover, [class*="focus:border-"]:focus, [class*="focus-visible:border-"]:focus-visible) {
-    border-color: hsl(var(--stroke-focus)) !important;
-  }
-
-  :where(.ring-2, [class*="ring-primary"], [class*="ring-ring"], .focus-visible\:ring-2:focus-visible) {
-    --tw-ring-color: hsl(var(--stroke-focus)) !important;
-    --tw-ring-offset-width: 0px !important;
-  }
-
-  :where(.divide-y > :not([hidden]) ~ :not([hidden]), .divide-x > :not([hidden]) ~ :not([hidden])) {
-    border-color: hsl(var(--stroke-subtle)) !important;
-  }
 }
 
 @layer utilities {
@@ -291,16 +564,22 @@
     -ms-overflow-style: none;
     scrollbar-width: none;
   }
+  .ds-shadow-1 { box-shadow: var(--ds-shadow-1); }
+  .ds-shadow-2 { box-shadow: var(--ds-shadow-2); }
+  .ds-shadow-3 { box-shadow: var(--ds-shadow-3); }
+  /* Alvo de toque mínimo (44px) sem mudar o tamanho visual do ícone. */
+  .hit-44 { min-width: var(--ds-hit-min); min-height: var(--ds-hit-min); }
 }
 
-/* Custom scrollbar */
+/* Barras de rolagem discretas, como no macOS. */
 ::-webkit-scrollbar {
-  width: 4px;
+  width: 8px;
+  height: 8px;
 }
 ::-webkit-scrollbar-track {
   background: transparent;
 }
 ::-webkit-scrollbar-thumb {
-  background: hsl(214 12% 63% / 0.4);
-  border-radius: 2px;
+  background: hsl(var(--muted-foreground) / 0.35);
+  border-radius: var(--ds-radius-pill);
 }

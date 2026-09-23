@@ -1,13 +1,30 @@
 import { useState, useEffect, useMemo } from "react";
-import { useParams, useNavigate } from "react-router-dom";
+import { useParams, useNavigate, useLocation } from "react-router-dom";
 import { useGoBack } from "@/lib/navigation";
 import { motion } from "framer-motion";
 import { AppLayout } from "@/components/AppLayout";
 import {
-  ArrowLeft, ExternalLink, AlertCircle, Wand2, Lock, Check, FileText,
+  ExternalLink, AlertCircle, Wand2, Lock, Check, FileText,
   Building2, Target, Instagram, DollarSign, BookOpen, User, Loader2, Plus, X,
-  Paperclip, ShieldCheck,
+  ShieldCheck, Clock, CheckCircle2,
 } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import {
+  Callout,
+  ConfirmDialog,
+  EmptyState,
+  ErrorState,
+  IconButton,
+  LoadingState,
+  PageContainer,
+  PageHeader,
+  SectionCard,
+  SectionHeader,
+  SelectField,
+  StatusPill,
+  TextAreaField,
+} from "@/components/ds";
+import { cn } from "@/lib/utils";
 import { staggerContainer, fadeUpItem } from "@/lib/animations";
 import { supabase } from "@/integrations/supabase/client";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
@@ -16,23 +33,28 @@ import { ptBR } from "date-fns/locale";
 import { shortName } from "@/lib/formatName";
 import { toast } from "sonner";
 import { useAuth } from "@/hooks/useAuth";
-import { getEffectiveBookingStatus } from "@/lib/bookingStatus";
+import { bookingRequiresReport, getEffectiveBookingStatus, isBookingPast } from "@/lib/bookingStatus";
 import { StudentTools } from "@/components/StudentTools";
 import { SessionDeliverableDialog } from "@/components/SessionDeliverableDialog";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
-import { RefreshCcw } from "lucide-react";
-
+import {
+  invalidateMentorBookingQueries,
+  translateBookingError,
+  useMentorBookingActions,
+} from "@/components/mentor/MentorBookingActions";
 
 type Suggestion = { id: string; text: string; approved: boolean };
 
 const MentorRelatorioPage = () => {
   const { bookingId } = useParams<{ bookingId: string }>();
   const navigate = useNavigate();
+  const location = useLocation();
   const queryClient = useQueryClient();
   const { hasRole, profile } = useAuth();
-  const layoutRole: "admin" | "mentor" = hasRole("admin") ? "admin" : "mentor";
-  const goBack = useGoBack(hasRole("admin") ? "/admin/membros" : "/mentor/sessoes");
+  // O layout segue a rota (/admin/... ou /mentor/...), não o papel do usuário
+  const isAdminRoute = location.pathname.startsWith("/admin");
+  const layoutRole: "admin" | "mentor" = isAdminRoute ? "admin" : "mentor";
+  const goBack = useGoBack(isAdminRoute ? "/admin/membros" : "/mentor/sessoes");
+  const { actingId, markCompleted } = useMentorBookingActions();
 
   const [transcript, setTranscript] = useState("");
   const [summary, setSummary] = useState("");
@@ -46,14 +68,31 @@ const MentorRelatorioPage = () => {
   const [organizing, setOrganizing] = useState(false);
   const [loaded, setLoaded] = useState(false);
   const [deliverableOpen, setDeliverableOpen] = useState(false);
-  
-  
 
-  const { data: booking } = useQuery({
+  // Ao trocar de sessão na mesma tela (ex.: clique em notificação), zera o formulário
+  // para o texto de um relatório não vazar para outro.
+  useEffect(() => {
+    setTranscript("");
+    setSummary("");
+    setDelivered("");
+    setNextSteps("");
+    setAiAlert("");
+    setAiStrategy("");
+    setImpressions("");
+    setShowImpressions(false);
+    setSuggestions([]);
+    setLoaded(false);
+  }, [bookingId]);
+
+  const { data: booking, isLoading: bookingLoading, isError: bookingError, refetch: refetchBooking } = useQuery({
     queryKey: ["booking-detail", bookingId],
     queryFn: async () => {
       if (!bookingId) return null;
-      const { data, error } = await supabase.from("bookings").select("*").eq("id", bookingId).single();
+      const { data, error } = await supabase
+        .from("bookings")
+        .select("id, mentor_id, liberty_id, session_id, scheduled_date, start_time, end_time, status, is_retroactive, report_required, zoom_join_url")
+        .eq("id", bookingId)
+        .maybeSingle();
       if (error) throw error;
       return data;
     },
@@ -64,7 +103,8 @@ const MentorRelatorioPage = () => {
     queryKey: ["liberty-profile", booking?.liberty_id],
     queryFn: async () => {
       if (!booking?.liberty_id) return null;
-      const { data } = await supabase.from("profiles").select("*").eq("id", booking.liberty_id).single();
+      const { data, error } = await supabase.from("profiles").select("*").eq("id", booking.liberty_id).maybeSingle();
+      if (error) throw error;
       return data;
     },
     enabled: !!booking?.liberty_id,
@@ -74,7 +114,8 @@ const MentorRelatorioPage = () => {
     queryKey: ["session-info", booking?.session_id],
     queryFn: async () => {
       if (!booking?.session_id) return null;
-      const { data } = await supabase.from("sessions").select("id, name").eq("id", booking.session_id).single();
+      const { data, error } = await supabase.from("sessions").select("id, name, is_kickoff").eq("id", booking.session_id).maybeSingle();
+      if (error) throw error;
       return data;
     },
     enabled: !!booking?.session_id,
@@ -83,36 +124,58 @@ const MentorRelatorioPage = () => {
   const { data: allSessions = [] } = useQuery({
     queryKey: ["all-sessions-for-swap"],
     queryFn: async () => {
-      const { data } = await supabase.from("sessions").select("id, name, order").order("order");
-      return (data || []) as { id: string; name: string; order: number }[];
+      const { data, error } = await supabase.from("sessions").select("id, name, order, is_kickoff").order("order");
+      if (error) throw error;
+      return (data || []) as { id: string; name: string; order: number; is_kickoff: boolean }[];
     },
   });
 
+  // Quem pode editar: o mentor da sessão ou um admin. Outros mentores só leem (D5).
+  const canEdit = !!booking && (booking.mentor_id === profile?.id || hasRole("admin"));
+
   const [swapping, setSwapping] = useState(false);
-  const swapSession = async (newSessionId: string) => {
-    if (!booking || !newSessionId || newSessionId === booking.session_id) return;
+  // Troca de sessão entregue: pede confirmação em ConfirmDialog (substitui window.confirm)
+  const [swapTargetId, setSwapTargetId] = useState<string | null>(null);
+  const swapTarget = swapTargetId ? allSessions.find((s) => s.id === swapTargetId) : undefined;
+  const swapSession = (newSessionId: string) => {
+    if (!booking || !newSessionId || newSessionId === booking.session_id || !canEdit) return;
+    const target = allSessions.find((s) => s.id === newSessionId);
+    const current = allSessions.find((s) => s.id === booking.session_id);
+    if (target?.is_kickoff || current?.is_kickoff) {
+      toast.error("A troca envolvendo o Mapeamento do Negócio deve ser feita pelo administrador.");
+      return;
+    }
+    setSwapTargetId(newSessionId);
+  };
+  const confirmSwapSession = async () => {
+    if (!booking || !swapTargetId) return;
+    const newSessionId = swapTargetId;
     setSwapping(true);
     try {
-      const { error } = await supabase
+      const { data, error } = await supabase
         .from("bookings")
         .update({ session_id: newSessionId })
-        .eq("id", booking.id);
+        .eq("id", booking.id)
+        .select("id");
       if (error) throw error;
+      if (!data || data.length === 0) throw new Error("Você não tem permissão para alterar esta sessão.");
       toast.success("Sessão alterada");
-      queryClient.invalidateQueries({ queryKey: ["booking-detail", bookingId] });
       queryClient.invalidateQueries({ queryKey: ["session-info", booking.session_id] });
-    } catch (e: any) {
-      toast.error("Erro ao trocar sessão: " + e.message);
+      await invalidateMentorBookingQueries(queryClient);
+      setSwapTargetId(null);
+    } catch (e) {
+      toast.error(translateBookingError(e as { message?: string }, "Erro ao trocar sessão."));
     } finally {
       setSwapping(false);
     }
   };
 
-  const { data: existingReport, refetch: refetchReport } = useQuery({
+  const { data: existingReport } = useQuery({
     queryKey: ["booking-report", bookingId],
     queryFn: async () => {
       if (!bookingId) return null;
-      const { data } = await supabase.from("booking_reports").select("*").eq("booking_id", bookingId).maybeSingle();
+      const { data, error } = await supabase.from("booking_reports").select("*").eq("booking_id", bookingId).maybeSingle();
+      if (error) throw error;
       return data;
     },
     enabled: !!bookingId,
@@ -123,13 +186,13 @@ const MentorRelatorioPage = () => {
     queryKey: ["student-tools", libertyProfile?.id, "for-booking", bookingId],
     queryFn: async () => {
       if (!bookingId) return [];
-      const { data } = await supabase.from("student_tools").select("id").eq("booking_id", bookingId);
+      const { data, error } = await supabase.from("student_tools").select("id").eq("booking_id", bookingId);
+      if (error) throw error;
       return data || [];
     },
     enabled: !!bookingId && !!libertyProfile?.id,
   });
   const hasTool = attachedTools.length > 0;
-  const pdfSent = !!(existingReport as any)?.pdf_delivered_at;
 
   useEffect(() => {
     if (existingReport && !loaded) {
@@ -201,15 +264,18 @@ const MentorRelatorioPage = () => {
     }
   };
 
-  const canSave = summary.trim().length > 0;
-  // O envio do PDF ainda está em ajustes — por enquanto a sessão conclui com relatório + ferramenta.
-  const canComplete = canSave && hasTool;
-
+  // A sessão só pode ser concluída (e o relatório enviado) depois do horário de término.
+  const sessionEnded = !!booking && isBookingPast(booking);
+  const requiresReport = !!booking && bookingRequiresReport(booking);
+  const effectiveStatus = booking ? getEffectiveBookingStatus(booking, { hasReport: !!existingReport }) : null;
+  const canSave = summary.trim().length > 0 && sessionEnded && canEdit;
 
   const saveMutation = useMutation({
     mutationFn: async () => {
-      if (!bookingId) throw new Error("No booking ID");
-      const reportData: any = {
+      if (!bookingId || !booking) throw new Error("Sessão não encontrada.");
+      if (!canEdit) throw new Error("Você não tem permissão para editar o relatório desta sessão.");
+      if (!isBookingPast(booking)) throw new Error("COMPLETION_BEFORE_SESSION_END");
+      const reportData = {
         booking_id: bookingId,
         summary: summary.trim(),
         delivered: delivered.trim() || null,
@@ -217,13 +283,14 @@ const MentorRelatorioPage = () => {
         ai_insights: [aiAlert.trim() && `⚠ Alerta\n${aiAlert.trim()}`, aiStrategy.trim() && `✦ Sugestão estratégica\n${aiStrategy.trim()}`].filter(Boolean).join("\n\n") || null,
         mentor_impressions: impressions.trim() || null,
       };
-      if (existingReport) {
-        const { error } = await supabase.from("booking_reports").update(reportData).eq("id", existingReport.id);
-        if (error) throw error;
-      } else {
-        const { error } = await supabase.from("booking_reports").insert(reportData);
-        if (error) throw error;
-      }
+      // Upsert por booking_id: evita erro de duplicidade em duas abas e RLS silenciosa no update
+      const { data: savedRows, error: reportError } = await supabase
+        .from("booking_reports")
+        .upsert(reportData, { onConflict: "booking_id" })
+        .select("id");
+      if (reportError) throw reportError;
+      if (!savedRows || savedRows.length === 0) throw new Error("Você não tem permissão para editar o relatório desta sessão.");
+
       const approved = suggestions.filter((s) => s.approved && s.text.trim());
       if (approved.length) {
         const rows = approved.map((s) => ({
@@ -234,351 +301,455 @@ const MentorRelatorioPage = () => {
         }));
         const { error } = await supabase.from("session_tasks").insert(rows);
         if (error) throw error;
+        // Limpa já aqui: se o passo seguinte falhar, um novo "Salvar" não duplica as tarefas
+        setSuggestions([]);
       }
-      // Conclui a sessão assim que o relatório for salvo (resumo preenchido),
-      // independente de ferramenta anexada — evita sessões passadas ficarem "agendadas"
-      // e desaparecerem da aba Realizadas do mentor.
-      if (
-        summary.trim().length > 0 &&
-        booking &&
-        getEffectiveBookingStatus(booking) !== "cancelled" &&
-        booking.status !== "completed" &&
-        booking.status !== "not_realized" &&
-        booking.status !== "pending_approval"
-      ) {
-        const { error } = await supabase.from("bookings").update({ status: "completed" }).eq("id", bookingId);
+      // Fecha a sessão como realizada ao salvar o relatório (só para sessões já encerradas e ainda "agendadas").
+      const raw = booking.status;
+      if (raw === "scheduled" || raw === "rescheduled") {
+        const { data: updated, error } = await supabase
+          .from("bookings")
+          .update({ status: "completed" })
+          .eq("id", bookingId)
+          .select("id");
         if (error) throw error;
+        if (!updated || updated.length === 0) throw new Error("Relatório salvo, mas a sessão não pôde ser marcada como realizada (sem permissão).");
       }
     },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["booking-report", bookingId] });
-      queryClient.invalidateQueries({ queryKey: ["mentor-bookings"] });
-      queryClient.invalidateQueries({ queryKey: ["admin-members"] });
-      setSuggestions([]);
+    onSuccess: async () => {
       toast.success("Relatório salvo.");
+      await invalidateMentorBookingQueries(queryClient);
+      queryClient.invalidateQueries({ queryKey: ["booking-report", bookingId] });
+      queryClient.invalidateQueries({ queryKey: ["booking-detail", bookingId] });
     },
-    onError: () => toast.error("Erro ao salvar relatório"),
+    onError: (error: { message?: string; details?: string }) =>
+      toast.error(translateBookingError(error, "Erro ao salvar relatório.")),
   });
-
 
   if (!bookingId) {
     return (
       <AppLayout role={layoutRole}>
-        <div className="flex flex-col items-center justify-center min-h-[60vh] text-center">
-          <AlertCircle className="h-10 w-10 text-muted-foreground/40 mb-3" />
-          <p className="text-sm text-muted-foreground">Nenhuma sessão selecionada.</p>
-        </div>
+        <PageContainer variant="narrow">
+          <PageHeader back={goBack} title="Relatório da sessão" />
+          <EmptyState
+            icon={AlertCircle}
+            title="Nenhuma sessão selecionada"
+            description="Abra o relatório a partir de uma sessão na sua agenda."
+            action={<Button variant="outline" size="sm" onClick={goBack}>Voltar</Button>}
+          />
+        </PageContainer>
       </AppLayout>
     );
   }
 
-  // Bloqueia relatório/tarefas para sessões canceladas ou aguardando aprovação.
-  const effectiveStatus = booking ? getEffectiveBookingStatus(booking) : null;
-  if (booking && (effectiveStatus === "cancelled" || effectiveStatus === "pending_approval")) {
-    const isCancelled = effectiveStatus === "cancelled";
+  if (bookingLoading) {
     return (
       <AppLayout role={layoutRole}>
-        <div className="max-w-2xl mx-auto mt-12">
-          <button onClick={goBack} className="text-xs text-muted-foreground hover:text-foreground flex items-center gap-1 mb-4">
-            <ArrowLeft className="h-3 w-3" /> Voltar
-          </button>
-          <div className={`rounded-2xl border p-6 ${isCancelled ? "border-destructive/30 bg-destructive/5" : "border-status-yellow/30 bg-status-yellow/5"}`}>
-            <div className="flex items-start gap-3">
-              <AlertCircle className={`h-5 w-5 mt-0.5 flex-shrink-0 ${isCancelled ? "text-destructive" : "text-status-yellow"}`} />
-              <div className="space-y-1">
-                <h2 className="text-base font-semibold text-foreground">
-                  {isCancelled ? "Esta sessão foi cancelada" : "Esta sessão ainda não foi aprovada"}
-                </h2>
-                <p className="text-sm text-muted-foreground leading-relaxed">
-                  {isCancelled
-                    ? "Sessões canceladas não geram relatório nem tarefas e não contam como mentoria realizada."
-                    : "Aguarde a aprovação do administrador para registrar o relatório desta sessão."}
-                </p>
-              </div>
-            </div>
-          </div>
-        </div>
+        <PageContainer variant="narrow">
+          <LoadingState variant="page" />
+        </PageContainer>
       </AppLayout>
     );
   }
+
+  if (bookingError || !booking) {
+    return (
+      <AppLayout role={layoutRole}>
+        <PageContainer variant="narrow">
+          <PageHeader back={goBack} title="Relatório da sessão" />
+          <ErrorState
+            title="Sessão não encontrada"
+            description={bookingError ? "Não foi possível carregar esta sessão. Verifique sua conexão e tente de novo." : "O link pode estar incorreto ou a sessão foi removida."}
+            onRetry={bookingError ? () => refetchBooking() : undefined}
+          />
+        </PageContainer>
+      </AppLayout>
+    );
+  }
+
+  // Bloqueia relatório/tarefas para sessões canceladas, não realizadas ou aguardando aprovação.
+  if (effectiveStatus === "cancelled" || effectiveStatus === "pending_approval" || effectiveStatus === "not_realized") {
+    const isBlockedRed = effectiveStatus === "cancelled" || effectiveStatus === "not_realized";
+    const title =
+      effectiveStatus === "cancelled" ? "Esta sessão foi cancelada"
+        : effectiveStatus === "not_realized" ? "Esta sessão foi marcada como não realizada"
+          : "Esta sessão ainda não foi aprovada";
+    const description =
+      effectiveStatus === "cancelled" ? "Sessões canceladas não geram relatório nem tarefas e não contam como mentoria realizada."
+        : effectiveStatus === "not_realized" ? "Sessões não realizadas não geram relatório nem tarefas. Se ela aconteceu, peça ao administrador para revisar o status."
+          : "Aguarde a aprovação do administrador para registrar o relatório desta sessão.";
+    return (
+      <AppLayout role={layoutRole}>
+        <PageContainer variant="narrow">
+          <PageHeader
+            back={goBack}
+            title="Relatório da sessão"
+            description={`${sessionInfo?.name || "Sessão"} · ${format(parseISO(booking.scheduled_date), "dd MMM yyyy", { locale: ptBR })}`}
+            actions={<StatusPill status={effectiveStatus} size="md" />}
+          />
+          <Callout tone={isBlockedRed ? "danger" : "warning"} icon={AlertCircle} title={title}>
+            {description}
+          </Callout>
+        </PageContainer>
+      </AppLayout>
+    );
+  }
+
+  const approvedCount = suggestions.filter((s) => s.approved && s.text.trim()).length;
+  const saveHint = !sessionEnded
+    ? "O relatório só pode ser enviado depois do horário da sessão."
+    : !canEdit
+      ? "Somente o mentor responsável pode editar."
+      : undefined;
 
   return (
     <AppLayout role={layoutRole}>
-      <motion.div variants={staggerContainer} initial="hidden" animate="show" className="max-w-5xl mx-auto space-y-6">
+      <PageContainer variant="narrow">
+      <motion.div variants={staggerContainer} initial="hidden" animate="show" className="space-y-6">
         {/* Header */}
-        <motion.div variants={fadeUpItem} className="flex items-start gap-3">
-          <button onClick={goBack} className="p-1.5 rounded-lg hover:bg-muted transition-colors mt-1">
-            <ArrowLeft className="h-4 w-4 text-muted-foreground" />
-          </button>
-          <div className="flex-1 min-w-0">
-            <h1 className="text-2xl font-semibold text-foreground">Relatório da sessão</h1>
-            <p className="text-muted-foreground text-sm mt-0.5">
-              {sessionInfo?.name || "Sessão"} · {booking ? format(parseISO(booking.scheduled_date), "dd MMM yyyy", { locale: ptBR }) : ""}
-              {libertyProfile && ` · ${shortName(libertyProfile.full_name)}`}
-            </p>
-            {booking && (
-              <div className="mt-2 flex items-center gap-2 flex-wrap">
-                <span className="text-[10px] uppercase tracking-wider text-muted-foreground font-semibold flex items-center gap-1">
-                  <RefreshCcw className="h-3 w-3" /> Trocar sessão entregue
+        <motion.div variants={fadeUpItem}>
+          <PageHeader
+            back={goBack}
+            title="Relatório da sessão"
+            description={
+              <span className="inline-flex items-center gap-2 flex-wrap">
+                <span>
+                  {sessionInfo?.name || "Sessão"} · {format(parseISO(booking.scheduled_date), "dd MMM yyyy", { locale: ptBR })} · {booking.start_time?.slice(0, 5) ?? "--:--"}
+                  {libertyProfile && ` · ${shortName(libertyProfile.full_name)}`}
                 </span>
-                <Tooltip>
-                  <TooltipTrigger asChild>
-                    <div>
-                      <Select value={booking.session_id} onValueChange={swapSession} disabled={swapping}>
-                        <SelectTrigger className="h-7 w-[260px] text-xs">
-                          <SelectValue />
-                        </SelectTrigger>
-                        <SelectContent>
-                          {allSessions.map((s) => (
-                            <SelectItem key={s.id} value={s.id}>{s.name}</SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                    </div>
-                  </TooltipTrigger>
-                  <TooltipContent>Use se a sessão real entregue foi diferente da agendada.</TooltipContent>
-                </Tooltip>
-              </div>
-            )}
-          </div>
-          {booking?.zoom_join_url && (
-            <a href={booking.zoom_join_url} target="_blank" rel="noopener noreferrer" className="btn-silver text-xs px-3 py-2 flex items-center gap-1.5">
-              <ExternalLink className="h-3 w-3" /> Zoom
-            </a>
-          )}
+                {effectiveStatus && <StatusPill status={effectiveStatus} />}
+              </span>
+            }
+            actions={
+              booking.zoom_join_url ? (
+                <Button asChild variant="outline" size="sm">
+                  <a href={booking.zoom_join_url} target="_blank" rel="noopener noreferrer">
+                    <ExternalLink /> Zoom
+                  </a>
+                </Button>
+              ) : undefined
+            }
+          />
         </motion.div>
 
-        {/* Essentials about the student */}
-        {libertyProfile && essentials.length > 0 && (
-          <motion.div variants={fadeUpItem} className="rounded-2xl border border-border bg-card/70 p-5">
-            <div className="flex items-center justify-between mb-3">
-              <p className="text-[10px] uppercase tracking-wider text-muted-foreground font-semibold">Sobre o aluno</p>
-              <button
-                onClick={() => navigate(`${layoutRole === "mentor" ? "/mentor/alunos" : "/admin/membros"}/${libertyProfile.id}`)}
-                className="text-xs text-primary hover:underline flex items-center gap-1"
-              >
-                <User className="h-3 w-3" /> Ver ficha completa
-              </button>
-            </div>
-            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-              {essentials.map((e) => (
-                <div key={e.label} className="rounded-xl border border-border bg-background/40 p-3">
-                  <div className="flex items-center gap-1.5 text-[10px] uppercase tracking-wider text-muted-foreground font-semibold mb-1">
-                    <e.icon className="h-3 w-3 text-primary" /> {e.label}
-                  </div>
-                  <p className="text-sm text-foreground leading-relaxed line-clamp-3">{String(e.value)}</p>
-                </div>
-              ))}
-            </div>
+        {/* Avisos de contexto: sessão futura, somente leitura, mapeamento sem relatório */}
+        {!sessionEnded && (
+          <motion.div variants={fadeUpItem}>
+            <Callout tone="info" icon={Clock} title="O relatório só pode ser enviado depois do horário da sessão">
+              Esta sessão termina em {format(parseISO(booking.scheduled_date), "dd/MM", { locale: ptBR })} às {booking.end_time?.slice(0, 5) ?? "--:--"}. Você pode preparar o texto agora, mas o botão de salvar fica liberado só após o término.
+            </Callout>
+          </motion.div>
+        )}
+        {!canEdit && (
+          <motion.div variants={fadeUpItem}>
+            <Callout tone="info" icon={Lock} title="Sessão de outro mentor · somente leitura">
+              Você pode consultar o relatório, mas só o mentor responsável (ou um administrador) pode editá-lo.
+            </Callout>
+          </motion.div>
+        )}
+        {!requiresReport && (
+          <motion.div variants={fadeUpItem}>
+            <Callout
+              tone="brand"
+              icon={CheckCircle2}
+              title={booking.is_retroactive ? "Registro retroativo: não exige relatório" : "Mapeamento do Negócio: não exige relatório"}
+              action={
+                canEdit && effectiveStatus === "pending_confirmation" ? (
+                  <Button size="sm" disabled={actingId === booking.id} onClick={() => markCompleted(booking.id)}>
+                    {actingId === booking.id ? <Loader2 className="animate-spin" /> : <CheckCircle2 />} Marcar realizada
+                  </Button>
+                ) : undefined
+              }
+            >
+              Esta sessão conta como realizada sem relatório. Se quiser, registre observações privadas abaixo.
+            </Callout>
           </motion.div>
         )}
 
-        {/* Paste Zoom transcript + AI */}
-        <motion.div variants={fadeUpItem} className="rounded-2xl border border-primary/20 bg-primary/5 p-5 space-y-3">
-          <div className="flex items-center gap-2 text-primary text-xs font-semibold uppercase tracking-wider">
-            <Wand2 className="h-3.5 w-3.5" /> Organizar com IA
-          </div>
-          <p className="text-xs text-muted-foreground">
-            Cole o resumo/transcrição que a IA do Zoom gerou. A IA estrutura tudo abaixo e sugere tarefas para você aprovar.
-          </p>
-          <textarea
-            value={transcript}
-            onChange={(e) => setTranscript(e.target.value)}
-            placeholder="Cole aqui o resumo da IA do Zoom..."
-            className="w-full bg-card border border-border rounded-lg p-3 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:border-primary/30 resize-none h-32"
-          />
-          <button
-            onClick={organize}
-            disabled={organizing || transcript.trim().length < 30}
-            className="btn-silver text-xs px-4 py-2 flex items-center gap-2 disabled:opacity-40"
-          >
-            {organizing ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Wand2 className="h-3.5 w-3.5" />}
-            {organizing ? "Organizando..." : "Organizar com IA"}
-          </button>
-        </motion.div>
+        {/* Trocar sessão entregue */}
+        {canEdit && (
+          <motion.div variants={fadeUpItem}>
+            <SelectField
+              label="Sessão entregue"
+              hint="Use se a sessão realizada foi diferente da agendada. A troca altera o histórico do aluno."
+              value={booking.session_id}
+              onChange={(e) => swapSession(e.target.value)}
+              disabled={swapping}
+            >
+              {allSessions.map((s) => (
+                <option key={s.id} value={s.id}>{s.name}</option>
+              ))}
+            </SelectField>
+          </motion.div>
+        )}
 
-        {/* Structured report */}
-        <motion.div variants={fadeUpItem} className="grid gap-5 lg:grid-cols-[2fr_1fr]">
-          <div className="space-y-4">
-            <Field label="Resumo" required value={summary} onChange={setSummary} placeholder="Panorama da sessão..." rows={5} />
-            <Field label="O que foi entregue" value={delivered} onChange={setDelivered} placeholder="O que foi efetivamente trabalhado..." rows={4} />
-            <Field label="Próximos passos" value={nextSteps} onChange={setNextSteps} placeholder="Encaminhamentos combinados..." rows={4} />
-          </div>
+        {/* Sobre o aluno */}
+        {libertyProfile && essentials.length > 0 && (
+          <motion.section variants={fadeUpItem}>
+            <SectionCard className="space-y-4">
+              <SectionHeader
+                as="h3"
+                title="Sobre o aluno"
+                actions={
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => navigate(`${layoutRole === "mentor" ? "/mentor/alunos" : "/admin/membros"}/${libertyProfile.id}`)}
+                  >
+                    <User /> Ver ficha completa
+                  </Button>
+                }
+              />
+              <dl className="grid gap-4 sm:grid-cols-2">
+                {essentials.map((e) => (
+                  <div key={e.label} className="min-w-0">
+                    <dt className="flex items-center gap-1.5 text-xs font-medium text-muted-foreground mb-1">
+                      <e.icon className="h-3.5 w-3.5 text-primary" aria-hidden /> {e.label}
+                    </dt>
+                    <dd className="text-sm text-foreground leading-relaxed line-clamp-3">{String(e.value)}</dd>
+                  </div>
+                ))}
+              </dl>
+            </SectionCard>
+          </motion.section>
+        )}
 
-          <aside className="space-y-4">
-            {/* AI insights — split into Alerta and Sugestão estratégica */}
-            <div className="rounded-xl border border-border bg-card/70 p-4 space-y-3">
-              <p className="text-[10px] uppercase tracking-wider text-primary font-semibold flex items-center gap-1.5">
-                <Wand2 className="h-3 w-3" /> Insights da IA
-              </p>
-              {!aiAlert && !aiStrategy ? (
-                <p className="text-xs text-muted-foreground italic">Cole a transcrição do Zoom e clique em "Organizar com IA" para gerar.</p>
-              ) : (
-                <div className="space-y-3">
-                  <div className="rounded-lg border border-status-yellow/20 bg-status-yellow/5 p-3">
-                    <p className="text-[10px] uppercase tracking-wider text-status-yellow font-semibold mb-1 flex items-center gap-1">
-                      <AlertCircle className="h-3 w-3" /> Alerta
-                    </p>
-                    <textarea
-                      value={aiAlert}
-                      onChange={(e) => setAiAlert(e.target.value)}
-                      placeholder="Nenhum alerta identificado."
-                      className="w-full bg-transparent text-xs text-foreground placeholder:text-muted-foreground focus:outline-none resize-none leading-relaxed min-h-[56px]"
-                    />
-                  </div>
-                  <div className="rounded-lg border border-primary/20 bg-primary/5 p-3">
-                    <p className="text-[10px] uppercase tracking-wider text-primary font-semibold mb-1 flex items-center gap-1">
-                      <Wand2 className="h-3 w-3" /> Sugestão estratégica
-                    </p>
-                    <textarea
-                      value={aiStrategy}
-                      onChange={(e) => setAiStrategy(e.target.value)}
-                      placeholder="Nenhuma sugestão estratégica registrada."
-                      className="w-full bg-transparent text-xs text-foreground placeholder:text-muted-foreground focus:outline-none resize-none leading-relaxed min-h-[56px]"
-                    />
-                  </div>
-                </div>
-              )}
+        {/* Organizar com IA */}
+        <motion.section variants={fadeUpItem}>
+          <SectionCard tone="brand" className="space-y-4">
+            <SectionHeader
+              as="h3"
+              title="Organizar com IA"
+              description="Cole o resumo ou a transcrição gerada pelo Zoom. A IA estrutura o relatório e sugere tarefas para você aprovar."
+            />
+            <TextAreaField
+              label="Resumo do Zoom"
+              value={transcript}
+              onChange={(e) => setTranscript(e.target.value)}
+              placeholder="Cole aqui o resumo da IA do Zoom..."
+              className="min-h-[128px] resize-y"
+              hint={transcript.trim().length > 0 && transcript.trim().length < 30 ? "Cole um trecho com mais conteúdo (mínimo 30 caracteres)." : undefined}
+            />
+            <div>
+              <Button variant="secondary" onClick={organize} disabled={organizing || transcript.trim().length < 30}>
+                {organizing ? <Loader2 className="animate-spin" /> : <Wand2 />}
+                {organizing ? "Organizando..." : "Organizar com IA"}
+              </Button>
             </div>
+          </SectionCard>
+        </motion.section>
 
-            {/* Suggested tasks */}
-            <div className="rounded-xl border border-border bg-card/70 p-4 space-y-3">
-              <div className="flex items-center justify-between">
-                <p className="text-[10px] uppercase tracking-wider text-primary font-semibold flex items-center gap-1.5">
-                  <Target className="h-3 w-3" /> Tarefas para o aluno
-                </p>
-                <button
-                  onClick={() => setSuggestions((cur) => [...cur, { id: `m-${Date.now()}`, text: "", approved: true }])}
-                  className="text-[10px] text-primary hover:underline flex items-center gap-1"
-                >
-                  <Plus className="h-3 w-3" /> Adicionar
-                </button>
+        {/* Relatório estruturado */}
+        <motion.section variants={fadeUpItem}>
+          <SectionCard className="space-y-4">
+            <SectionHeader as="h3" title="Relatório" description="O que o aluno vai ler." />
+            <TextAreaField label="Resumo" required value={summary} onChange={(e) => setSummary(e.target.value)} placeholder="Panorama da sessão..." className="min-h-[120px] resize-y" />
+            <TextAreaField label="O que foi entregue" value={delivered} onChange={(e) => setDelivered(e.target.value)} placeholder="O que foi efetivamente trabalhado..." className="min-h-[96px] resize-y" />
+            <TextAreaField label="Próximos passos" value={nextSteps} onChange={(e) => setNextSteps(e.target.value)} placeholder="Encaminhamentos combinados..." className="min-h-[96px] resize-y" />
+          </SectionCard>
+        </motion.section>
+
+        {/* Insights da IA */}
+        <motion.section variants={fadeUpItem}>
+          <SectionCard className="space-y-4">
+            <SectionHeader as="h3" title="Insights da IA" />
+            {!aiAlert && !aiStrategy ? (
+              <p className="text-sm text-muted-foreground">Cole a transcrição do Zoom e toque em “Organizar com IA” para gerar.</p>
+            ) : (
+              <div className="space-y-4">
+                <TextAreaField
+                  label={<span className="inline-flex items-center gap-1.5"><AlertCircle className="h-3.5 w-3.5 text-status-yellow" aria-hidden /> Alerta</span>}
+                  value={aiAlert}
+                  onChange={(e) => setAiAlert(e.target.value)}
+                  placeholder="Nenhum alerta identificado."
+                  className="min-h-[72px] resize-y"
+                />
+                <TextAreaField
+                  label={<span className="inline-flex items-center gap-1.5"><Wand2 className="h-3.5 w-3.5 text-primary" aria-hidden /> Sugestão estratégica</span>}
+                  value={aiStrategy}
+                  onChange={(e) => setAiStrategy(e.target.value)}
+                  placeholder="Nenhuma sugestão estratégica registrada."
+                  className="min-h-[72px] resize-y"
+                />
               </div>
-              {suggestions.length === 0 ? (
-                <p className="text-xs text-muted-foreground italic">
-                  As sugestões da IA aparecem aqui depois de organizar a transcrição. Você também pode adicionar tarefas manualmente.
-                </p>
-              ) : (
-                <>
-                  <p className="text-[10px] text-muted-foreground">
-                    {suggestions.filter((s) => s.approved && s.text.trim()).length} de {suggestions.length} serão enviadas ao checklist do aluno ao salvar. Toque no quadradinho para aprovar ou rejeitar.
-                  </p>
-                <ul className="space-y-2">
-                  {suggestions.map((s) => (
-                    <li key={s.id} className="flex items-start gap-2 group">
-                      <button
-                        onClick={() => setSuggestions((cur) => cur.map((x) => x.id === s.id ? { ...x, approved: !x.approved } : x))}
-                        className={`mt-1 h-4 w-4 rounded border flex items-center justify-center shrink-0 transition-colors ${s.approved ? "bg-primary border-primary text-primary-foreground" : "border-border bg-background"}`}
-                        title={s.approved ? "Aprovada" : "Rejeitada"}
-                      >
-                        {s.approved && <Check className="h-3 w-3" />}
-                      </button>
-                      <textarea
-                        value={s.text}
-                        rows={1}
-                        onChange={(e) => {
-                          setSuggestions((cur) => cur.map((x) => x.id === s.id ? { ...x, text: e.target.value } : x));
-                          e.target.style.height = "auto";
-                          e.target.style.height = `${e.target.scrollHeight}px`;
-                        }}
-                        ref={(el) => {
-                          if (el) {
-                            el.style.height = "auto";
-                            el.style.height = `${el.scrollHeight}px`;
-                          }
-                        }}
-                        className={`flex-1 min-w-0 resize-none bg-transparent text-xs text-foreground focus:outline-none border-b border-transparent focus:border-primary/30 leading-relaxed break-words whitespace-pre-wrap ${s.approved ? "" : "line-through text-muted-foreground"}`}
-                      />
-                      <button
-                        onClick={() => setSuggestions((cur) => cur.filter((x) => x.id !== s.id))}
-                        className="mt-1 opacity-0 group-hover:opacity-100 text-muted-foreground hover:text-destructive transition shrink-0"
-                      >
-                        <X className="h-3 w-3" />
-                      </button>
-                    </li>
-                  ))}
-                </ul>
-                </>
-              )}
-            </div>
-          </aside>
-        </motion.div>
+            )}
+          </SectionCard>
+        </motion.section>
 
-        {/* Tools attached to this session */}
+        {/* Tarefas sugeridas */}
+        <motion.section variants={fadeUpItem}>
+          <SectionCard className="space-y-4">
+            <SectionHeader
+              as="h3"
+              title="Tarefas para o aluno"
+              description={
+                suggestions.length === 0
+                  ? "As sugestões da IA aparecem aqui depois de organizar a transcrição. Você também pode adicionar tarefas manualmente."
+                  : `${approvedCount} de ${suggestions.length} serão enviadas ao checklist do aluno ao salvar. Toque na caixa para aprovar ou rejeitar.`
+              }
+              actions={
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setSuggestions((cur) => [...cur, { id: `m-${Date.now()}`, text: "", approved: true }])}
+                >
+                  <Plus /> Adicionar
+                </Button>
+              }
+            />
+            {suggestions.length > 0 && (
+              <ul className="divide-y divide-border -mx-4 sm:-mx-6">
+                {suggestions.map((s) => (
+                  <li key={s.id} className="flex items-start gap-3 px-4 sm:px-6 py-2.5 min-h-[48px]">
+                    <button
+                      type="button"
+                      role="checkbox"
+                      aria-checked={s.approved}
+                      aria-label={s.approved ? "Tarefa aprovada" : "Tarefa rejeitada"}
+                      onClick={() => setSuggestions((cur) => cur.map((x) => x.id === s.id ? { ...x, approved: !x.approved } : x))}
+                      className={cn(
+                        "hit-44 relative mt-0.5 h-5 w-5 rounded-[6px] border flex items-center justify-center shrink-0 transition-colors duration-ds-1 ease-ds",
+                        "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 ring-offset-background",
+                        s.approved ? "bg-primary border-primary text-primary-foreground" : "border-border bg-card",
+                      )}
+                    >
+                      {s.approved && <Check className="h-3.5 w-3.5" aria-hidden />}
+                    </button>
+                    <textarea
+                      value={s.text}
+                      rows={1}
+                      aria-label="Descrição da tarefa"
+                      placeholder="Descreva a tarefa..."
+                      onChange={(e) => {
+                        setSuggestions((cur) => cur.map((x) => x.id === s.id ? { ...x, text: e.target.value } : x));
+                        e.target.style.height = "auto";
+                        e.target.style.height = `${e.target.scrollHeight}px`;
+                      }}
+                      ref={(el) => {
+                        if (el) {
+                          el.style.height = "auto";
+                          el.style.height = `${el.scrollHeight}px`;
+                        }
+                      }}
+                      className={cn(
+                        "flex-1 min-w-0 resize-none bg-transparent text-sm text-foreground placeholder:text-muted-foreground leading-relaxed break-words whitespace-pre-wrap py-0.5",
+                        "border-b border-transparent focus:outline-none focus-visible:border-ring",
+                        !s.approved && "line-through text-muted-foreground",
+                      )}
+                    />
+                    <IconButton
+                      aria-label="Remover tarefa"
+                      size="sm"
+                      onClick={() => setSuggestions((cur) => cur.filter((x) => x.id !== s.id))}
+                      className="-mt-1 hover:text-destructive"
+                    >
+                      <X className="h-4 w-4" />
+                    </IconButton>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </SectionCard>
+        </motion.section>
+
+        {/* Ferramentas anexadas a esta sessão */}
         {libertyProfile?.id && bookingId && (
           <motion.div variants={fadeUpItem}>
             <StudentTools libertyId={libertyProfile.id} bookingId={bookingId} />
           </motion.div>
         )}
 
-        {/* Private mentor impressions */}
-        <motion.div variants={fadeUpItem}>
+        {/* Observações privadas */}
+        <motion.section variants={fadeUpItem}>
           {!showImpressions ? (
-            <button
-              onClick={() => setShowImpressions(true)}
-              className="w-full glass-card p-4 text-left flex items-center gap-3 hover:border-primary/30 transition-all"
-            >
-              <Lock className="h-4 w-4 text-muted-foreground" />
-              <div>
-                <p className="text-sm font-medium text-foreground">Observações privadas</p>
-                <p className="text-xs text-muted-foreground">Não compartilhadas com o aluno. Só você e os admins veem.</p>
-              </div>
-            </button>
+            <SectionCard as="button" interactive onClick={() => setShowImpressions(true)} className="flex items-center gap-3">
+              <span className="h-10 w-10 rounded-[var(--ds-radius-md)] bg-muted text-muted-foreground flex items-center justify-center shrink-0">
+                <Lock className="h-4 w-4" aria-hidden />
+              </span>
+              <span className="min-w-0 flex-1">
+                <span className="block text-sm font-medium text-foreground">Observações privadas</span>
+                <span className="block text-xs text-muted-foreground">Não compartilhadas com o aluno. Só você e os administradores veem.</span>
+              </span>
+              <Plus className="h-4 w-4 text-muted-foreground shrink-0" aria-hidden />
+            </SectionCard>
           ) : (
-            <div className="border border-status-yellow/20 rounded-xl overflow-hidden">
-              <div className="bg-status-yellow/5 px-3 py-2 flex items-center gap-2">
-                <Lock className="h-3 w-3 text-status-yellow" />
-                <span className="text-[10px] text-status-yellow font-medium">Privado, não compartilhado com o aluno</span>
-              </div>
-              <textarea
+            <SectionCard tone="warning" className="space-y-3">
+              <SectionHeader
+                as="h3"
+                title={<span className="inline-flex items-center gap-2"><Lock className="h-4 w-4 text-status-yellow" aria-hidden /> Observações privadas</span>}
+                description="Privado. Não compartilhado com o aluno."
+              />
+              <TextAreaField
+                aria-label="Observações privadas"
                 value={impressions}
                 onChange={(e) => setImpressions(e.target.value)}
                 placeholder="Percepções estratégicas, alertas, oportunidades..."
-                className="w-full bg-card border-0 p-3 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none resize-none h-28"
+                className="min-h-[112px] resize-y"
               />
-            </div>
+            </SectionCard>
           )}
-        </motion.div>
+        </motion.section>
 
         {/* Checklist de conclusão da sessão */}
-        <motion.div variants={fadeUpItem} className="rounded-2xl border border-border bg-card/70 p-4 space-y-3">
-          <div className="flex items-center gap-2 text-primary text-[10px] font-semibold uppercase tracking-wider">
-            <ShieldCheck className="h-3.5 w-3.5" /> Para concluir a sessão
-          </div>
-          <ul className="space-y-1.5 text-xs">
-            <li className={`flex items-center gap-2 ${canSave ? "text-status-green" : "text-muted-foreground"}`}>
-              <Check className={`h-3.5 w-3.5 ${canSave ? "" : "opacity-30"}`} /> Relatório preenchido
-            </li>
-            <li className={`flex items-center gap-2 ${hasTool ? "text-status-green" : "text-muted-foreground"}`}>
-              <Check className={`h-3.5 w-3.5 ${hasTool ? "" : "opacity-30"}`} /> Ferramenta anexada
-            </li>
-          </ul>
-          {!canComplete && (
-            <p className="text-[10px] text-status-yellow flex items-start gap-1">
-              <AlertCircle className="h-3 w-3 mt-0.5 shrink-0" />
-              A sessão é marcada como concluída ao salvar com relatório e ferramenta anexada.
+        <motion.section variants={fadeUpItem}>
+          <SectionCard className="space-y-3">
+            <SectionHeader
+              as="h3"
+              title={<span className="inline-flex items-center gap-2"><ShieldCheck className="h-4 w-4 text-primary" aria-hidden /> Para concluir a sessão</span>}
+            />
+            <ul className="space-y-2 text-sm">
+              {[
+                { ok: sessionEnded, label: "Horário da sessão encerrado" },
+                { ok: summary.trim().length > 0, label: "Resumo preenchido" },
+                { ok: hasTool, label: "Ferramenta anexada (recomendado)" },
+              ].map((item) => (
+                <li key={item.label} className={cn("flex items-center gap-2", item.ok ? "text-status-green" : "text-muted-foreground")}>
+                  <Check className={cn("h-4 w-4 shrink-0", !item.ok && "opacity-30")} aria-hidden /> {item.label}
+                </li>
+              ))}
+            </ul>
+            <p className="text-xs text-muted-foreground leading-relaxed">
+              {!sessionEnded
+                ? "O relatório só pode ser enviado depois do horário da sessão."
+                : "A sessão é marcada como realizada ao salvar o relatório com o resumo preenchido. A ferramenta é recomendada, mas não obrigatória."}
             </p>
-          )}
-        </motion.div>
+          </SectionCard>
+        </motion.section>
 
-        <motion.div variants={fadeUpItem} className="flex flex-wrap items-center justify-end gap-2">
-          <button
-            onClick={() => setDeliverableOpen(true)}
-            className="text-xs px-4 py-2.5 rounded-lg border border-primary/30 bg-primary/5 hover:bg-primary/10 text-primary flex items-center gap-2 transition-colors"
-          >
-            <FileText className="h-4 w-4" />
-            Gerar {sessionInfo?.name ? `"${sessionInfo.name}"` : "material da sessão"}
-          </button>
-          <button
-            onClick={() => saveMutation.mutate()}
-            disabled={!canSave || saveMutation.isPending}
-            className="btn-silver px-6 py-2.5 text-sm disabled:opacity-40 flex items-center gap-2"
-          >
-            {saveMutation.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <FileText className="h-4 w-4" />}
-            {existingReport ? "Atualizar relatório" : "Salvar relatório"}
-          </button>
+        {/* Ações: fixas na base no mobile */}
+        <motion.div
+          variants={fadeUpItem}
+          className="sticky bottom-[calc(64px+env(safe-area-inset-bottom))] lg:static z-20 -mx-4 px-4 sm:-mx-6 sm:px-6 py-3 bg-background/95 backdrop-blur border-t border-border lg:mx-0 lg:p-0 lg:bg-transparent lg:border-0 lg:backdrop-blur-none"
+        >
+          <div className="flex flex-col-reverse sm:flex-row sm:items-center sm:justify-end gap-2">
+            <Button variant="outline" size="lg" onClick={() => setDeliverableOpen(true)}>
+              <FileText /> Gerar material
+            </Button>
+            <Button
+              size="lg"
+              onClick={() => saveMutation.mutate()}
+              disabled={!canSave || saveMutation.isPending}
+              title={saveHint}
+              className="w-full sm:w-auto"
+            >
+              {saveMutation.isPending ? <Loader2 className="animate-spin" /> : <FileText />}
+              {existingReport ? "Atualizar relatório" : "Salvar relatório"}
+            </Button>
+          </div>
+          {saveHint && <p className="text-xs text-muted-foreground text-right mt-2">{saveHint}</p>}
         </motion.div>
       </motion.div>
+      </PageContainer>
+
+      <ConfirmDialog
+        open={!!swapTargetId}
+        onOpenChange={(open) => { if (!open && !swapping) setSwapTargetId(null); }}
+        title="Trocar a sessão entregue?"
+        description={`A sessão passa a ser “${swapTarget?.name ?? "outra sessão"}”. Isso altera o histórico do aluno.`}
+        confirmLabel="Trocar sessão"
+        loading={swapping}
+        onConfirm={confirmSwapSession}
+      />
 
       {libertyProfile && (
         <SessionDeliverableDialog
@@ -595,27 +766,5 @@ const MentorRelatorioPage = () => {
     </AppLayout>
   );
 };
-
-// eslint-disable-next-line @typescript-eslint/no-unused-vars
-const _icons_used = [Paperclip];
-
-const Field = ({
-  label, value, onChange, placeholder, rows = 4, required,
-}: {
-  label: string; value: string; onChange: (v: string) => void; placeholder?: string; rows?: number; required?: boolean;
-}) => (
-  <div>
-    <label className="text-xs text-muted-foreground mb-1 block">
-      {label} {required && <span className="text-destructive">*</span>}
-    </label>
-    <textarea
-      value={value}
-      onChange={(e) => onChange(e.target.value)}
-      placeholder={placeholder}
-      style={{ minHeight: `${rows * 24}px` }}
-      className="w-full bg-card border border-border rounded-lg p-3 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:border-primary/30 resize-y"
-    />
-  </div>
-);
 
 export default MentorRelatorioPage;

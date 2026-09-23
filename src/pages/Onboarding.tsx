@@ -3,16 +3,11 @@ import { useNavigate } from "react-router-dom";
 import { useAuth } from "@/hooks/useAuth";
 import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Textarea } from "@/components/ui/textarea";
-import { Calendar } from "@/components/ui/calendar";
-import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
-import { Checkbox } from "@/components/ui/checkbox";
 import { toast } from "sonner";
-import { format, parse, isValid } from "date-fns";
-import { ptBR } from "date-fns/locale";
-import { ArrowLeft, ArrowRight, Check, Calendar as CalendarIcon } from "lucide-react";
+import { format } from "date-fns";
+import { ArrowLeft, ArrowRight, Check } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { Chip, PageContainer, PageHeader, ProgressBar, SelectField, TextAreaField, TextField } from "@/components/ds";
 
 type FieldType =
   | "text"
@@ -38,7 +33,6 @@ interface Field {
 }
 
 interface StepGroup {
-  emoji: string;
   title: string;
   subtitle: string;
   fields: Field[];
@@ -51,7 +45,6 @@ const UFS = [
 
 const STEPS: StepGroup[] = [
   {
-    emoji: "👋",
     title: "Sobre você",
     subtitle: "Vamos começar pelo básico.",
     fields: [
@@ -64,7 +57,6 @@ const STEPS: StepGroup[] = [
     ],
   },
   {
-    emoji: "📍",
     title: "Onde você está",
     subtitle: "Sua localização e algumas preferências.",
     fields: [
@@ -77,7 +69,6 @@ const STEPS: StepGroup[] = [
     ],
   },
   {
-    emoji: "📖",
     title: "Sua história",
     subtitle: "A verdadeira força de um negócio não está no que ele vende, mas na história por trás dele. Conte o caminho que te trouxe até aqui, sem pressa.",
     fields: [
@@ -87,7 +78,6 @@ const STEPS: StepGroup[] = [
     ],
   },
   {
-    emoji: "🏢",
     title: "Seu negócio",
     subtitle: "Agora me conta sobre a sua empresa.",
     fields: [
@@ -108,7 +98,6 @@ const STEPS: StepGroup[] = [
     ],
   },
   {
-    emoji: "💰",
     title: "Financeiro",
     subtitle: "Sem julgamentos. Quanto mais real, melhor te ajudamos.",
     fields: [
@@ -134,8 +123,7 @@ const STEPS: StepGroup[] = [
     ],
   },
   {
-    emoji: "🌟",
-    title: "Sonhos & metas",
+    title: "Sonhos e metas",
     subtitle: "Pra fechar, onde você quer chegar.",
     fields: [
       { key: "challenge_2026", label: "Maior desafio para 2026", type: "textarea", required: true,
@@ -163,10 +151,6 @@ const splitCityState = (val?: string | null): { city: string; uf: string } => {
   if (m) return { city: m[1].trim(), uf: m[2].toUpperCase() };
   return { city: val, uf: "" };
 };
-
-// Shared input/textarea classes — higher contrast (bg-card + visible border)
-const FIELD_CLASSES =
-  "bg-card border border-input/80 text-foreground placeholder:text-muted-foreground/70 focus-visible:border-primary";
 
 export default function Onboarding() {
   const navigate = useNavigate();
@@ -313,179 +297,135 @@ export default function Onboarding() {
 
   if (done) {
     return (
-      <div className="min-h-screen bg-background flex items-center justify-center px-6">
-        <div className="text-center animate-fade-in">
-          <div className="inline-flex items-center justify-center w-24 h-24 rounded-full bg-primary/15 mb-6">
-            <Check className="w-12 h-12 text-primary" />
+      <div className="min-h-[100dvh] bg-background flex items-center justify-center py-10">
+        <PageContainer variant="narrow">
+          <div className="max-w-sm mx-auto text-center space-y-6" role="status" aria-live="polite">
+            <div className="mx-auto inline-flex items-center justify-center h-16 w-16 rounded-full bg-primary/15">
+              <Check className="h-8 w-8 text-primary" aria-hidden />
+            </div>
+            <div className="space-y-2">
+              <h1 className="text-[24px] md:text-[28px] font-semibold leading-[1.2] tracking-[var(--ds-tracking-display)] text-foreground">
+                Tudo pronto
+              </h1>
+              <p className="text-sm text-muted-foreground">Bem-vindo(a) ao Liberty Begin. Estamos levando você para o início.</p>
+            </div>
+            <Button size="lg" onClick={() => navigate("/dashboard", { replace: true })} className="w-full">
+              Ir para o início
+            </Button>
           </div>
-          <h1 className="text-4xl md:text-5xl font-bold mb-3">Tudo pronto! 🎉</h1>
-          <p className="text-lg text-muted-foreground">Bem-vindo(a) ao Liberty Begin.</p>
-        </div>
+        </PageContainer>
       </div>
     );
   }
-
-  const progress = Math.round(((step + 1) / TOTAL_STEPS) * 100);
 
   const renderField = (f: Field) => {
     const v = answers[f.key] ?? "";
     const colSpan = f.span === "full" ? "md:col-span-2" : "";
 
-    const Label = (
-      <label className="text-sm font-medium text-foreground">
-        {f.label} {f.required && <span className="text-primary">*</span>}
-      </label>
-    );
-
     if (f.type === "textarea") {
       return (
-        <div key={f.key} className={cn("space-y-2", colSpan)}>
-          {Label}
-          {f.hint && <p className="text-xs text-muted-foreground">{f.hint}</p>}
-          <Textarea
-            value={v}
-            onChange={(e) => setField(f.key, e.target.value)}
-            placeholder={f.placeholder}
-            rows={f.rows ?? 4}
-            className={cn("resize-y leading-relaxed", FIELD_CLASSES)}
-          />
-        </div>
+        <TextAreaField
+          key={f.key}
+          label={f.label}
+          hint={f.hint}
+          required={f.required}
+          value={v}
+          onChange={(e) => setField(f.key, e.target.value)}
+          placeholder={f.placeholder}
+          rows={f.rows ?? 4}
+          className="resize-y leading-relaxed"
+          containerClassName={colSpan}
+        />
       );
     }
 
-    // Dropdown nativo — evita travamentos/tela preta em iOS (Safari/PWA)
+    // Select nativo: evita travamentos em iOS (Safari/PWA)
     if (f.type === "select") {
       return (
-        <div key={f.key} className={cn("space-y-2", colSpan)}>
-          {Label}
-          <select
-            value={v}
-            onChange={(e) => setField(f.key, e.target.value)}
-            className={cn(
-              "h-11 w-full rounded-md px-3 text-sm",
-              FIELD_CLASSES,
-            )}
-          >
-            <option value="">Selecione uma opção</option>
-            {(f.options ?? []).map((opt) => (
-              <option key={opt} value={opt}>{opt}</option>
-            ))}
-          </select>
-        </div>
+        <SelectField
+          key={f.key}
+          label={f.label}
+          required={f.required}
+          value={v}
+          onChange={(e) => setField(f.key, e.target.value)}
+          containerClassName={colSpan}
+        >
+          <option value="">Selecione uma opção</option>
+          {(f.options ?? []).map((opt) => (
+            <option key={opt} value={opt}>{opt}</option>
+          ))}
+        </SelectField>
       );
     }
 
-
-    // Chips — used for short yes/no/maybe style answers
+    // Chips: respostas curtas (sim / talvez / não)
     if (f.type === "select-chips") {
       return (
-        <div key={f.key} className={cn("space-y-2", colSpan)}>
-          {Label}
+        <fieldset key={f.key} className={cn("space-y-1.5 min-w-0", colSpan)}>
+          <legend className="block text-sm font-medium text-foreground mb-1.5">
+            {f.label}
+            {f.required && <span className="text-destructive ml-0.5" aria-hidden>*</span>}
+          </legend>
           <div className="flex flex-wrap gap-2">
-            {(f.options ?? []).map((opt) => {
-              const selected = v === opt;
-              return (
-                <button
-                  type="button"
-                  key={opt}
-                  onClick={() => setField(f.key, opt)}
-                  className={cn(
-                    "px-3.5 py-2 rounded-lg border text-sm transition-all",
-                    selected
-                      ? "border-primary/60 bg-primary/15 text-foreground"
-                      : "border-input/80 bg-card text-muted-foreground hover:border-primary/40 hover:text-foreground",
-                  )}
-                >
-                  {selected && <Check className="inline w-3.5 h-3.5 mr-1.5 text-primary" />}
-                  {opt}
-                </button>
-              );
-            })}
+            {(f.options ?? []).map((opt) => (
+              <Chip key={opt} active={v === opt} onClick={() => setField(f.key, opt)}>
+                {opt}
+              </Chip>
+            ))}
           </div>
-        </div>
+        </fieldset>
       );
     }
 
     if (f.type === "date") {
-      const parsed = v ? parse(v, "yyyy-MM-dd", new Date()) : undefined;
-      const displayDate = parsed && isValid(parsed) ? parsed : undefined;
       return (
-        <div key={f.key} className={cn("space-y-2", colSpan)}>
-          {Label}
-          <p className="text-xs text-muted-foreground">Você pode digitar a data direto no campo (dia/mês/ano).</p>
-          <div className="flex gap-2">
-            <Input
-              type="date"
-              value={v}
-              onChange={(e) => setField(f.key, e.target.value)}
-              className={cn("flex-1 h-11", FIELD_CLASSES)}
-              max={format(new Date(), "yyyy-MM-dd")}
-            />
-            <Popover>
-              <PopoverTrigger asChild>
-                <Button
-                  variant="outline"
-                  size="icon"
-                  type="button"
-                  className="h-11 w-11 bg-card border-input/80"
-                  aria-label="Abrir calendário"
-                >
-                  <CalendarIcon className="h-4 w-4" />
-                </Button>
-              </PopoverTrigger>
-              <PopoverContent className="w-auto p-0 bg-popover border-border" align="end">
-                <Calendar
-                  mode="single"
-                  selected={displayDate}
-                  onSelect={(d) => d && setField(f.key, format(d, "yyyy-MM-dd"))}
-                  captionLayout="dropdown-buttons"
-                  fromYear={1930}
-                  toYear={new Date().getFullYear()}
-                  defaultMonth={displayDate}
-                  locale={ptBR}
-                  className={cn("p-3 pointer-events-auto onboarding-calendar")}
-                />
-              </PopoverContent>
-            </Popover>
-          </div>
-        </div>
+        <TextField
+          key={f.key}
+          type="date"
+          label={f.label}
+          hint="Dia, mês e ano."
+          required={f.required}
+          value={v}
+          onChange={(e) => setField(f.key, e.target.value)}
+          max={format(new Date(), "yyyy-MM-dd")}
+          containerClassName={colSpan}
+        />
       );
     }
 
     if (f.type === "uf") {
       return (
-        <div key={f.key} className={cn("space-y-2", colSpan)}>
-          {Label}
-          <select
-            value={v}
-            onChange={(e) => {
-              const val = e.target.value;
-              setField(f.key, val);
-              if (val !== answers.uf) setField("city", "");
-            }}
-            className={cn("h-11 w-full rounded-md px-3 text-sm", FIELD_CLASSES)}
-          >
-            <option value="">Selecione o estado</option>
-            {UFS.map((u) => (
-              <option key={u} value={u}>{u}</option>
-            ))}
-          </select>
-
-        </div>
+        <SelectField
+          key={f.key}
+          label={f.label}
+          required={f.required}
+          value={v}
+          onChange={(e) => {
+            const val = e.target.value;
+            setField(f.key, val);
+            if (val !== answers.uf) setField("city", "");
+          }}
+          containerClassName={colSpan}
+        >
+          <option value="">Selecione o estado</option>
+          {UFS.map((u) => (
+            <option key={u} value={u}>{u}</option>
+          ))}
+        </SelectField>
       );
     }
 
     if (f.type === "city") {
       return (
-        <div key={f.key} className={cn("space-y-2", colSpan)}>
-          {Label}
-          <Input
+        <div key={f.key} className={cn("min-w-0", colSpan)}>
+          <TextField
+            label={f.label}
+            required={f.required}
             list="city-options"
             value={v}
-            placeholder={answers.uf ? "Comece a digitar a cidade..." : f.placeholder}
+            placeholder={answers.uf ? "Comece a digitar a cidade" : f.placeholder}
             disabled={!answers.uf}
             onChange={(e) => setField(f.key, e.target.value)}
-            className={cn("h-11", FIELD_CLASSES)}
           />
           <datalist id="city-options">
             {cityOptions.map((c) => <option key={c} value={c} />)}
@@ -496,103 +436,85 @@ export default function Onboarding() {
 
     if (f.type === "margin") {
       return (
-        <div key={f.key} className={cn("space-y-2", colSpan)}>
-          {Label}
-          <div className="flex items-center gap-2">
-            <div className="relative flex-1">
-              <Input
+        <div key={f.key} className={cn("space-y-1.5 min-w-0", colSpan)}>
+          <div className="flex items-end gap-2.5">
+            <div className="relative flex-1 min-w-0">
+              <TextField
                 type="number"
+                label={f.label}
+                required={f.required}
                 min={0}
                 max={100}
                 step={0.1}
+                inputMode="decimal"
                 value={marginUnknown ? "" : v}
                 disabled={marginUnknown}
                 onChange={(e) => setField(f.key, e.target.value)}
-                placeholder={f.placeholder}
-                className={cn("h-11 pr-9", FIELD_CLASSES)}
+                placeholder={marginUnknown ? "Não sei" : f.placeholder}
+                className="pr-9"
               />
-              <span className="absolute right-3 top-1/2 -translate-y-1/2 text-sm text-muted-foreground">%</span>
+              <span className="absolute right-4 bottom-3 text-sm text-muted-foreground pointer-events-none" aria-hidden>%</span>
             </div>
-            <label className="flex items-center gap-2 px-3 h-11 rounded-lg border border-input/80 bg-card cursor-pointer hover:bg-muted/40 transition-colors">
-              <Checkbox
-                checked={marginUnknown}
-                onCheckedChange={(c) => {
-                  const checked = !!c;
-                  setMarginUnknown(checked);
-                  if (checked) setField(f.key, "");
-                }}
-              />
-              <span className="text-sm text-foreground">Não sei</span>
-            </label>
+            <Chip
+              active={marginUnknown}
+              onClick={() => {
+                const next = !marginUnknown;
+                setMarginUnknown(next);
+                if (next) setField(f.key, "");
+              }}
+              className="h-11 mb-0.5"
+            >
+              Não sei
+            </Chip>
           </div>
         </div>
       );
     }
 
     return (
-      <div key={f.key} className={cn("space-y-2", colSpan)}>
-        {Label}
-        <Input
-          type={f.type === "tel" ? "tel" : "text"}
-          value={v}
-          onChange={(e) => setField(f.key, e.target.value)}
-          placeholder={f.placeholder}
-          className={cn("h-11", FIELD_CLASSES)}
-        />
-      </div>
+      <TextField
+        key={f.key}
+        type={f.type === "tel" ? "tel" : "text"}
+        label={f.label}
+        required={f.required}
+        inputMode={f.type === "tel" ? "tel" : undefined}
+        autoComplete={f.type === "tel" ? "tel" : undefined}
+        value={v}
+        onChange={(e) => setField(f.key, e.target.value)}
+        placeholder={f.placeholder}
+        containerClassName={colSpan}
+      />
     );
   };
 
   return (
-    <div className="min-h-screen bg-background flex flex-col">
-      {/* Inline styles to give the native dropdowns inside the calendar proper contrast */}
-      <style>{`
-        .onboarding-calendar .rdp-caption_dropdowns select,
-        .onboarding-calendar select {
-          background-color: hsl(var(--card));
-          color: hsl(var(--foreground));
-          border: 1px solid hsl(var(--input));
-          border-radius: 6px;
-          padding: 4px 6px;
-          font-size: 0.875rem;
-        }
-        .onboarding-calendar .rdp-caption_dropdowns select:focus {
-          outline: 2px solid hsl(var(--ring));
-          outline-offset: 1px;
-        }
-        .onboarding-calendar .rdp-caption_dropdowns option {
-          background-color: hsl(var(--popover));
-          color: hsl(var(--foreground));
-        }
-      `}</style>
-
-      <header className="px-6 py-5 flex items-center justify-between border-b border-border/40">
-        <div className="text-sm font-medium text-muted-foreground">
-          Etapa {step + 1} <span className="opacity-50">de {TOTAL_STEPS}</span>
+    <div className="min-h-[100dvh] bg-background pt-[calc(env(safe-area-inset-top,0px)_+_1.5rem)] pb-[calc(env(safe-area-inset-bottom,0px)_+_2.5rem)] md:pt-10">
+      <PageContainer variant="narrow">
+        <div className="space-y-3">
+          <PageHeader
+            eyebrow={`Etapa ${step + 1} de ${TOTAL_STEPS}`}
+            title={currentStep.title}
+            description={currentStep.subtitle}
+            actions={
+              <Button type="button" variant="ghost" size="sm" onClick={() => signOut()} className="text-muted-foreground">
+                Sair
+              </Button>
+            }
+          />
+          <ProgressBar value={step + 1} max={TOTAL_STEPS} label={`Progresso: etapa ${step + 1} de ${TOTAL_STEPS}`} />
         </div>
-        <button onClick={() => signOut()} className="text-xs text-muted-foreground hover:text-foreground transition">
-          Sair
-        </button>
-      </header>
 
-      <div className="h-1 bg-border/30">
-        <div className="h-full bg-primary transition-all duration-500" style={{ width: `${progress}%` }} />
-      </div>
-
-      <main className="flex-1 flex justify-center px-4 sm:px-6 py-8 md:py-12">
-        <div key={step} className="w-full max-w-2xl animate-fade-in">
-          <div className="text-xs font-medium uppercase tracking-wider text-primary/80 mb-3 flex items-center gap-2">
-            <span className="text-base">{currentStep.emoji}</span>
-            <span>{currentStep.title}</span>
-          </div>
-          <h1 className="text-2xl md:text-4xl font-bold leading-tight mb-2">{currentStep.title}</h1>
-          <p className="text-sm md:text-base text-muted-foreground mb-8 leading-relaxed">{currentStep.subtitle}</p>
-
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-x-5 gap-y-6">
+        <form
+          key={step}
+          onSubmit={(e) => { e.preventDefault(); void handleNext(); }}
+          className="space-y-8"
+          noValidate
+        >
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-x-4 gap-y-5">
             {currentStep.fields.map(renderField)}
           </div>
 
-          <div className="mt-10 flex items-center justify-between">
+          <div className="flex items-center justify-between gap-3 pt-2">
             <Button
               type="button"
               variant="ghost"
@@ -600,16 +522,16 @@ export default function Onboarding() {
               disabled={step === 0}
               className="text-muted-foreground"
             >
-              <ArrowLeft className="w-4 h-4 mr-2" /> Voltar
+              <ArrowLeft aria-hidden /> Voltar
             </Button>
-            <Button type="button" onClick={handleNext} disabled={saving} size="lg" className="min-w-[160px]">
+            <Button type="submit" disabled={saving} size="lg" className="min-w-[160px]">
               {step === TOTAL_STEPS - 1
-                ? (saving ? "Finalizando..." : <>Finalizar <Check className="w-4 h-4 ml-2" /></>)
-                : (saving ? "Salvando..." : <>Continuar <ArrowRight className="w-4 h-4 ml-2" /></>)}
+                ? (saving ? "Finalizando..." : <>Finalizar <Check aria-hidden /></>)
+                : (saving ? "Salvando..." : <>Continuar <ArrowRight aria-hidden /></>)}
             </Button>
           </div>
-        </div>
-      </main>
+        </form>
+      </PageContainer>
     </div>
   );
 }

@@ -4,6 +4,8 @@ import { initials } from "@/lib/formatName";
 import { Camera, Loader2, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import { useQueryClient } from "@tanstack/react-query";
+import { Button } from "@/components/ui/button";
+import { ConfirmDialog } from "@/components/ds";
 
 interface AvatarUploadProps {
   profileId: string;
@@ -17,6 +19,7 @@ export const AvatarUpload = ({ profileId, fullName, avatarUrl, size = 80, onChan
   const inputRef = useRef<HTMLInputElement>(null);
   const [uploading, setUploading] = useState(false);
   const [currentUrl, setCurrentUrl] = useState<string | null>(avatarUrl);
+  const [confirmRemove, setConfirmRemove] = useState(false);
   const queryClient = useQueryClient();
 
   const handleFile = async (file: File) => {
@@ -56,7 +59,7 @@ export const AvatarUpload = ({ profileId, fullName, avatarUrl, size = 80, onChan
   };
 
   const handleRemove = async () => {
-    if (!confirm("Remover foto de perfil?")) return;
+    setConfirmRemove(false);
     setUploading(true);
     try {
       const { error } = await supabase
@@ -93,26 +96,32 @@ export const AvatarUpload = ({ profileId, fullName, avatarUrl, size = 80, onChan
           </div>
         )}
       </div>
-      <div className="flex flex-col gap-1.5">
-        <button
-          type="button"
-          disabled={uploading}
-          onClick={() => inputRef.current?.click()}
-          className="text-xs px-3 py-1.5 rounded-lg border border-border hover:bg-muted text-foreground flex items-center gap-1.5 disabled:opacity-50"
-        >
+      <div className="flex flex-col items-start gap-2">
+        <Button type="button" variant="outline" size="sm" disabled={uploading} onClick={() => inputRef.current?.click()}>
           <Camera className="h-3.5 w-3.5" />
           {currentUrl ? "Trocar foto" : "Adicionar foto"}
-        </button>
+        </Button>
         {currentUrl && (
-          <button
+          <Button
             type="button"
+            variant="ghost"
+            size="sm"
             disabled={uploading}
-            onClick={handleRemove}
-            className="text-xs px-3 py-1.5 rounded-lg text-muted-foreground hover:text-destructive flex items-center gap-1.5 disabled:opacity-50"
+            onClick={() => setConfirmRemove(true)}
+            className="text-muted-foreground hover:text-destructive"
           >
             <Trash2 className="h-3.5 w-3.5" /> Remover
-          </button>
+          </Button>
         )}
+        <ConfirmDialog
+          open={confirmRemove}
+          onOpenChange={setConfirmRemove}
+          title="Remover foto de perfil?"
+          description="A foto atual será apagada e o avatar voltará a mostrar as iniciais."
+          confirmLabel="Remover"
+          destructive
+          onConfirm={handleRemove}
+        />
         <input
           ref={inputRef}
           type="file"

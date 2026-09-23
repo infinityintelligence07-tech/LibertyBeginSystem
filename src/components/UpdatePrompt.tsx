@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { RefreshCw, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { IconButton, SectionCard } from "@/components/ds";
 import { reloadAppSafely } from "@/lib/appReload";
 
 /**
@@ -115,34 +116,23 @@ export const UpdatePrompt = () => {
 
   return (
     <div
-      className="fixed left-1/2 -translate-x-1/2 z-[60] w-[92%] max-w-md"
-      style={{ bottom: "calc(env(safe-area-inset-bottom, 0px) + 5.5rem)" }}
+      role="status"
+      aria-live="polite"
+      className="fixed inset-x-0 z-40 px-4 pointer-events-none bottom-[calc(env(safe-area-inset-bottom,0px)_+_4.5rem)] lg:bottom-6 lg:left-60"
     >
-      <div className="glass-card p-4 flex items-center gap-3 shadow-lg border border-primary/30">
-        <div className="w-10 h-10 rounded-lg bg-primary/10 flex items-center justify-center shrink-0">
-          <RefreshCw className="h-5 w-5 text-primary" />
-        </div>
+      <SectionCard tone="brand" padding="compact" className="max-w-md mx-auto pointer-events-auto shadow-ds-2 flex items-center gap-3">
+        <RefreshCw className="h-5 w-5 text-primary shrink-0" aria-hidden />
         <div className="flex-1 min-w-0">
-          <p className="text-sm font-medium text-foreground">Nova versão disponível</p>
-          <p className="text-xs text-muted-foreground">Atualize para ver as novidades do app.</p>
+          <p className="text-sm font-semibold text-foreground leading-tight">Nova versão disponível</p>
+          <p className="text-xs text-muted-foreground leading-tight mt-0.5">Atualize para ver as novidades.</p>
         </div>
-        <Button
-          onClick={handleReload}
-          size="sm"
-          className="text-xs shrink-0"
-        >
+        <Button size="sm" onClick={handleReload} className="shrink-0">
           Atualizar
         </Button>
-        <Button
-          variant="ghost"
-          size="icon"
-          onClick={() => setOutdated(false)}
-          className="h-8 w-8 text-muted-foreground shrink-0"
-          aria-label="Dispensar"
-        >
+        <IconButton aria-label="Dispensar" size="sm" onClick={() => setOutdated(false)} className="-mr-1">
           <X className="h-4 w-4" />
-        </Button>
-      </div>
+        </IconButton>
+      </SectionCard>
     </div>
   );
 };

@@ -7,6 +7,7 @@ import {
   type Answers,
   type ToolPillar,
 } from "@/lib/diagnosticoBegin";
+import { Button } from "@/components/ui/button";
 
 interface Props {
   answers: Answers;
@@ -93,11 +94,11 @@ const SectorCard = ({ pillar, color, answers, onChange, expanded, featured, onEx
 
         {/* HOJE */}
         <div className="flex min-h-0 flex-col gap-1.5 bg-muted/25 p-2.5">
-          <p className="text-[9px] font-bold uppercase tracking-[0.18em] text-muted-foreground">Hoje</p>
+          <p className="ds-kicker">Hoje</p>
 
           {/* Resumo em destaque, no TOPO — sempre visível */}
           <div className="shrink-0 rounded-md border border-muted-foreground/25 bg-background px-1.5 py-1">
-            <p className="mb-0.5 text-[7px] font-bold uppercase tracking-[0.16em] text-muted-foreground">
+            <p className="mb-0.5 text-xs font-medium text-muted-foreground">
               Resumo em uma frase
             </p>
             {current ? (
@@ -110,7 +111,7 @@ const SectorCard = ({ pillar, color, answers, onChange, expanded, featured, onEx
                 onChange={(e) => onChange(pillarCurrentKey(pillar.id), e.target.value)}
                 placeholder="Resuma como está hoje."
                 rows={rowsCurrent}
-                className={`w-full resize-none bg-transparent ${szCurrent} font-semibold leading-snug text-foreground placeholder:font-normal placeholder:text-muted-foreground/60 focus:outline-none`}
+                className={`w-full resize-none bg-transparent ${szCurrent} font-semibold leading-snug text-foreground placeholder:font-normal placeholder:text-muted-foreground focus:outline-none`}
               />
             )}
           </div>
@@ -142,14 +143,14 @@ const SectorCard = ({ pillar, color, answers, onChange, expanded, featured, onEx
           className="flex min-h-0 flex-col gap-1.5 p-2.5"
           style={{ background: `color-mix(in srgb, ${color} 10%, transparent)` }}
         >
-          <p className="flex items-center gap-1 text-[9px] font-bold uppercase tracking-[0.18em]" style={{ color }}>
+          <p className="ds-kicker flex items-center gap-1" style={{ color }}>
             <ArrowRight className="h-3 w-3" /> Onde quer chegar
           </p>
           <textarea
             value={goal}
             onChange={(e) => onChange(pillarGoalKey(pillar.id), e.target.value)}
             placeholder="O destino deste setor."
-            className={`min-h-0 w-full flex-1 resize-none rounded-md border-2 bg-background p-2 ${szGoal} font-bold leading-snug text-foreground placeholder:font-normal placeholder:text-muted-foreground/60 focus:outline-none`}
+            className={`min-h-0 w-full flex-1 resize-none rounded-ds border bg-background p-2 focus-visible:ring-2 focus-visible:ring-ring ${szGoal} font-bold leading-snug text-foreground placeholder:font-normal placeholder:text-muted-foreground focus:outline-none`}
             style={{
               borderColor: `color-mix(in srgb, ${color} 55%, transparent)`,
               boxShadow: `inset 0 0 0 9999px color-mix(in srgb, ${color} 5%, transparent)`,
@@ -171,17 +172,15 @@ export const StateMap = ({ answers, onChange, onBack, onNext, accentFor }: Props
 
   return (
     <div className="space-y-3">
-      <div className="flex flex-wrap items-end justify-between gap-3 rounded-xl border border-border bg-card px-4 py-3">
+      <div className="flex flex-wrap items-end justify-between gap-3 rounded-ds-lg border border-border bg-card px-4 py-3">
         <div>
-          <span className="text-[10px] font-semibold uppercase tracking-[0.22em] text-muted-foreground">
-            Mapa do negócio
-          </span>
-          <h2 className="text-lg font-semibold leading-tight text-foreground">Hoje x onde quer chegar</h2>
+          <span className="ds-kicker">Mapa do negócio</span>
+          <h2 className="text-[22px] font-semibold leading-tight text-foreground">Hoje x onde quer chegar</h2>
         </div>
-        <div className="flex items-center gap-2 text-[10px] uppercase tracking-[0.14em] text-muted-foreground">
-          <span className="rounded-md bg-muted px-2 py-1">Hoje</span>
-          <ArrowRight className="h-3.5 w-3.5" />
-          <span className="rounded-md bg-primary/15 px- py-1 text-primary">Destino</span>
+        <div className="flex items-center gap-2 text-xs text-muted-foreground">
+          <span className="rounded-full bg-muted px-2.5 py-1">Hoje</span>
+          <ArrowRight className="h-3.5 w-3.5" aria-hidden />
+          <span className="rounded-full bg-primary/15 px-2.5 py-1 text-primary">Destino</span>
         </div>
       </div>
 
@@ -200,15 +199,12 @@ export const StateMap = ({ answers, onChange, onBack, onNext, accentFor }: Props
       </div>
 
       <div className="flex flex-col gap-2 sm:flex-row-reverse">
-        <button onClick={onNext} className="btn-primary flex flex-1 items-center justify-center gap-2 py-3 text-sm">
-          Próxima etapa <ArrowRight className="h-4 w-4" />
-        </button>
-        <button
-          onClick={onBack}
-          className="btn-silver flex items-center justify-center gap-1.5 py-2.5 text-sm sm:w-52"
-        >
-          <ArrowLeft className="h-4 w-4" /> Voltar ao radar
-        </button>
+        <Button size="lg" className="flex-1" onClick={onNext}>
+          Próxima etapa <ArrowRight className="h-4 w-4" aria-hidden />
+        </Button>
+        <Button variant="outline" size="lg" className="sm:w-52" onClick={onBack}>
+          <ArrowLeft className="h-4 w-4" aria-hidden /> Voltar ao radar
+        </Button>
       </div>
 
       {full !== null && (

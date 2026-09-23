@@ -35,7 +35,7 @@ export const AvatarLightbox = ({
           title="Ver foto ampliada"
           aria-label={`Ampliar foto de ${name}`}
           className={cn(
-            "relative overflow-hidden border border-primary/20 shrink-0 bg-muted cursor-zoom-in hover:ring-2 hover:ring-primary/40 transition-all",
+            "relative overflow-hidden border border-border shrink-0 bg-muted cursor-zoom-in transition-shadow duration-ds-1 ease-ds hover:ring-2 hover:ring-primary/30 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 ring-offset-background",
             shape,
             className,
           )}
@@ -45,13 +45,13 @@ export const AvatarLightbox = ({
         </button>
 
         <Dialog open={open} onOpenChange={setOpen}>
-          <DialogContent className="max-w-[90vw] max-h-[90vh] p-0 overflow-hidden bg-background/95 border-border gap-0 [&>button]:text-muted-foreground [&>button]:hover:text-foreground">
+          <DialogContent className="max-w-[90vw] max-h-[90vh] p-0 overflow-hidden gap-0">
             <DialogTitle className="sr-only">Foto de {name}</DialogTitle>
             <div className="flex items-center justify-center p-2">
               <img
                 src={avatarUrl}
                 alt={name}
-                className="max-w-full max-h-[85vh] object-contain rounded-lg"
+                className="max-w-full max-h-[85vh] object-contain rounded-ds"
               />
             </div>
             <p className="text-center text-sm text-muted-foreground pb-3 px-4">{name}</p>
@@ -70,7 +70,7 @@ export const AvatarLightbox = ({
         className,
       )}
     >
-      <span style={{ fontSize: Math.max(9, Math.round(size * 0.32)) }}>{initials(name)}</span>
+      <span style={{ fontSize: Math.max(11, Math.round(size * 0.32)) }}>{initials(name)}</span>
     </div>
   );
 };

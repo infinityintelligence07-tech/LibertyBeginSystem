@@ -1,16 +1,23 @@
 import { useState } from "react";
 import {
   CheckCircle2, Clock, Pencil, Trash2, X, Save, RotateCcw, ShieldCheck,
-  TrendingUp, MessageSquare, Calendar as CalendarIcon, User,
+  TrendingUp, MessageSquare, Calendar as CalendarIcon, User, Plus,
 } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { useMutation } from "@tanstack/react-query";
 import { toast } from "sonner";
+import { Button } from "@/components/ui/button";
 import {
-  Dialog, DialogContent, DialogHeader, DialogTitle,
-} from "@/components/ui/dialog";
+  BottomSheet,
+  Chip,
+  ConfirmDialog,
+  IconButton,
+  StatusPill,
+  TextAreaField,
+  TextField,
+} from "@/components/ds";
 import { useAuth } from "@/hooks/useAuth";
-import { getTaskStatus, taskStatusConfig } from "@/lib/taskStatus";
+import { getTaskStatus, taskStatusConfig, type TaskStatus } from "@/lib/taskStatus";
 import { TaskPlanDialog } from "@/components/TaskPlanDialog";
 import { format, parseISO } from "date-fns";
 import { ptBR } from "date-fns/locale";
@@ -52,6 +59,7 @@ export const MemberTasksList = ({ tasks, sessionNameFor, canManage, onChanged, r
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editText, setEditText] = useState("");
   const [planTaskId, setPlanTaskId] = useState<string | null>(null);
+  const [deleteTaskId, setDeleteTaskId] = useState<string | null>(null);
 
   const [resultTaskId, setResultTaskId] = useState<string | null>(null);
   const [resultType, setResultType] = useState<"quantitative" | "qualitative">("qualitative");
@@ -141,116 +149,149 @@ export const MemberTasksList = ({ tasks, sessionNameFor, canManage, onChanged, r
     onError: (e: any) => toast.error("Erro ao registrar resultado: " + (e?.message || "")),
   });
 
+  const toneFor = (status: TaskStatus): "neutral" | "info" | "pending" | "success" => {
+    switch (status) {
+      case "pending":
+        return "neutral";
+      case "in_progress":
+        return "info";
+      case "done_by_student":
+        return "pending";
+      case "validated":
+        return "success";
+      default: {
+        const exhaustive: never = status;
+        return exhaustive;
+      }
+    }
+  };
+
+  const renderStatusControl = (t: Task, status: TaskStatus) => {
+    if (!canManage) return <StatusPill tone={toneFor(status)} size="sm">{taskStatusConfig[status].label}</StatusPill>;
+    if (status === "pending" || status === "in_progress") {
+      return (
+        <button
+          type="button"
+          onClick={() => openResult(t)}
+          aria-label="Concluir e registrar resultado"
+          title="Concluir e registrar resultado"
+          className="hit-44 flex h-6 w-6 shrink-0 items-center justify-center rounded-full border border-muted-foreground/40 transition-colors duration-ds-1 hover:border-status-green hover:bg-status-green/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+        />
+      );
+    }
+    if (status === "done_by_student") {
+      return (
+        <button
+          type="button"
+          onClick={() => openResult(t)}
+          aria-label="Validar com resultado"
+          title="Validar com resultado"
+          className="hit-44 flex h-6 w-6 shrink-0 items-center justify-center rounded-full border border-status-yellow/60 bg-status-yellow/10 transition-colors duration-ds-1 hover:bg-status-yellow/20 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+        >
+          <Clock className="h-3.5 w-3.5 text-status-yellow" />
+        </button>
+      );
+    }
+    return (
+      <button
+        type="button"
+        onClick={() => reopen.mutate(t.id)}
+        disabled={reopen.isPending}
+        aria-label="Reabrir tarefa"
+        title="Reabrir tarefa"
+        className="hit-44 flex h-6 w-6 shrink-0 items-center justify-center rounded-full border border-status-green bg-status-green/15 transition-colors duration-ds-1 hover:bg-status-green/25 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50"
+      >
+        <CheckCircle2 className="h-4 w-4 text-status-green" />
+      </button>
+    );
+  };
+
+  const deleteTask = tasks.find((x) => x.id === deleteTaskId) ?? null;
+
   return (
     <>
-      <div className="space-y-1.5">
+      <ul className="space-y-2" aria-label="Tarefas">
         {tasks.map((t) => {
           const status = getTaskStatus(t);
           const cfg = taskStatusConfig[status];
           const sessionName = sessionNameFor(t.booking_id);
           const isEditing = editingId === t.id;
+          const today = new Date().toISOString().slice(0, 10);
+          const overdue = !!t.due_date && t.due_date < today && status !== "validated";
 
           return (
-            <div key={t.id} className="flex items-start gap-3 px-3 py-2 rounded-lg border border-border bg-background/40">
-              {/* Interactive circle / status icon */}
-              {canManage ? (
-                status === "pending" ? (
-                  <button
-                    onClick={() => openResult(t)}
-                    title="Concluir e registrar resultado"
-                    className="w-5 h-5 rounded-full border-2 border-muted-foreground/30 hover:border-status-green hover:bg-status-green/10 transition-colors shrink-0 mt-0.5"
-                  />
-                ) : status === "done_by_student" ? (
-                  <button
-                    onClick={() => openResult(t)}
-                    title="Validar com resultado"
-                    className="w-5 h-5 rounded-full border-2 border-status-yellow/60 bg-status-yellow/10 hover:bg-status-yellow/20 transition-colors shrink-0 mt-0.5 flex items-center justify-center"
-                  >
-                    <Clock className="h-3 w-3 text-status-yellow" />
-                  </button>
-                ) : (
-                  <button
-                    onClick={() => reopen.mutate(t.id)}
-                    disabled={reopen.isPending}
-                    title="Reabrir tarefa"
-                    className="w-5 h-5 rounded-full border-2 border-status-green bg-status-green/15 hover:bg-status-green/25 transition-colors shrink-0 mt-0.5 flex items-center justify-center"
-                  >
-                    <CheckCircle2 className="h-3.5 w-3.5 text-status-green" />
-                  </button>
-                )
-              ) : (
-                <span className={`text-[9px] uppercase tracking-wider px-1.5 py-0.5 rounded border font-semibold mt-0.5 shrink-0 ${cfg.classes}`}>
-                  {cfg.label}
-                </span>
-              )}
+            <li key={t.id} className="flex items-start gap-3 rounded-ds border border-border bg-card px-3 py-2.5">
+              <div className="mt-0.5 shrink-0">{renderStatusControl(t, status)}</div>
 
               <div className="flex-1 min-w-0">
                 {isEditing ? (
-                  <div className="flex items-center gap-2">
-                    <input
+                  <div className="flex items-center gap-1">
+                    <TextField
+                      aria-label="Descrição da tarefa"
                       value={editText}
                       onChange={(e) => setEditText(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter" && editText.trim()) updateDescription.mutate({ id: t.id, description: editText.trim() });
+                        if (e.key === "Escape") setEditingId(null);
+                      }}
                       autoFocus
-                      className="flex-1 bg-transparent text-sm text-foreground border-b border-primary/30 focus:outline-none"
+                      containerClassName="flex-1"
+                      className="h-9"
                     />
-                    <button
+                    <IconButton
+                      aria-label="Salvar descrição"
+                      size="sm"
+                      className="text-primary"
+                      disabled={updateDescription.isPending || !editText.trim()}
                       onClick={() => editText.trim() && updateDescription.mutate({ id: t.id, description: editText.trim() })}
-                      className="p-1 rounded hover:bg-muted"
-                      title="Salvar"
                     >
-                      <Save className="h-3.5 w-3.5 text-primary" />
-                    </button>
-                    <button onClick={() => setEditingId(null)} className="p-1 rounded hover:bg-muted" title="Cancelar">
-                      <X className="h-3.5 w-3.5 text-muted-foreground" />
-                    </button>
+                      <Save className="h-4 w-4" />
+                    </IconButton>
+                    <IconButton aria-label="Cancelar edição" size="sm" onClick={() => setEditingId(null)}>
+                      <X className="h-4 w-4" />
+                    </IconButton>
                   </div>
                 ) : (
                   <>
-                    <p className={`text-sm break-words ${status === "validated" ? "text-foreground/70 line-through" : "text-foreground"}`}>
+                    <p className={`text-sm break-words ${status === "validated" ? "text-muted-foreground line-through" : "text-foreground"}`}>
                       {t.description}
                     </p>
-                    <p className="text-[10px] text-muted-foreground mt-0.5 flex items-center gap-2 flex-wrap">
-                      <span>{sessionName}</span>
-                      <span className={`px-1.5 py-0.5 rounded border font-semibold ${cfg.classes}`}>{cfg.label}</span>
-                      {/* planned_date pill removed — only due_date (Prazo) is shown to avoid duplicate deadline chips */}
-
-                      {t.due_date && (() => {
-                        const today = new Date().toISOString().slice(0, 10);
-                        const overdue = t.due_date! < today && status !== "validated";
-                        return (
-                          <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full border bg-muted/50 text-muted-foreground border-border">
-                            <Clock className="h-2.5 w-2.5" />
-                            Prazo {format(parseISO(t.due_date!), "dd 'de' MMM", { locale: ptBR })}
-                            {overdue && " · vencido"}
-                          </span>
-                        );
-                      })()}
-                      {t.assignee_name && (
-                        <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full bg-muted text-muted-foreground border border-border">
-                          <User className="h-2.5 w-2.5" /> {t.assignee_name}
-                        </span>
+                    <div className="mt-1 flex flex-wrap items-center gap-1.5 text-xs text-muted-foreground">
+                      <span className="truncate max-w-[220px]">{sessionName}</span>
+                      <StatusPill tone={toneFor(status)} size="sm">{cfg.label}</StatusPill>
+                      {t.due_date && (
+                        <StatusPill tone={overdue ? "danger" : "neutral"} size="sm" withDot={false}>
+                          <Clock className="h-3 w-3" aria-hidden />
+                          Prazo {format(parseISO(t.due_date), "dd 'de' MMM", { locale: ptBR })}
+                          {overdue && " · vencido"}
+                        </StatusPill>
                       )}
-                    </p>
+                      {t.assignee_name && (
+                        <StatusPill tone="neutral" size="sm" withDot={false}>
+                          <User className="h-3 w-3" aria-hidden /> {t.assignee_name}
+                        </StatusPill>
+                      )}
+                    </div>
                     {t.result_value && (
-                      <div className="mt-2 p-2 rounded-lg bg-muted/50 border border-border">
-                        <div className="flex items-center gap-1.5 mb-0.5">
+                      <div className="mt-2 rounded-ds border border-border bg-muted/40 p-2.5">
+                        <div className="mb-0.5 flex items-center gap-1.5">
                           {t.result_type === "quantitative"
-                            ? <TrendingUp className="h-3 w-3 text-status-green" />
-                            : <MessageSquare className="h-3 w-3 text-status-blue" />}
-                          <span className="text-[10px] text-muted-foreground uppercase tracking-wider font-medium">
-                            {t.result_type === "quantitative" ? "Quantitativo" : "Qualitativo"}
-                          </span>
+                            ? <TrendingUp className="h-3.5 w-3.5 text-status-green" aria-hidden />
+                            : <MessageSquare className="h-3.5 w-3.5 text-status-blue" aria-hidden />}
+                          <span className="ds-kicker">{t.result_type === "quantitative" ? "Quantitativo" : "Qualitativo"}</span>
                           {canManage && (
-                            <button
+                            <IconButton
+                              aria-label="Remover resultado"
+                              size="sm"
+                              className="ml-auto h-7 w-7 hover:text-destructive"
+                              disabled={clearResult.isPending}
                               onClick={() => clearResult.mutate(t.id)}
-                              className="ml-auto text-[10px] text-muted-foreground hover:text-destructive"
-                              title="Remover resultado"
                             >
-                              <X className="h-3 w-3" />
-                            </button>
+                              <X className="h-3.5 w-3.5" />
+                            </IconButton>
                           )}
                         </div>
-                        <p className="text-xs text-foreground">
+                        <p className="text-sm text-foreground">
                           {t.result_metric ? `${t.result_metric}: ` : ""}{t.result_value}
                         </p>
                       </div>
@@ -260,60 +301,37 @@ export const MemberTasksList = ({ tasks, sessionNameFor, canManage, onChanged, r
               </div>
 
               {canManage && !isEditing && (
-                <div className="flex items-center gap-1 shrink-0">
+                <div className="flex items-center gap-0.5 shrink-0 flex-wrap justify-end">
                   {status === "done_by_student" && (
-                    <button
-                      onClick={() => validateOnly.mutate(t.id)}
-                      className="text-[10px] px-2 py-1 rounded bg-muted text-foreground hover:bg-muted/70"
-                      title="Apenas validar"
-                    >
+                    <Button variant="ghost" size="sm" onClick={() => validateOnly.mutate(t.id)} disabled={validateOnly.isPending} title="Apenas validar, sem resultado">
                       Validar
-                    </button>
+                    </Button>
                   )}
                   {status === "validated" && !t.result_value && (
-                    <button
-                      onClick={() => openResult(t)}
-                      className="text-[10px] px-2 py-1 rounded bg-primary/10 text-primary hover:bg-primary/20"
-                    >
-                      + Resultado
-                    </button>
+                    <Button variant="ghost" size="sm" className="text-primary" onClick={() => openResult(t)}>
+                      <Plus className="h-3.5 w-3.5" /> Resultado
+                    </Button>
                   )}
                   {status !== "pending" && (
-                    <button
-                      onClick={() => reopen.mutate(t.id)}
-                      className="p-1.5 rounded hover:bg-muted text-muted-foreground hover:text-foreground"
-                      title="Reabrir"
-                    >
-                      <RotateCcw className="h-3.5 w-3.5" />
-                    </button>
+                    <IconButton aria-label="Reabrir tarefa" size="sm" onClick={() => reopen.mutate(t.id)} disabled={reopen.isPending}>
+                      <RotateCcw className="h-4 w-4" />
+                    </IconButton>
                   )}
-                  <button
-                    onClick={() => setPlanTaskId(t.id)}
-                    className="p-1.5 rounded hover:bg-muted text-muted-foreground hover:text-foreground"
-                    title="Definir data e prazo"
-                  >
-                    <CalendarIcon className="h-3.5 w-3.5" />
-                  </button>
-                  <button
-                    onClick={() => { setEditingId(t.id); setEditText(t.description); }}
-                    className="p-1.5 rounded hover:bg-muted text-muted-foreground hover:text-foreground"
-                    title="Editar"
-                  >
-                    <Pencil className="h-3.5 w-3.5" />
-                  </button>
-                  <button
-                    onClick={() => { if (confirm("Remover esta tarefa?")) del.mutate(t.id); }}
-                    className="p-1.5 rounded hover:bg-destructive/10 text-muted-foreground hover:text-destructive"
-                    title="Remover"
-                  >
-                    <Trash2 className="h-3.5 w-3.5" />
-                  </button>
+                  <IconButton aria-label="Definir data e prazo" size="sm" onClick={() => setPlanTaskId(t.id)}>
+                    <CalendarIcon className="h-4 w-4" />
+                  </IconButton>
+                  <IconButton aria-label="Editar tarefa" size="sm" onClick={() => { setEditingId(t.id); setEditText(t.description); }}>
+                    <Pencil className="h-4 w-4" />
+                  </IconButton>
+                  <IconButton aria-label="Remover tarefa" size="sm" className="hover:text-destructive" onClick={() => setDeleteTaskId(t.id)}>
+                    <Trash2 className="h-4 w-4" />
+                  </IconButton>
                 </div>
               )}
-            </div>
+            </li>
           );
         })}
-      </div>
+      </ul>
 
       <TaskPlanDialog
         task={planTaskId ? (tasks.find((x) => x.id === planTaskId) as any) : null}
@@ -321,77 +339,66 @@ export const MemberTasksList = ({ tasks, sessionNameFor, canManage, onChanged, r
         role={role}
       />
 
-      <Dialog open={!!resultTaskId} onOpenChange={(o) => !o && setResultTaskId(null)}>
-        <DialogContent className="sm:max-w-md">
-          <DialogHeader>
-            <DialogTitle className="flex items-center gap-2">
-              <ShieldCheck className="h-4 w-4 text-status-green" /> Registrar resultado da tarefa
-            </DialogTitle>
-          </DialogHeader>
-          <div className="space-y-3">
-            <div className="flex gap-2">
-              <button
-                onClick={() => setResultType("qualitative")}
-                className={`flex-1 px-3 py-2 rounded-lg border text-sm font-semibold transition-colors ${
-                  resultType === "qualitative"
-                    ? "bg-status-blue/15 text-status-blue border-status-blue/30"
-                    : "bg-card text-muted-foreground border-border hover:text-foreground"
-                }`}
-              >
-                <MessageSquare className="h-3.5 w-3.5 inline mr-1" /> Qualitativo
-              </button>
-              <button
-                onClick={() => setResultType("quantitative")}
-                className={`flex-1 px-3 py-2 rounded-lg border text-sm font-semibold transition-colors ${
-                  resultType === "quantitative"
-                    ? "bg-status-green/15 text-status-green border-status-green/30"
-                    : "bg-card text-muted-foreground border-border hover:text-foreground"
-                }`}
-              >
-                <TrendingUp className="h-3.5 w-3.5 inline mr-1" /> Quantitativo
-              </button>
-            </div>
-            {resultType === "quantitative" && (
-              <div>
-                <label className="text-[11px] uppercase tracking-wide text-muted-foreground font-semibold">Métrica (opcional)</label>
-                <input
-                  value={resultMetric}
-                  onChange={(e) => setResultMetric(e.target.value)}
-                  placeholder="Ex.: Faturamento, Leads captados…"
-                  className="mt-1 w-full rounded-lg border border-border bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/40"
-                />
-              </div>
-            )}
-            <div>
-              <label className="text-[11px] uppercase tracking-wide text-muted-foreground font-semibold">
-                {resultType === "quantitative" ? "Valor / crescimento" : "Descreva o resultado alcançado"}
-              </label>
-              <textarea
-                value={resultValue}
-                onChange={(e) => setResultValue(e.target.value)}
-                rows={3}
-                placeholder={resultType === "quantitative" ? "Ex.: +50% de vendas, 20 novos leads…" : "Ex.: Cultura da empresa mais clara, processos definidos…"}
-                className="mt-1 w-full rounded-lg border border-border bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/40"
-              />
-            </div>
-            <div className="flex items-center justify-end gap-2 pt-1">
-              <button
-                onClick={() => setResultTaskId(null)}
-                className="px-3 py-2 rounded-lg border border-border text-sm text-foreground hover:bg-muted"
-              >
-                Cancelar
-              </button>
-              <button
-                onClick={() => saveResult.mutate()}
-                disabled={saveResult.isPending || !resultValue.trim()}
-                className="px-3 py-2 rounded-lg bg-primary text-primary-foreground text-sm font-semibold hover:bg-primary/90 disabled:opacity-50"
-              >
-                Salvar resultado
-              </button>
-            </div>
+      <ConfirmDialog
+        open={!!deleteTaskId}
+        onOpenChange={(o) => { if (!o) setDeleteTaskId(null); }}
+        title="Remover esta tarefa?"
+        description={deleteTask ? `"${deleteTask.description}" será removida da lista do membro.` : undefined}
+        confirmLabel="Remover"
+        destructive
+        onConfirm={() => {
+          const id = deleteTaskId;
+          setDeleteTaskId(null);
+          if (id) del.mutate(id);
+        }}
+      />
+
+      <BottomSheet
+        open={!!resultTaskId}
+        onOpenChange={(o) => !o && setResultTaskId(null)}
+        title={
+          <span className="inline-flex items-center gap-2">
+            <ShieldCheck className="h-4 w-4 text-status-green" aria-hidden /> Registrar resultado da tarefa
+          </span>
+        }
+        description="A tarefa é marcada como concluída e validada com o resultado informado."
+        size="sm"
+        locked={saveResult.isPending}
+        footer={
+          <>
+            <Button variant="ghost" onClick={() => setResultTaskId(null)} disabled={saveResult.isPending}>Cancelar</Button>
+            <Button onClick={() => saveResult.mutate()} disabled={saveResult.isPending || !resultValue.trim()}>
+              {saveResult.isPending ? "Salvando" : "Salvar resultado"}
+            </Button>
+          </>
+        }
+      >
+        <div className="space-y-4">
+          <div className="flex gap-2" role="group" aria-label="Tipo de resultado">
+            <Chip active={resultType === "qualitative"} onClick={() => setResultType("qualitative")} className="flex-1 justify-center">
+              <MessageSquare className="h-3.5 w-3.5" aria-hidden /> Qualitativo
+            </Chip>
+            <Chip active={resultType === "quantitative"} onClick={() => setResultType("quantitative")} className="flex-1 justify-center">
+              <TrendingUp className="h-3.5 w-3.5" aria-hidden /> Quantitativo
+            </Chip>
           </div>
-        </DialogContent>
-      </Dialog>
+          {resultType === "quantitative" && (
+            <TextField
+              label="Métrica (opcional)"
+              value={resultMetric}
+              onChange={(e) => setResultMetric(e.target.value)}
+              placeholder="Ex.: Faturamento, Leads captados"
+            />
+          )}
+          <TextAreaField
+            label={resultType === "quantitative" ? "Valor ou crescimento" : "Descreva o resultado alcançado"}
+            value={resultValue}
+            onChange={(e) => setResultValue(e.target.value)}
+            rows={3}
+            placeholder={resultType === "quantitative" ? "Ex.: +50% de vendas, 20 novos leads" : "Ex.: Cultura da empresa mais clara, processos definidos"}
+          />
+        </div>
+      </BottomSheet>
     </>
   );
 };

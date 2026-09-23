@@ -1,15 +1,28 @@
 import { useState } from "react";
-import { motion } from "framer-motion";
 import { AppLayout } from "@/components/AppLayout";
-import { staggerContainer, fadeUpItem } from "@/lib/animations";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
-import {
-  Plus, Edit, Trash2, Save, X, CalendarDays, MapPin, Clock, Eye, EyeOff, Globe, Video, Users
-} from "lucide-react";
+import { Plus, Edit, Trash2, CalendarDays, Eye, EyeOff, Users } from "lucide-react";
 import { toast } from "sonner";
-import { EmptyState } from "@/components/EmptyState";
 import { EventAttendanceList } from "@/components/EventAttendanceList";
+import { Button } from "@/components/ui/button";
+import { Switch } from "@/components/ui/switch";
+import {
+  PageContainer,
+  PageHeader,
+  SectionCard,
+  ListRow,
+  DateBlock,
+  StatusPill,
+  IconButton,
+  BottomSheet,
+  ConfirmDialog,
+  TextField,
+  TextAreaField,
+  LoadingState,
+  EmptyState,
+  ErrorState,
+} from "@/components/ds";
 
 interface EventForm {
   title: string; description: string; event_date: string; event_time: string;
@@ -25,14 +38,23 @@ const emptyForm: EventForm = {
   rsvp_enabled: true, rsvp_deadline: "", capacity: "",
 };
 
+const SwitchRow = ({ id, label, checked, onChange }: { id: string; label: string; checked: boolean; onChange: (v: boolean) => void }) => (
+  <div className="flex items-center justify-between gap-3 min-h-[44px]">
+    <label htmlFor={id} className="text-sm font-medium text-foreground cursor-pointer flex-1">{label}</label>
+    <Switch id={id} checked={checked} onCheckedChange={onChange} />
+  </div>
+);
+
 const AdminEventosPage = () => {
   const queryClient = useQueryClient();
   const [showForm, setShowForm] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [form, setForm] = useState<EventForm>(emptyForm);
   const [attendanceOpen, setAttendanceOpen] = useState<string | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<{ id: string; title: string } | null>(null);
+  const [deleting, setDeleting] = useState(false);
 
-  const { data: events, isLoading } = useQuery({
+  const { data: events, isLoading, isError, refetch } = useQuery({
     queryKey: ["admin-events"],
     queryFn: async () => {
       const { data, error } = await supabase.from("events").select("*").order("event_date", { ascending: false });
@@ -82,145 +104,216 @@ const AdminEventosPage = () => {
   };
 
   const deleteEvent = async (id: string) => {
-    if (!confirm("Excluir este evento?")) return;
+    setDeleting(true);
     const { error } = await supabase.from("events").delete().eq("id", id);
+    setDeleting(false);
     if (error) { toast.error("Erro ao excluir evento"); return; }
+    setDeleteTarget(null);
     queryClient.invalidateQueries({ queryKey: ["admin-events"] });
     toast.success("Evento excluído");
   };
 
+  const formatLongDate = (date: string) =>
+    new Date(date + "T12:00:00").toLocaleDateString("pt-BR", { day: "2-digit", month: "long", year: "numeric" });
+
+  const total = events?.length ?? 0;
+
   return (
     <AppLayout role="admin">
-      <motion.div variants={staggerContainer} initial="hidden" animate="show" className="space-y-6">
-        <motion.div variants={fadeUpItem} className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
-          <div>
-            <h1 className="text-2xl font-semibold text-foreground">Eventos</h1>
-            <p className="text-muted-foreground text-sm mt-1">{events?.length ?? 0} eventos</p>
-          </div>
-          <button onClick={openAdd} className="btn-silver text-xs px-4 py-2.5 flex items-center gap-1.5 h-10 rounded-lg">
-            <Plus className="h-3.5 w-3.5" /> Novo evento
-          </button>
-        </motion.div>
-
-        {showForm && (
-          <motion.div variants={fadeUpItem} className="glass-card p-5 border-primary/30">
-            <h3 className="text-sm font-semibold text-foreground mb-4">{editingId ? "Editar" : "Novo"} evento</h3>
-            <div className="space-y-3">
-              <input value={form.title} onChange={e => setForm(f => ({ ...f, title: e.target.value }))} className="input-begin text-sm h-10 w-full" placeholder="Título" />
-              <textarea value={form.description} onChange={e => setForm(f => ({ ...f, description: e.target.value }))} className="input-begin text-sm w-full h-20 resize-none" placeholder="Descrição" />
-              <div className="grid grid-cols-2 lg:grid-cols-3 gap-3">
-                <div>
-                  <label className="text-[10px] font-semibold text-muted-foreground uppercase block mb-1">Data</label>
-                  <input type="date" value={form.event_date} onChange={e => setForm(f => ({ ...f, event_date: e.target.value }))} className="input-begin text-sm h-10 w-full" />
-                </div>
-                <div>
-                  <label className="text-[10px] font-semibold text-muted-foreground uppercase block mb-1">Horário</label>
-                  <input value={form.event_time} onChange={e => setForm(f => ({ ...f, event_time: e.target.value }))} className="input-begin text-sm h-10 w-full" placeholder="09:00 - 12:00" />
-                </div>
-                <div>
-                  <label className="text-[10px] font-semibold text-muted-foreground uppercase block mb-1 flex items-center gap-1">
-                    <input type="checkbox" checked={form.is_online} onChange={e => setForm(f => ({ ...f, is_online: e.target.checked }))} className="rounded border-border" />
-                    Online
-                  </label>
-                </div>
-              </div>
-              <input value={form.location} onChange={e => setForm(f => ({ ...f, location: e.target.value }))} className="input-begin text-sm h-10 w-full" placeholder={form.is_online ? "Link da reunião" : "Local"} />
-              {!form.is_online && (
-                <input value={form.location_url} onChange={e => setForm(f => ({ ...f, location_url: e.target.value }))} className="input-begin text-sm h-10 w-full" placeholder="URL do Maps (opcional)" />
-              )}
-              <input value={form.cover_image_url} onChange={e => setForm(f => ({ ...f, cover_image_url: e.target.value }))} className="input-begin text-sm h-10 w-full" placeholder="URL da imagem de capa (opcional)" />
-              <label className="flex items-center gap-2 text-sm text-foreground cursor-pointer">
-                <input type="checkbox" checked={form.is_visible} onChange={e => setForm(f => ({ ...f, is_visible: e.target.checked }))} className="rounded border-border" />
-                Visível para membros
-              </label>
-              <label className="flex items-center gap-2 text-sm text-foreground cursor-pointer">
-                <input type="checkbox" checked={form.rsvp_enabled} onChange={e => setForm(f => ({ ...f, rsvp_enabled: e.target.checked }))} className="rounded border-border" />
-                Permitir confirmação de presença
-              </label>
-              {form.rsvp_enabled && (
-                <div className="grid grid-cols-2 gap-3">
-                  <div>
-                    <label className="text-[10px] font-semibold text-muted-foreground uppercase block mb-1">Prazo para confirmar</label>
-                    <input type="date" value={form.rsvp_deadline} onChange={e => setForm(f => ({ ...f, rsvp_deadline: e.target.value }))} className="input-begin text-sm h-10 w-full" />
-                  </div>
-                  <div>
-                    <label className="text-[10px] font-semibold text-muted-foreground uppercase block mb-1">Vagas (opcional)</label>
-                    <input type="number" min="1" value={form.capacity} onChange={e => setForm(f => ({ ...f, capacity: e.target.value }))} className="input-begin text-sm h-10 w-full" placeholder="Ilimitado" />
-                  </div>
-                </div>
-              )}
-              <div className="flex gap-2">
-                <button onClick={save} className="btn-silver text-xs px-4 py-2.5 flex items-center gap-1.5 h-10 rounded-lg"><Save className="h-3.5 w-3.5" /> Salvar</button>
-                <button onClick={() => setShowForm(false)} className="text-xs px-4 py-2.5 border border-border rounded-lg text-muted-foreground hover:text-foreground h-10 flex items-center gap-1.5"><X className="h-3.5 w-3.5" /> Cancelar</button>
-              </div>
-            </div>
-          </motion.div>
-        )}
+      <PageContainer>
+        <PageHeader
+          title="Eventos"
+          description={isLoading ? "Carregando eventos" : `${total} ${total === 1 ? "evento" : "eventos"}`}
+          actions={
+            <Button onClick={openAdd}>
+              <Plus aria-hidden /> Novo evento
+            </Button>
+          }
+        />
 
         {isLoading ? (
-          <div className="space-y-3">{Array.from({ length: 3 }).map((_, i) => <div key={i} className="glass-card p-5 animate-pulse h-28" />)}</div>
+          <LoadingState variant="list" rows={4} />
+        ) : isError ? (
+          <ErrorState title="Não foi possível carregar os eventos" onRetry={() => refetch()} />
         ) : !events || events.length === 0 ? (
           <EmptyState
             icon={CalendarDays}
             title="Nenhum evento cadastrado"
             description="Crie o primeiro evento da comunidade."
             action={
-              <button onClick={openAdd} className="btn-silver text-sm px-4 py-2 inline-flex items-center gap-2">
-                <Plus className="h-4 w-4" /> Criar evento
-              </button>
+              <Button onClick={openAdd}>
+                <Plus aria-hidden /> Criar evento
+              </Button>
             }
           />
         ) : (
-          <motion.div variants={fadeUpItem} className="space-y-3">
-            {events.map((event: any) => (
-              <div key={event.id} className={`glass-card p-5 ${!event.is_visible ? "opacity-60" : ""}`}>
-                <div className="flex flex-col lg:flex-row lg:items-start gap-4">
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-2 flex-wrap mb-2">
-                      <h3 className="text-sm font-semibold text-foreground">{event.title}</h3>
-                      {event.is_online ? (
-                        <span className="text-[10px] px-2 py-0.5 rounded-full bg-status-blue/10 text-status-blue border border-border flex items-center gap-1"><Video className="h-3 w-3" /> Online</span>
-                      ) : (
-                        <span className="text-[10px] px-2 py-0.5 rounded-full bg-status-green/10 text-status-green border border-border flex items-center gap-1"><MapPin className="h-3 w-3" /> Presencial</span>
-                      )}
-                      {!event.is_visible && (
-                        <span className="text-[10px] px-2 py-0.5 rounded-full bg-muted text-muted-foreground border border-border flex items-center gap-1"><EyeOff className="h-3 w-3" /> Oculto</span>
-                      )}
+          <SectionCard padding="none">
+            {events.map((event: any, index: number) => {
+              const isLast = index === events.length - 1;
+              const isAttendanceOpen = attendanceOpen === event.id;
+              const subtitle = [formatLongDate(event.event_date), event.event_time, event.location, event.description]
+                .filter(Boolean)
+                .join(" · ");
+              return (
+                <div key={event.id} className={!event.is_visible ? "opacity-70" : undefined}>
+                  <ListRow
+                    last={isLast && !isAttendanceOpen}
+                    leading={<DateBlock date={event.event_date} tone={event.is_visible ? "default" : "muted"} />}
+                    title={event.title}
+                    subtitle={subtitle}
+                    trailing={
+                      <>
+                        <span className="hidden sm:flex items-center gap-1.5">
+                          {event.is_online ? (
+                            <StatusPill tone="info">Online</StatusPill>
+                          ) : (
+                            <StatusPill tone="success">Presencial</StatusPill>
+                          )}
+                          {!event.is_visible && <StatusPill tone="neutral">Oculto</StatusPill>}
+                        </span>
+                        <IconButton
+                          aria-label="Lista de presença"
+                          size="sm"
+                          variant={isAttendanceOpen ? "primary" : "ghost"}
+                          onClick={() => setAttendanceOpen(isAttendanceOpen ? null : event.id)}
+                        >
+                          <Users className="h-4 w-4" />
+                        </IconButton>
+                        <IconButton
+                          aria-label={event.is_visible ? "Ocultar dos membros" : "Mostrar para membros"}
+                          size="sm"
+                          onClick={() => toggleVisible(event.id, event.is_visible)}
+                        >
+                          {event.is_visible ? <Eye className="h-4 w-4" /> : <EyeOff className="h-4 w-4" />}
+                        </IconButton>
+                        <IconButton aria-label="Editar evento" size="sm" onClick={() => openEdit(event)}>
+                          <Edit className="h-4 w-4" />
+                        </IconButton>
+                        <IconButton
+                          aria-label="Excluir evento"
+                          size="sm"
+                          className="hover:text-destructive hover:bg-destructive/10"
+                          onClick={() => setDeleteTarget({ id: event.id, title: event.title })}
+                        >
+                          <Trash2 className="h-4 w-4" />
+                        </IconButton>
+                      </>
+                    }
+                  />
+                  {isAttendanceOpen && (
+                    <div className={`px-4 pb-4 pt-2 bg-muted/20 ${!isLast ? "border-b border-border" : ""}`}>
+                      <EventAttendanceList eventId={event.id} eventTitle={event.title} />
                     </div>
-                    <div className="space-y-1 text-xs text-muted-foreground">
-                      <div className="flex items-center gap-2"><CalendarDays className="h-3.5 w-3.5 shrink-0" /> {new Date(event.event_date + "T12:00:00").toLocaleDateString("pt-BR", { day: "2-digit", month: "long", year: "numeric" })}</div>
-                      {event.event_time && <div className="flex items-center gap-2"><Clock className="h-3.5 w-3.5 shrink-0" /> {event.event_time}</div>}
-                      {event.location && <div className="flex items-center gap-2"><MapPin className="h-3.5 w-3.5 shrink-0" /> {event.location}</div>}
-                    </div>
-                    {event.description && <p className="text-xs text-muted-foreground mt-2">{event.description}</p>}
-                  </div>
-                  <div className="flex items-center gap-1.5 shrink-0">
-                    <button
-                      onClick={() => setAttendanceOpen(attendanceOpen === event.id ? null : event.id)}
-                      className={`p-2 rounded-lg transition-colors ${attendanceOpen === event.id ? "bg-primary/10 text-primary" : "hover:bg-muted text-muted-foreground hover:text-foreground"}`}
-                      title="Lista de presença"
-                    >
-                      <Users className="h-4 w-4" />
-                    </button>
-                    <button onClick={() => toggleVisible(event.id, event.is_visible)} className="p-2 rounded-lg hover:bg-muted text-muted-foreground hover:text-foreground transition-colors">
-                      {event.is_visible ? <Eye className="h-4 w-4" /> : <EyeOff className="h-4 w-4" />}
-                    </button>
-                    <button onClick={() => openEdit(event)} className="p-2 rounded-lg hover:bg-muted text-muted-foreground hover:text-foreground transition-colors">
-                      <Edit className="h-4 w-4" />
-                    </button>
-                    <button onClick={() => deleteEvent(event.id)} className="p-2 rounded-lg hover:bg-destructive/10 text-muted-foreground hover:text-destructive transition-colors">
-                      <Trash2 className="h-4 w-4" />
-                    </button>
-                  </div>
+                  )}
                 </div>
-                {attendanceOpen === event.id && (
-                  <EventAttendanceList eventId={event.id} eventTitle={event.title} />
-                )}
-              </div>
-            ))}
-          </motion.div>
+              );
+            })}
+          </SectionCard>
         )}
-      </motion.div>
+      </PageContainer>
+
+      <BottomSheet
+        open={showForm}
+        onOpenChange={setShowForm}
+        title={editingId ? "Editar evento" : "Novo evento"}
+        description="Título e data são obrigatórios."
+        footer={
+          <>
+            <Button variant="ghost" onClick={() => setShowForm(false)}>Cancelar</Button>
+            <Button onClick={save}>{editingId ? "Salvar" : "Criar evento"}</Button>
+          </>
+        }
+      >
+        <div className="space-y-4">
+          <TextField
+            label="Título"
+            required
+            value={form.title}
+            onChange={e => setForm(f => ({ ...f, title: e.target.value }))}
+            placeholder="Nome do evento"
+          />
+          <TextAreaField
+            label="Descrição"
+            value={form.description}
+            onChange={e => setForm(f => ({ ...f, description: e.target.value }))}
+            className="h-20 resize-none"
+            placeholder="O que vai acontecer"
+          />
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <TextField
+              label="Data"
+              required
+              type="date"
+              value={form.event_date}
+              onChange={e => setForm(f => ({ ...f, event_date: e.target.value }))}
+            />
+            <TextField
+              label="Horário"
+              value={form.event_time}
+              onChange={e => setForm(f => ({ ...f, event_time: e.target.value }))}
+              placeholder="09:00 - 12:00"
+            />
+          </div>
+          <SwitchRow id="event-online" label="Evento online" checked={form.is_online} onChange={v => setForm(f => ({ ...f, is_online: v }))} />
+          <TextField
+            label={form.is_online ? "Link da reunião" : "Local"}
+            value={form.location}
+            onChange={e => setForm(f => ({ ...f, location: e.target.value }))}
+            placeholder={form.is_online ? "https://..." : "Endereço do encontro"}
+          />
+          {!form.is_online && (
+            <TextField
+              label="URL do Maps"
+              hint="Opcional"
+              value={form.location_url}
+              onChange={e => setForm(f => ({ ...f, location_url: e.target.value }))}
+              placeholder="https://maps.google.com/..."
+            />
+          )}
+          <TextField
+            label="Imagem de capa"
+            hint="URL da imagem (opcional)"
+            value={form.cover_image_url}
+            onChange={e => setForm(f => ({ ...f, cover_image_url: e.target.value }))}
+            placeholder="https://..."
+          />
+          <div className="divide-y divide-border border-y border-border">
+            <SwitchRow id="event-visible" label="Visível para membros" checked={form.is_visible} onChange={v => setForm(f => ({ ...f, is_visible: v }))} />
+            <SwitchRow id="event-rsvp" label="Permitir confirmação de presença" checked={form.rsvp_enabled} onChange={v => setForm(f => ({ ...f, rsvp_enabled: v }))} />
+          </div>
+          {form.rsvp_enabled && (
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <TextField
+                label="Prazo para confirmar"
+                type="date"
+                value={form.rsvp_deadline}
+                onChange={e => setForm(f => ({ ...f, rsvp_deadline: e.target.value }))}
+              />
+              <TextField
+                label="Vagas"
+                hint="Deixe vazio para ilimitado"
+                type="number"
+                min="1"
+                inputMode="numeric"
+                value={form.capacity}
+                onChange={e => setForm(f => ({ ...f, capacity: e.target.value }))}
+                placeholder="Ilimitado"
+              />
+            </div>
+          )}
+        </div>
+      </BottomSheet>
+
+      <ConfirmDialog
+        open={deleteTarget !== null}
+        onOpenChange={(open) => !open && setDeleteTarget(null)}
+        title="Excluir evento?"
+        description={deleteTarget ? `"${deleteTarget.title}" e a lista de presença serão removidos. Essa ação não pode ser desfeita.` : undefined}
+        confirmLabel="Excluir"
+        destructive
+        loading={deleting}
+        onConfirm={() => deleteTarget && deleteEvent(deleteTarget.id)}
+      />
     </AppLayout>
   );
 };

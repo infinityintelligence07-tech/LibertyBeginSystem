@@ -1,45 +1,16 @@
 // Organize a Zoom transcript/summary into a structured mentoring report
 // using Lovable AI Gateway. Returns: summary, delivered, next_steps,
 // ai_insights, suggested_tasks[].
-import { corsHeaders } from "npm:@supabase/supabase-js@2/cors";
-import { createClient } from "npm:@supabase/supabase-js@2";
+import { corsHeaders, handleOptions } from "../_shared/cors.ts";
+import { requireRole, toResponse, STAFF_ROLES } from "../_shared/auth.ts";
 
 Deno.serve(async (req) => {
-  if (req.method === "OPTIONS") {
-    return new Response("ok", { headers: corsHeaders });
-  }
+  const preflight = handleOptions(req);
+  if (preflight) return preflight;
 
   try {
-    // Require a signed-in mentor/admin/super_admin.
-    const authHeader = req.headers.get("Authorization");
-    if (!authHeader?.startsWith("Bearer ")) {
-      return new Response(JSON.stringify({ error: "Unauthorized" }), {
-        status: 401,
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
-    }
-    const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
-    const anonKey = Deno.env.get("SUPABASE_ANON_KEY")!;
-    const srk = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
-    const anonClient = createClient(supabaseUrl, anonKey);
-    const token = authHeader.replace("Bearer ", "");
-    const { data: userData, error: uErr } = await anonClient.auth.getUser(token);
-    if (uErr || !userData?.user) {
-      return new Response(JSON.stringify({ error: "Invalid token" }), {
-        status: 401,
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
-    }
-    const adminClient = createClient(supabaseUrl, srk);
-    const { data: roleRow } = await adminClient
-      .from("user_roles").select("role").eq("user_id", userData.user.id)
-      .in("role", ["mentor", "admin", "super_admin"]).maybeSingle();
-    if (!roleRow) {
-      return new Response(JSON.stringify({ error: "Forbidden" }), {
-        status: 403,
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
-    }
+    // Exige mentor/admin/super_admin autenticado.
+    await requireRole(req, STAFF_ROLES);
 
     const { transcript, session_name, liberty_name, main_pain } = await req.json();
 
@@ -206,10 +177,6 @@ Antes de responder, analise silenciosamente: qual era o verdadeiro problema disc
       headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
   } catch (e) {
-    console.error("organize-zoom-report error:", e);
-    return new Response(
-      JSON.stringify({ error: e instanceof Error ? e.message : "Erro desconhecido" }),
-      { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } },
-    );
+    return toResponse(e);
   }
 });

@@ -2,6 +2,8 @@ import { useRef, useState } from "react";
 import { ImagePlus, Loader2, Trash2 } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
+import { Button } from "@/components/ui/button";
+import { ConfirmDialog, IconButton } from "@/components/ds";
 
 interface Props {
   sessionId: string;
@@ -15,6 +17,7 @@ const MAX_BYTES = 2 * 1024 * 1024; // 2MB
 export const SessionCoverUpload = ({ sessionId, sessionName, coverUrl, onChange }: Props) => {
   const inputRef = useRef<HTMLInputElement>(null);
   const [uploading, setUploading] = useState(false);
+  const [confirmRemove, setConfirmRemove] = useState(false);
 
   const extractPath = (url: string): string | null => {
     const marker = "/session-covers/";
@@ -65,7 +68,7 @@ export const SessionCoverUpload = ({ sessionId, sessionName, coverUrl, onChange 
 
   const handleRemove = async () => {
     if (!coverUrl) return;
-    if (!confirm("Remover a capa desta sessão?")) return;
+    setConfirmRemove(false);
     setUploading(true);
     try {
       const prev = extractPath(coverUrl);
@@ -82,27 +85,27 @@ export const SessionCoverUpload = ({ sessionId, sessionName, coverUrl, onChange 
   };
 
   return (
-    <div className="space-y-2">
-      <div className="relative w-full max-w-md aspect-[4/1] rounded-lg overflow-hidden border border-border/40 bg-muted/30">
+    <div className="space-y-2.5">
+      <div className="relative w-full max-w-md aspect-[4/1] rounded-ds overflow-hidden border border-border bg-muted/30">
         {coverUrl ? (
           <img src={coverUrl} alt={sessionName} className="w-full h-full object-cover" />
         ) : (
-          <div className="w-full h-full flex flex-col items-center justify-center gap-1 text-muted-foreground/60">
-            <ImagePlus className="h-5 w-5" />
-            <span className="text-[10px] uppercase tracking-wider">Sem capa</span>
+          <div className="w-full h-full flex flex-col items-center justify-center gap-1 text-muted-foreground">
+            <ImagePlus className="h-5 w-5" aria-hidden />
+            <span className="text-[11px]">Sem capa</span>
           </div>
         )}
         {uploading && (
-          <div className="absolute inset-0 flex items-center justify-center bg-background/60 backdrop-blur-sm">
+          <div className="absolute inset-0 flex items-center justify-center bg-background/60" aria-busy="true">
             <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
           </div>
         )}
       </div>
-      <div className="flex items-center justify-between gap-2">
-        <p className="text-[10px] text-muted-foreground/80">
-          Recomendado: <span className="text-foreground/80">1200×400 px</span> · 3:1 · PNG ou JPG · até 2 MB
+      <div className="flex flex-wrap items-center justify-between gap-2.5">
+        <p className="text-xs text-muted-foreground">
+          Recomendado: <span className="text-foreground">1200×400 px</span> · 3:1 · PNG ou JPG · até 2 MB
         </p>
-        <div className="flex items-center gap-1.5 shrink-0">
+        <div className="flex items-center gap-2 shrink-0">
           <input
             ref={inputRef}
             type="file"
@@ -110,28 +113,33 @@ export const SessionCoverUpload = ({ sessionId, sessionName, coverUrl, onChange 
             className="hidden"
             onChange={(e) => { const f = e.target.files?.[0]; if (f) handleFile(f); }}
           />
-          <button
-            type="button"
-            onClick={() => inputRef.current?.click()}
-            disabled={uploading}
-            className="text-[10px] px-3 py-1.5 border border-border rounded-lg text-muted-foreground hover:text-foreground hover:bg-muted transition-colors flex items-center gap-1.5 disabled:opacity-50"
-          >
-            <ImagePlus className="h-3 w-3" />
-            {coverUrl ? "Trocar" : "Enviar capa"}
-          </button>
+          <Button type="button" variant="outline" size="sm" onClick={() => inputRef.current?.click()} disabled={uploading}>
+            <ImagePlus className="h-3.5 w-3.5" />
+            {coverUrl ? "Trocar capa" : "Enviar capa"}
+          </Button>
           {coverUrl && (
-            <button
-              type="button"
-              onClick={handleRemove}
+            <IconButton
+              aria-label="Remover capa"
+              size="sm"
+              variant="outline"
+              onClick={() => setConfirmRemove(true)}
               disabled={uploading}
-              className="text-[10px] px-2 py-1.5 border border-border rounded-lg text-muted-foreground hover:text-destructive transition-colors disabled:opacity-50"
-              title="Remover capa"
+              className="hover:text-destructive"
             >
-              <Trash2 className="h-3 w-3" />
-            </button>
+              <Trash2 className="h-3.5 w-3.5" />
+            </IconButton>
           )}
         </div>
       </div>
+      <ConfirmDialog
+        open={confirmRemove}
+        onOpenChange={setConfirmRemove}
+        title="Remover a capa desta sessão?"
+        description="A imagem será apagada e a sessão ficará sem capa."
+        confirmLabel="Remover"
+        destructive
+        onConfirm={handleRemove}
+      />
     </div>
   );
 };

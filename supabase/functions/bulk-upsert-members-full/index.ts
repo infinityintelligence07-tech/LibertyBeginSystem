@@ -1,10 +1,9 @@
-import { createClient } from "https://esm.sh/@supabase/supabase-js@2.99.2";
-
-const corsHeaders = {
-  "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
-  "Access-Control-Allow-Methods": "POST, OPTIONS",
-};
+// Importa/atualiza membros a partir da planilha completa. Só admin/super_admin.
+// Cria a conta com senha aleatória (devolvida em `results[].password`) quando o
+// membro ainda não tem acesso. Nunca registra senhas em logs.
+import { handleOptions, json, errorJson } from "../_shared/cors.ts";
+import { requireRole, toResponse, ADMIN_ROLES } from "../_shared/auth.ts";
+import { normalizeEmail, findProfilesByEmail, ensureAuthUserForEmail, linkProfileToUser } from "../_shared/accounts.ts";
 
 interface MemberInput {
   full_name: string;
@@ -24,20 +23,15 @@ const PROFILE_FIELDS = [
   "phone","company_name","program_start_date","program_end_date","member_tier",
   "birth_date","marital_status","city_state","instagram_personal","personal_story",
   "favorite_chocolate","dietary_restriction","company_segment","company_address",
-  "business_description","company_instagram","business_age","employees_count",
+  "business_description","business_story","company_instagram","business_age","employees_count",
+  "employees_count_num","leaders_count",
   "monthly_revenue","profit_margin","would_buy_self","financial_control","uses_dre",
   "costs_expenses","financial_challenge","challenge_2026","dream_2026",
   "program_expectation","main_pain","vision_6_months","sector_to_develop",
 ];
 
-function generatePassword(): string {
-  const chars = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghjkmnpqrstuvwxyz23456789";
-  let pwd = "";
-  for (let i = 0; i < 10; i++) pwd += chars[Math.floor(Math.random() * chars.length)];
-  return pwd + "@1";
-}
-
 const DATE_FIELDS = new Set(["program_start_date", "program_end_date", "birth_date"]);
+const INT_FIELDS = new Set(["employees_count_num", "leaders_count"]);
 
 function sanitizeDate(s: string): string | null {
   const m = s.match(/^(\d{4})-(\d{2})-(\d{2})/);
@@ -62,6 +56,11 @@ function buildUpdate(m: MemberInput): Record<string, unknown> {
       if (safe) upd[f] = safe;
       continue;
     }
+    if (INT_FIELDS.has(f)) {
+      const n = parseInt(s.replace(/\D/g, ""), 10);
+      if (!Number.isNaN(n)) upd[f] = n;
+      continue;
+    }
     if (f === "member_tier") {
       upd[f] = s.toLowerCase() === "liberty" ? "liberty" : "begin";
     } else {
@@ -72,49 +71,21 @@ function buildUpdate(m: MemberInput): Record<string, unknown> {
 }
 
 Deno.serve(async (req) => {
-  if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
+  const preflight = handleOptions(req);
+  if (preflight) return preflight;
 
   try {
-    const authHeader = req.headers.get("Authorization");
-    if (!authHeader) {
-      return new Response(JSON.stringify({ error: "Missing authorization" }), {
-        status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
-    }
+    const ctx = await requireRole(req, ADMIN_ROLES);
+    const admin = ctx.supabaseAdmin;
 
-    const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
-    const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
-    const anonClient = createClient(supabaseUrl, Deno.env.get("SUPABASE_ANON_KEY")!);
-    const token = authHeader.replace("Bearer ", "");
-    const { data: { user: caller }, error: authError } = await anonClient.auth.getUser(token);
-    if (authError || !caller) {
-      return new Response(JSON.stringify({ error: "Invalid token" }), {
-        status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
-    }
-
-    const adminClient = createClient(supabaseUrl, serviceRoleKey);
-    const { data: roleData } = await adminClient
-      .from("user_roles").select("role")
-      .eq("user_id", caller.id).in("role", ["admin", "super_admin"]).maybeSingle();
-    if (!roleData) {
-      return new Response(JSON.stringify({ error: "Not authorized" }), {
-        status: 403, headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
-    }
-
-    const body = await req.json();
+    const body = await req.json().catch(() => ({}));
     const members: MemberInput[] = Array.isArray(body?.members) ? body.members : [];
-    if (members.length === 0) {
-      return new Response(JSON.stringify({ error: "Nenhum membro enviado" }), {
-        status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
-    }
+    if (members.length === 0) return errorJson("Nenhum membro enviado", 400);
 
     const results: UpsertResult[] = [];
 
     for (const m of members) {
-      const email = String(m.email || "").trim().toLowerCase();
+      const email = normalizeEmail(m.email);
       const full_name = String(m.full_name || "").trim();
       if (!email || !full_name) {
         results.push({ email, full_name, status: "error", message: "Nome e e-mail obrigatórios" });
@@ -122,49 +93,51 @@ Deno.serve(async (req) => {
       }
 
       try {
-        const { data: existing } = await adminClient
-          .from("profiles").select("id, user_id").eq("email", email).maybeSingle();
-
+        const existingList = await findProfilesByEmail(admin, email);
+        const existing = existingList.find((p) => p.user_id) ?? existingList[0] ?? null;
         const update = buildUpdate(m);
 
         if (existing) {
           if (Object.keys(update).length > 0) {
-            const { error: uErr } = await adminClient
-              .from("profiles").update(update).eq("id", existing.id);
+            const { error: uErr } = await admin.from("profiles").update(update).eq("id", existing.id);
             if (uErr) throw uErr;
           }
-          results.push({ email, full_name, status: "updated", message: "Perfil atualizado" });
-        } else {
-          const password = generatePassword();
-          const { data: newUser, error: createError } = await adminClient.auth.admin.createUser({
-            email, password, email_confirm: true,
-            user_metadata: { full_name },
-          });
-          if (createError || !newUser?.user) {
-            results.push({ email, full_name, status: "error", message: createError?.message || "Falha ao criar usuário" });
-            continue;
+          if (existing.user_id) {
+            results.push({ email, full_name, status: "updated", message: "Perfil atualizado" });
+          } else {
+            // Perfil existente sem acesso: cria a conta e vincula
+            const account = await ensureAuthUserForEmail(admin, { email, fullName: full_name, profileId: existing.id });
+            await linkProfileToUser(admin, { profileId: existing.id, userId: account.userId, role: "liberty" });
+            results.push({ email, full_name, status: "updated", password: account.password, message: "Perfil atualizado e acesso criado" });
           }
-          const userId = newUser.user.id;
-          const { error: profileError } = await adminClient
-            .from("profiles")
-            .upsert({ ...update, user_id: userId, full_name, email }, { onConflict: "user_id" });
-          if (profileError) {
-            await adminClient.auth.admin.deleteUser(userId);
-            results.push({ email, full_name, status: "error", message: profileError.message });
-            continue;
-          }
-          const { error: roleError } = await adminClient
-            .from("user_roles")
-            .upsert({ user_id: userId, role: "liberty" }, { onConflict: "user_id,role" });
-          if (roleError) {
-            await adminClient.auth.admin.deleteUser(userId);
-            results.push({ email, full_name, status: "error", message: roleError.message });
-            continue;
-          }
-          results.push({ email, full_name, status: "created", password });
+          continue;
         }
+
+        const account = await ensureAuthUserForEmail(admin, { email, fullName: full_name });
+        const userId = account.userId;
+        const { error: profileError } = await admin
+          .from("profiles")
+          .upsert({ ...update, user_id: userId, full_name, email }, { onConflict: "user_id" });
+        if (profileError) {
+          if (!account.linkedExisting) await admin.auth.admin.deleteUser(userId);
+          results.push({ email, full_name, status: "error", message: profileError.message });
+          continue;
+        }
+        const { error: roleError } = await admin
+          .from("user_roles")
+          .upsert({ user_id: userId, role: "liberty" }, { onConflict: "user_id,role" });
+        if (roleError) {
+          if (!account.linkedExisting) await admin.auth.admin.deleteUser(userId);
+          results.push({ email, full_name, status: "error", message: roleError.message });
+          continue;
+        }
+        results.push({ email, full_name, status: "created", password: account.password });
       } catch (err) {
-        results.push({ email, full_name, status: "error", message: (err as Error).message });
+        let message = (err as Error).message || "Erro desconhecido";
+        if (err instanceof Response) {
+          try { message = ((await err.json()) as { error?: string }).error || message; } catch { /* ignore */ }
+        }
+        results.push({ email, full_name, status: "error", message });
       }
     }
 
@@ -175,12 +148,8 @@ Deno.serve(async (req) => {
       errors: results.filter(r => r.status === "error").length,
     };
 
-    return new Response(JSON.stringify({ success: true, summary, results }), {
-      status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" },
-    });
+    return json({ success: true, summary, results });
   } catch (err) {
-    return new Response(JSON.stringify({ error: (err as Error).message }), {
-      status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" },
-    });
+    return toResponse(err);
   }
 });

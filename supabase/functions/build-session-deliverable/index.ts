@@ -1,14 +1,17 @@
 // Build a structured "strategic deliverable" JSON from a raw Zoom
 // transcript/summary. This is the source for the infographic PDF the mentor
 // sends to the student on WhatsApp.
-import { corsHeaders } from "npm:@supabase/supabase-js@2/cors";
+import { corsHeaders, handleOptions } from "../_shared/cors.ts";
+import { requireRole, toResponse, STAFF_ROLES } from "../_shared/auth.ts";
 
 Deno.serve(async (req) => {
-  if (req.method === "OPTIONS") {
-    return new Response("ok", { headers: corsHeaders });
-  }
+  const preflight = handleOptions(req);
+  if (preflight) return preflight;
 
   try {
+    // Exige mentor/admin/super_admin autenticado (o entregável é gerado pelo mentor).
+    await requireRole(req, STAFF_ROLES);
+
     const {
       zoom_transcript,
       session_name,
@@ -208,10 +211,6 @@ next_steps (array de 3 a 5 strings): próximas ações prioritárias, cada uma c
       headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
   } catch (e) {
-    console.error("build-session-deliverable error:", e);
-    return new Response(
-      JSON.stringify({ error: e instanceof Error ? e.message : "Erro desconhecido" }),
-      { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } },
-    );
+    return toResponse(e);
   }
 });

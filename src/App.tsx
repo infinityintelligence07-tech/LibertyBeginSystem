@@ -46,7 +46,6 @@ import FerramentaModeloPage from "./pages/FerramentaModelo";
 import FerramentaAplicacaoPage from "./pages/FerramentaAplicacao";
 import AgendaOverviewPage from "./pages/AgendaOverview";
 import ProfilePage from "./pages/Profile";
-import PlaceholderPage from "./pages/Placeholder";
 import NpsFormPage from "./pages/NpsForm";
 import AdminNpsPage from "./pages/AdminNps";
 import NotFound from "./pages/NotFound";
@@ -140,7 +139,6 @@ const App = () => {
               <Route path="/admin/ferramentas/:id" element={<ProtectedRoute allowedRoles={["admin"]}><FerramentaAplicacaoPage role="admin" /></ProtectedRoute>} />
               <Route path="/admin/financeiro" element={<ProtectedRoute allowedRoles={["admin"]}><AdminFilterProvider><AdminFinanceiroPage /></AdminFilterProvider></ProtectedRoute>} />
               <Route path="/admin/conteudos" element={<ProtectedRoute allowedRoles={["admin"]}><AdminConteudosPage /></ProtectedRoute>} />
-              <Route path="/admin/ferramentas" element={<ProtectedRoute allowedRoles={["admin"]}><AdminFilterProvider><AdminConteudosPage /></AdminFilterProvider></ProtectedRoute>} />
               <Route path="/admin/eventos" element={<ProtectedRoute allowedRoles={["admin"]}><AdminEventosPage /></ProtectedRoute>} />
               
               <Route path="/admin/nps" element={<ProtectedRoute allowedRoles={["admin"]}><AdminFilterProvider><AdminNpsPage /></AdminFilterProvider></ProtectedRoute>} />

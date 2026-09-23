@@ -1,81 +1,93 @@
-import { motion } from "framer-motion";
+import { useState } from "react";
+import { motion, useReducedMotion } from "framer-motion";
+import { SUPPORT_WHATSAPP_URL } from "@/lib/authErrors";
 import { AppLayout } from "@/components/AppLayout";
 import { MessageCircle, Clock, ChevronDown } from "lucide-react";
-import { useState } from "react";
+import { cn } from "@/lib/utils";
+import { Button } from "@/components/ui/button";
+import { PageContainer, PageHeader, SectionCard, SectionHeader } from "@/components/ds";
 
 const faqs = [
-  { q: "Como faço para agendar uma sessão?", a: "Acesse 'Agenda' no menu e clique em 'Agendar sessão'. Escolha a sessão, o mentor e o horário disponível." },
-  { q: "Posso remarcar uma sessão?", a: "Sim, você pode remarcar até 24h antes da sessão. Acesse sua agenda e clique em 'Remarcar'." },
+  { q: "Como faço para agendar uma sessão?", a: "Acesse 'Agenda' no menu e toque em 'Agendar sessão'. Escolha a sessão, o mentor e o horário disponível." },
+  { q: "Posso remarcar uma sessão?", a: "Sim, você pode remarcar até 24h antes da sessão. Acesse sua agenda e toque em 'Remarcar'." },
   { q: "Com que frequência devo agendar?", a: "Recomendamos 2 sessões por mês para concluir a jornada em 6 meses." },
-  { q: "O que acontece se eu perder uma sessão?", a: "A sessão será marcada como 'no-show'. Entre em contato com o nosso suporte para reagendar." },
-  { q: "Como acesso o Zoom?", a: "O link do Zoom é enviado por email e aparece no card da sessão agendada no dashboard." },
+  { q: "O que acontece se eu perder uma sessão?", a: "A sessão será marcada como não realizada. Entre em contato com o nosso suporte para reagendar." },
+  { q: "Como acesso o Zoom?", a: "O link do Zoom é enviado por e-mail e aparece no card da sessão agendada no início." },
 ];
 
 const SupportPage = () => {
   const [openFaq, setOpenFaq] = useState<number | null>(null);
+  const reduceMotion = useReducedMotion();
 
   return (
     <AppLayout role="liberty">
-      <motion.div
-        initial={{ opacity: 0, y: 16 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.4 }}
-        className="max-w-2xl mx-auto space-y-8"
-      >
-        <div className="text-center">
-          <div className="w-20 h-20 rounded-full bg-card border border-border mx-auto mb-4 flex items-center justify-center">
-            <MessageCircle className="h-8 w-8 text-primary" />
-          </div>
-          <h1 className="text-3xl font-semibold text-foreground mb-2">Suporte</h1>
-          <p className="text-muted-foreground">
-            Precisa de ajuda? Estamos aqui para você.
-          </p>
-          <p className="text-muted-foreground text-sm mt-1">
-            Tire dúvidas sobre agendamento, acesso e direcionamento.
-          </p>
-        </div>
-
-        <a
-          href="https://wa.me/5511999999999"
-          target="_blank"
-          rel="noopener noreferrer"
-          className="btn-silver w-full flex items-center justify-center gap-3 py-4 text-base"
+      <PageContainer variant="narrow">
+        <motion.div
+          initial={reduceMotion ? false : { opacity: 0, y: 8 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.32, ease: "easeOut" }}
+          className="space-y-6 lg:space-y-8"
         >
-          <MessageCircle className="h-5 w-5" />
-          Falar com o nosso suporte
-        </a>
+          <PageHeader
+            title="Suporte"
+            description="Tire dúvidas sobre agendamento, acesso e direcionamento. Estamos aqui para você."
+          />
 
-        <div className="flex items-center gap-2 justify-center text-xs text-muted-foreground">
-          <Clock className="h-3.5 w-3.5" />
-          Atendimento: Seg-Sex 9h-18h
-        </div>
-
-        <div>
-          <h2 className="text-xl font-semibold text-foreground mb-4">Perguntas frequentes</h2>
-          <div className="space-y-2">
-            {faqs.map((faq, i) => (
-              <div key={i} className="glass-card overflow-hidden">
-                <button
-                  onClick={() => setOpenFaq(openFaq === i ? null : i)}
-                  className="w-full flex items-center justify-between p-4 text-left text-sm text-foreground hover:bg-accent/50 transition-colors"
-                >
-                  <span>{faq.q}</span>
-                  <ChevronDown className={`h-4 w-4 text-muted-foreground transition-transform ${openFaq === i ? "rotate-180" : ""}`} />
-                </button>
-                {openFaq === i && (
-                  <motion.div
-                    initial={{ height: 0, opacity: 0 }}
-                    animate={{ height: "auto", opacity: 1 }}
-                    className="px-4 pb-4 text-sm text-muted-foreground"
-                  >
-                    {faq.a}
-                  </motion.div>
-                )}
+          <SectionCard className="flex flex-col sm:flex-row sm:items-center gap-4">
+            <div className="flex items-start gap-3 flex-1 min-w-0">
+              <span className="h-10 w-10 rounded-[var(--ds-radius-md)] bg-primary/10 flex items-center justify-center shrink-0">
+                <MessageCircle className="h-5 w-5 text-primary" aria-hidden />
+              </span>
+              <div className="min-w-0 space-y-1">
+                <p className="text-[17px] font-semibold text-foreground">Fale com o nosso suporte</p>
+                <p className="text-sm text-muted-foreground">Atendimento pelo WhatsApp, com a equipe Liberty.</p>
+                <p className="text-xs text-muted-foreground inline-flex items-center gap-1.5">
+                  <Clock className="h-3.5 w-3.5" aria-hidden />
+                  Segunda a sexta, 9h às 18h
+                </p>
               </div>
-            ))}
-          </div>
-        </div>
-      </motion.div>
+            </div>
+            <Button size="lg" asChild className="w-full sm:w-auto shrink-0">
+              <a href={SUPPORT_WHATSAPP_URL} target="_blank" rel="noopener noreferrer">
+                <MessageCircle aria-hidden />
+                Abrir WhatsApp
+              </a>
+            </Button>
+          </SectionCard>
+
+          <section className="space-y-3" aria-labelledby="faq-title">
+            <SectionHeader title={<span id="faq-title">Perguntas frequentes</span>} />
+            <SectionCard padding="none">
+              {faqs.map((faq, i) => {
+                const isOpen = openFaq === i;
+                const panelId = `faq-panel-${i}`;
+                return (
+                  <div key={faq.q} className={cn(i < faqs.length - 1 && "border-b border-border")}>
+                    <button
+                      type="button"
+                      onClick={() => setOpenFaq(isOpen ? null : i)}
+                      aria-expanded={isOpen}
+                      aria-controls={panelId}
+                      className="w-full min-h-14 px-4 py-3 flex items-center justify-between gap-3 text-left text-sm font-medium text-foreground transition-colors duration-ds-1 hover:bg-accent/60 focus-visible:outline-none focus-visible:bg-accent/60"
+                    >
+                      <span>{faq.q}</span>
+                      <ChevronDown
+                        className={cn("h-4 w-4 text-muted-foreground shrink-0 transition-transform duration-ds-2", isOpen && "rotate-180")}
+                        aria-hidden
+                      />
+                    </button>
+                    {isOpen && (
+                      <div id={panelId} className="px-4 pb-4 text-sm text-muted-foreground leading-relaxed">
+                        {faq.a}
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </SectionCard>
+          </section>
+        </motion.div>
+      </PageContainer>
     </AppLayout>
   );
 };

@@ -1,7 +1,9 @@
 import { useState } from "react";
-import { Copy, Check, MessageSquareText, ChevronDown } from "lucide-react";
+import { Copy, Check, MessageSquareText } from "lucide-react";
 import { toast } from "sonner";
 import { shortName } from "@/lib/formatName";
+import { Button } from "@/components/ui/button";
+import { BottomSheet, IconButton, ListRow, SectionCard } from "@/components/ds";
 
 interface Props {
   memberName?: string | null;
@@ -65,54 +67,46 @@ export const MemberQuickMessages = ({ memberName, phone }: Props) => {
   };
 
   return (
-    <div className="relative">
-      <button
-        onClick={() => setOpen((o) => !o)}
-        title="Mensagens rápidas para copiar"
-        className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-card border border-border text-foreground text-[11px] font-semibold hover:border-primary/40 transition-colors"
-      >
-        <MessageSquareText className="h-3 w-3 text-primary" /> Mensagens
-        <ChevronDown className={`h-3 w-3 text-muted-foreground transition-transform ${open ? "rotate-180" : ""}`} />
-      </button>
+    <>
+      <Button variant="outline" size="sm" onClick={() => setOpen(true)}>
+        <MessageSquareText className="h-4 w-4 text-primary" aria-hidden /> Mensagens
+      </Button>
 
-      {open && (
-        <>
-          <div className="fixed inset-0 z-40" onClick={() => setOpen(false)} />
-          <div className="absolute right-0 mt-2 z-50 w-[320px] max-w-[90vw] rounded-xl border border-border bg-card shadow-xl p-2 space-y-1">
-            <p className="text-[10px] uppercase tracking-wider text-muted-foreground font-semibold px-2 py-1">
-              Copiar e colar no WhatsApp
-            </p>
-            {templates.map((t) => (
-              <div key={t.key} className="rounded-lg border border-border/70 bg-background/40 p-2">
-                <div className="flex items-center justify-between gap-2">
-                  <span className="text-xs font-semibold text-foreground">{t.label}</span>
-                  <div className="flex items-center gap-1 shrink-0">
-                    <button
-                      onClick={() => copy(t.key, t.text)}
-                      className="p-1.5 rounded-md hover:bg-muted text-muted-foreground hover:text-primary transition-colors"
-                      title="Copiar mensagem"
+      <BottomSheet
+        open={open}
+        onOpenChange={setOpen}
+        title="Mensagens rápidas"
+        description="Copie e cole no WhatsApp. O nome do membro já está preenchido."
+        size="sm"
+      >
+        <SectionCard padding="none">
+          {templates.map((t, i) => (
+            <ListRow
+              key={t.key}
+              last={i === templates.length - 1}
+              title={t.label}
+              subtitle={<span className="line-clamp-2 whitespace-normal">{t.text}</span>}
+              trailing={
+                <>
+                  {digits && (
+                    <a
+                      href={`https://wa.me/${digits}?text=${encodeURIComponent(t.text)}`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="btn-ghost btn-sm text-status-green"
                     >
-                      {copiedKey === t.key ? <Check className="h-3.5 w-3.5 text-status-green" /> : <Copy className="h-3.5 w-3.5" />}
-                    </button>
-                    {digits && (
-                      <a
-                        href={`https://wa.me/${digits}?text=${encodeURIComponent(t.text)}`}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="text-[10px] font-semibold text-status-green hover:underline px-1"
-                        title="Abrir no WhatsApp já preenchido"
-                      >
-                        Enviar
-                      </a>
-                    )}
-                  </div>
-                </div>
-                <p className="text-[11px] text-muted-foreground leading-snug mt-1 line-clamp-2">{t.text}</p>
-              </div>
-            ))}
-          </div>
-        </>
-      )}
-    </div>
+                      Enviar
+                    </a>
+                  )}
+                  <IconButton aria-label={`Copiar mensagem: ${t.label}`} size="sm" onClick={() => copy(t.key, t.text)}>
+                    {copiedKey === t.key ? <Check className="h-4 w-4 text-status-green" /> : <Copy className="h-4 w-4" />}
+                  </IconButton>
+                </>
+              }
+            />
+          ))}
+        </SectionCard>
+      </BottomSheet>
+    </>
   );
 };

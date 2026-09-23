@@ -4,6 +4,8 @@ import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/hooks/useAuth";
 import { Star, Plus, Trash2, Loader2, Lock, Globe } from "lucide-react";
 import { toast } from "sonner";
+import { Button } from "@/components/ui/button";
+import { ConfirmDialog, EmptyState, IconButton, SectionCard, StatusPill, TextAreaField, TextField } from "@/components/ds";
 
 export const TestimonialsCard = () => {
   const { profile } = useAuth();
@@ -14,6 +16,7 @@ export const TestimonialsCard = () => {
   const [metric, setMetric] = useState("");
   const [isPublic, setIsPublic] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [removeId, setRemoveId] = useState<string | null>(null);
 
   const { data: testimonials = [] } = useQuery({
     queryKey: ["my-testimonials", profile?.id],
@@ -52,7 +55,7 @@ export const TestimonialsCard = () => {
   };
 
   const remove = async (id: string) => {
-    if (!confirm("Excluir este depoimento?")) return;
+    setRemoveId(null);
     const { error } = await supabase.from("member_testimonials").delete().eq("id", id);
     if (error) return toast.error("Erro ao excluir");
     toast.success("Depoimento excluído");
@@ -61,81 +64,112 @@ export const TestimonialsCard = () => {
   };
 
   return (
-    <div className="rounded-2xl border border-border bg-card/70 p-5 space-y-4">
+    <SectionCard className="space-y-4">
       <div className="flex items-start justify-between gap-3 flex-wrap">
-        <div>
-          <div className="flex items-center gap-2 text-primary text-[10px] font-semibold uppercase tracking-wider">
-            <Star className="h-3.5 w-3.5" /> Meus depoimentos
-          </div>
-          <h3 className="text-base font-semibold text-foreground mt-1">Conte seus resultados</h3>
-          <p className="text-xs text-muted-foreground">Cada depoimento vale <strong className="text-primary">+20 pts</strong> no ranking. Total: {totalPoints} pts.</p>
+        <div className="min-w-0">
+          <p className="ds-kicker flex items-center gap-1.5">
+            <Star className="h-3.5 w-3.5 text-primary" aria-hidden /> Meus depoimentos
+          </p>
+          <h3 className="text-[17px] font-semibold text-foreground mt-1 tracking-[var(--ds-tracking-title-sm)]">Conte seus resultados</h3>
+          <p className="text-xs text-muted-foreground mt-0.5">
+            Cada depoimento vale <strong className="text-primary font-semibold">+20 pts</strong> no ranking. Total: <span className="tabular-nums">{totalPoints}</span> pts.
+          </p>
         </div>
         {!open && (
-          <button onClick={() => setOpen(true)} className="btn-silver text-xs flex items-center gap-1.5">
-            <Plus className="h-3.5 w-3.5" /> Novo
-          </button>
+          <Button size="sm" variant="secondary" onClick={() => setOpen(true)}>
+            <Plus className="h-3.5 w-3.5" /> Novo depoimento
+          </Button>
         )}
       </div>
 
       {open && (
-        <div className="space-y-2.5 rounded-xl border border-border bg-background/50 p-3">
-          <input
+        <SectionCard tone="brand" padding="compact" className="space-y-3">
+          <TextField
+            label="Título"
             value={headline}
             onChange={(e) => setHeadline(e.target.value)}
-            placeholder="Título (ex: Faturei R$ 50k em 3 meses)"
-            className="w-full text-sm px-3 py-2 rounded-lg border border-border bg-card"
+            placeholder="Ex: Faturei R$ 50k em 3 meses"
             maxLength={120}
           />
-          <textarea
+          <TextAreaField
+            label="Depoimento"
             value={content}
             onChange={(e) => setContent(e.target.value)}
             placeholder="Conte como foi sua transformação, o que aprendeu e como aplicou..."
             rows={4}
-            className="w-full text-sm px-3 py-2 rounded-lg border border-border bg-card resize-none"
+            className="resize-none"
             maxLength={800}
           />
-          <input
+          <TextField
+            label="Métrica"
+            hint="Opcional. Ex: +180% em receita"
             value={metric}
             onChange={(e) => setMetric(e.target.value)}
-            placeholder="Métrica (opcional, ex: +180% em receita)"
-            className="w-full text-sm px-3 py-2 rounded-lg border border-border bg-card"
+            placeholder="Ex: +180% em receita"
             maxLength={80}
           />
-          <label className="flex items-center gap-2 text-xs text-muted-foreground cursor-pointer">
-            <input type="checkbox" checked={isPublic} onChange={(e) => setIsPublic(e.target.checked)} />
-            {isPublic ? <Globe className="h-3 w-3" /> : <Lock className="h-3 w-3" />}
+          <label className="flex items-center gap-2.5 min-h-[44px] text-sm text-foreground cursor-pointer">
+            <input
+              type="checkbox"
+              checked={isPublic}
+              onChange={(e) => setIsPublic(e.target.checked)}
+              className="h-5 w-5 rounded-[var(--ds-radius-sm)] border-border accent-primary"
+            />
+            {isPublic ? <Globe className="h-4 w-4 text-muted-foreground" aria-hidden /> : <Lock className="h-4 w-4 text-muted-foreground" aria-hidden />}
             {isPublic ? "Público (aparece no ranking)" : "Privado (apenas você e admins)"}
           </label>
-          <div className="flex gap-2 justify-end">
-            <button onClick={() => setOpen(false)} className="text-xs px-3 py-1.5 rounded-lg border border-border">Cancelar</button>
-            <button onClick={save} disabled={saving || !headline.trim() || !content.trim()} className="btn-silver text-xs flex items-center gap-1.5 disabled:opacity-50">
-              {saving && <Loader2 className="h-3 w-3 animate-spin" />} Salvar
-            </button>
+          <div className="flex flex-col-reverse sm:flex-row gap-2 sm:justify-end">
+            <Button variant="outline" onClick={() => setOpen(false)}>Cancelar</Button>
+            <Button onClick={save} disabled={saving || !headline.trim() || !content.trim()}>
+              {saving && <Loader2 className="h-4 w-4 animate-spin" />} Salvar depoimento
+            </Button>
           </div>
-        </div>
+        </SectionCard>
       )}
 
       {testimonials.length === 0 && !open ? (
-        <p className="text-xs text-muted-foreground italic text-center py-3">
-          Nenhum depoimento ainda. Registre suas conquistas para subir no ranking!
-        </p>
+        <EmptyState
+          compact
+          icon={Star}
+          title="Nenhum depoimento ainda"
+          description="Registre suas conquistas para subir no ranking."
+        />
       ) : (
         <div className="space-y-2">
           {testimonials.map((t: any) => (
-            <div key={t.id} className="rounded-lg border border-border bg-background/40 p-3 space-y-1">
+            <div key={t.id} className="rounded-ds border border-border bg-card p-3 space-y-1">
               <div className="flex items-start justify-between gap-2">
-                <p className="text-sm font-semibold text-foreground">{t.headline}</p>
-                <button onClick={() => remove(t.id)} className="text-muted-foreground hover:text-destructive shrink-0">
+                <p className="text-sm font-semibold text-foreground min-w-0">{t.headline}</p>
+                <IconButton
+                  aria-label={`Excluir depoimento ${t.headline}`}
+                  size="sm"
+                  onClick={() => setRemoveId(t.id)}
+                  className="-mr-1 -mt-1 hover:text-destructive"
+                >
                   <Trash2 className="h-3.5 w-3.5" />
-                </button>
+                </IconButton>
               </div>
               <p className="text-xs text-muted-foreground leading-relaxed line-clamp-3">{t.content}</p>
-              {t.result_metric && <p className="text-[11px] text-primary font-semibold">Resultado: {t.result_metric}</p>}
-              <p className="text-[10px] text-muted-foreground">{t.is_public ? "Público" : "Privado"}</p>
+              {t.result_metric && <p className="text-xs text-primary font-semibold">Resultado: {t.result_metric}</p>}
+              <StatusPill tone={t.is_public ? "success" : "neutral"} withDot={false}>
+                {t.is_public ? "Público" : "Privado"}
+              </StatusPill>
             </div>
           ))}
         </div>
       )}
-    </div>
+
+      <ConfirmDialog
+        open={!!removeId}
+        onOpenChange={(o) => !o && setRemoveId(null)}
+        title="Excluir este depoimento?"
+        description="Os 20 pontos correspondentes serão removidos do ranking."
+        confirmLabel="Excluir"
+        destructive
+        onConfirm={async () => {
+          if (removeId) await remove(removeId);
+        }}
+      />
+    </SectionCard>
   );
 };

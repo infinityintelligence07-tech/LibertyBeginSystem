@@ -47,25 +47,25 @@ export const DiagnosticSheet = ({
 
   return (
     <div
-      className={`flex flex-col overflow-hidden rounded-2xl border border-border bg-card shadow-sm ${
+      className={`flex flex-col overflow-hidden rounded-ds-lg border border-border bg-card ${
         fullHeight ? "h-full" : ""
       }`}
     >
       {/* Cabeçalho */}
       <div className="flex items-center justify-between gap-4 border-b border-border bg-muted/30 px-4 py-2.5">
         <div className="min-w-0">
-          <p className="text-[10px] font-semibold uppercase tracking-[0.22em] text-muted-foreground">
+          <p className="ds-kicker">
             Mapeamento do Negócio
           </p>
-          <h3 className="truncate text-base font-semibold leading-tight text-foreground">{pillar.name}</h3>
+          <h3 className="truncate text-[17px] font-semibold leading-tight text-foreground">{pillar.name}</h3>
           {(memberName || companyName) && (
-            <p className="truncate text-[11px] text-muted-foreground">
+            <p className="truncate text-xs text-muted-foreground">
               {[memberName, companyName].filter(Boolean).join(" · ")}
             </p>
           )}
         </div>
         <div className="shrink-0 text-right">
-          <p className="text-[9px] font-semibold uppercase tracking-wider text-muted-foreground">Nota</p>
+          <p className="text-xs font-medium text-muted-foreground">Nota</p>
           <p className="text-xl font-semibold leading-none tabular-nums text-primary">
             {Number(value ?? 0).toFixed(1)}
             <span className="text-xs font-normal text-muted-foreground">/5</span>
@@ -80,17 +80,17 @@ export const DiagnosticSheet = ({
 
         {/* Hoje */}
         <div className="flex min-h-0 flex-col gap-2 border-b border-border bg-muted/25 p-3 md:border-b-0">
-          <p className="text-[9px] font-bold uppercase tracking-[0.18em] text-muted-foreground">Hoje</p>
+          <p className="ds-kicker">Hoje</p>
 
           {/* Resumo em destaque, no TOPO — sempre visível */}
           <div className="shrink-0 rounded-lg border border-muted-foreground/25 bg-background px-2.5 py-1.5">
-            <p className="mb-0.5 text-[8px] font-bold uppercase tracking-wider text-muted-foreground">
+            <p className="mb-0.5 text-xs font-medium text-muted-foreground">
               Resumo em uma frase
             </p>
             {current ? (
               <p className="whitespace-pre-wrap text-lg font-semibold leading-snug text-foreground">{current}</p>
             ) : (
-              <p className="text-[11px] italic text-muted-foreground">Resumo ainda não preenchido.</p>
+              <p className="text-xs text-muted-foreground">Resumo ainda não preenchido.</p>
             )}
           </div>
 
@@ -102,28 +102,28 @@ export const DiagnosticSheet = ({
                     key={i}
                     className="rounded-md border border-muted-foreground/20 border-l-[2.5px] border-l-primary/60 bg-background/70 px-2.5 py-1.5"
                   >
-                    <p className="text-[12px] leading-snug text-foreground/85">{text}</p>
+                    <p className="text-xs leading-snug text-foreground">{text}</p>
                   </div>
                 ))}
               </div>
             ) : (
-              <p className="text-xs italic text-muted-foreground/70">Nenhuma resposta registrada neste setor.</p>
+              <p className="text-xs text-muted-foreground">Nenhuma resposta registrada neste setor.</p>
             )}
           </div>
         </div>
 
         {/* Destino */}
         <div className="flex min-h-0 flex-col gap-2 bg-status-green/10 p-3">
-          <p className="flex items-center gap-1.5 text-[9px] font-bold uppercase tracking-[0.18em] text-status-green">
-            <ArrowRight className="h-3 w-3" /> Onde quer chegar
+          <p className="ds-kicker flex items-center gap-1.5 text-status-green">
+            <ArrowRight className="h-3 w-3" aria-hidden /> Onde quer chegar
           </p>
-          <div className="flex min-h-[6rem] flex-1 items-start rounded-lg border-2 border-status-green/50 bg-background p-3">
+          <div className="flex min-h-[6rem] flex-1 items-start rounded-lg border border-status-green/40 bg-background p-3">
             {goal ? (
               <p className="whitespace-pre-wrap text-xl font-bold leading-snug text-foreground md:text-2xl">
                 {goal}
               </p>
             ) : (
-              <p className="text-xs italic text-muted-foreground">O aluno ainda não definiu o destino desta área.</p>
+              <p className="text-xs text-muted-foreground">O aluno ainda não definiu o destino desta área.</p>
             )}
           </div>
         </div>

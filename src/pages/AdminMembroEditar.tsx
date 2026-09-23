@@ -1,12 +1,18 @@
 import { useEffect, useState } from "react";
-import { useParams, useNavigate, Link, useLocation } from "react-router-dom";
-import { ArrowLeft, Save } from "lucide-react";
+import { useParams, useLocation } from "react-router-dom";
+import { Save } from "lucide-react";
 import { useGoBack } from "@/lib/navigation";
 import { AppLayout } from "@/components/AppLayout";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
 import { AvatarUpload } from "@/components/AvatarUpload";
 import { toTitleCase } from "@/lib/formatName";
+import { Button } from "@/components/ui/button";
+import {
+  ErrorState, LoadingState, PageContainer, PageHeader, SectionCard, SectionHeader, SelectField, StatusPill,
+  TextAreaField, TextField,
+} from "@/components/ds";
+import { AccessCredentialsDialog, type AccessCredentialsData } from "@/components/AccessCredentialsDialog";
 
 type Profile = Record<string, any>;
 
@@ -76,7 +82,6 @@ const SECTIONS: { title: string; fields: { key: string; label: string; type?: "t
 
 const AdminMembroEditarPage = () => {
   const { id } = useParams();
-  const navigate = useNavigate();
   const location = useLocation();
   const layoutRole: "admin" | "mentor" = location.pathname.startsWith("/mentor") ? "mentor" : "admin";
   const backRoute = layoutRole === "mentor" ? `/mentor/alunos/${id}` : "/admin/membros";
@@ -98,6 +103,7 @@ const AdminMembroEditarPage = () => {
   const update = (key: string, value: any) => setProfile((p) => (p ? { ...p, [key]: value } : p));
 
   const [newPassword, setNewPassword] = useState("");
+  const [credentialsDialog, setCredentialsDialog] = useState<AccessCredentialsData | null>(null);
 
   const handleSave = async () => {
     if (!profile) return;
@@ -142,92 +148,135 @@ const AdminMembroEditarPage = () => {
     }
     setNewPassword("");
     toast.success("Cadastro atualizado");
+    // Ao trocar o e-mail de um cadastro sem conta, a função cria o acesso e devolve a senha para o admin enviar.
+    const created = data as { account_created?: boolean; password?: string; email?: string } | null;
+    if (created?.account_created && created.password) {
+      setCredentialsDialog({
+        full_name: profile.full_name || "",
+        email: created.email || newEmail,
+        password: created.password,
+        role: "liberty",
+      });
+    }
   };
 
-  if (loading) return <AppLayout role={layoutRole}><div className="p-8 text-muted-foreground">Carregando…</div></AppLayout>;
-  if (!profile) return <AppLayout role={layoutRole}><div className="p-8">Membro não encontrado.</div></AppLayout>;
+  if (loading) {
+    return (
+      <AppLayout role={layoutRole}>
+        <PageContainer>
+          <PageHeader title="Editar cadastro" back={goBack} size="large" />
+          <LoadingState variant="page" />
+        </PageContainer>
+      </AppLayout>
+    );
+  }
+  if (!profile) {
+    return (
+      <AppLayout role={layoutRole}>
+        <PageContainer>
+          <PageHeader title="Editar cadastro" back={goBack} size="large" />
+          <ErrorState
+            title="Membro não encontrado"
+            description="O cadastro pode ter sido excluído ou mesclado com outro perfil."
+            onRetry={goBack}
+          />
+        </PageContainer>
+      </AppLayout>
+    );
+  }
+
+  const saveButton = (
+    <Button onClick={handleSave} disabled={saving}>
+      <Save className="h-4 w-4" /> {saving ? "Salvando" : "Salvar"}
+    </Button>
+  );
 
   return (
     <AppLayout role={layoutRole}>
-      <div className="max-w-5xl mx-auto p-6 space-y-6">
-        <div className="flex items-center justify-between">
-          <button onClick={goBack} className="flex items-center gap-2 text-sm text-muted-foreground hover:text-foreground">
-            <ArrowLeft className="h-4 w-4" /> Voltar
-          </button>
-          <button onClick={handleSave} disabled={saving} className="btn-silver flex items-center gap-2 text-sm disabled:opacity-50">
-            <Save className="h-4 w-4" /> {saving ? "Salvando…" : "Salvar"}
-          </button>
-        </div>
+      <PageContainer>
+        <PageHeader
+          size="large"
+          back={goBack}
+          eyebrow="Editar cadastro"
+          title={toTitleCase(profile.full_name || "")}
+          description={profile.email}
+          actions={saveButton}
+        />
 
-        <div className="glass-card p-6 flex flex-col md:flex-row md:items-center gap-4">
+        <SectionCard className="flex flex-col md:flex-row md:items-center gap-4">
           <AvatarUpload
             profileId={profile.id}
             fullName={profile.full_name || ""}
             avatarUrl={profile.avatar_url}
             onChange={(url) => update("avatar_url", url)}
           />
-          <div className="flex-1">
-            <h1 className="text-xl font-semibold">{toTitleCase(profile.full_name || "")}</h1>
-            <p className="text-sm text-muted-foreground">{profile.email}</p>
-            <p className="text-xs text-muted-foreground mt-1">
-              Tipo: <span className="text-primary">{profile.member_tier === "liberty" ? "Liberty Premium" : "Begin"}</span>
-            </p>
+          <div className="flex-1 min-w-0">
+            <p className="text-sm text-foreground font-medium truncate">{toTitleCase(profile.full_name || "")}</p>
+            <div className="flex items-center gap-2 mt-1">
+              <span className="text-xs text-muted-foreground">Tipo:</span>
+              <StatusPill tone={profile.member_tier === "liberty" ? "brand" : "neutral"} size="sm" withDot={false}>
+                {profile.member_tier === "liberty" ? "Liberty Premium" : "Begin"}
+              </StatusPill>
+            </div>
           </div>
-          <div className="md:w-64">
-            <label className="block text-xs text-muted-foreground mb-1">Nova senha (opcional, mín. 6)</label>
-            <input
+          <div className="md:w-72">
+            <TextField
+              label="Nova senha"
+              hint="Opcional, mínimo de 6 caracteres. Deixe vazio para manter."
               type="text"
               value={newPassword}
               onChange={(e) => setNewPassword(e.target.value)}
               placeholder="Deixe vazio para manter"
-              className="input-begin w-full text-sm h-10"
               autoComplete="new-password"
             />
           </div>
-        </div>
+        </SectionCard>
 
         {SECTIONS.map((section) => (
-          <section key={section.title} className="glass-card p-6 space-y-4">
-            <h2 className="text-base font-semibold border-b border-border pb-2">{section.title}</h2>
+          <SectionCard as="section" key={section.title} className="space-y-4">
+            <SectionHeader title={section.title} />
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               {section.fields.map((f) => {
                 const val = profile[f.key] ?? "";
                 const span = f.type === "textarea" ? "md:col-span-2" : "";
+                if (f.type === "textarea") {
+                  return (
+                    <TextAreaField
+                      key={f.key}
+                      containerClassName={span}
+                      label={f.label}
+                      value={val}
+                      onChange={(e) => update(f.key, e.target.value)}
+                      rows={4}
+                    />
+                  );
+                }
+                if (f.type === "select") {
+                  return (
+                    <SelectField key={f.key} label={f.label} value={val} onChange={(e) => update(f.key, e.target.value)}>
+                      {f.options!.map((o) => (
+                        <option key={o} value={o}>{o === "begin" ? "Begin" : "Liberty Premium"}</option>
+                      ))}
+                    </SelectField>
+                  );
+                }
                 return (
-                  <div key={f.key} className={span}>
-                    <label className="block text-xs text-muted-foreground mb-1">{f.label}</label>
-                    {f.type === "textarea" ? (
-                      <textarea
-                        value={val}
-                        onChange={(e) => update(f.key, e.target.value)}
-                        rows={4}
-                        className="input-begin w-full text-sm"
-                      />
-                    ) : f.type === "select" ? (
-                      <select
-                        value={val}
-                        onChange={(e) => update(f.key, e.target.value)}
-                        className="input-begin w-full text-sm h-10"
-                      >
-                        {f.options!.map((o) => (
-                          <option key={o} value={o}>{o === "begin" ? "Begin" : "Liberty Premium"}</option>
-                        ))}
-                      </select>
-                    ) : (
-                      <input
-                        type={f.type === "date" ? "date" : "text"}
-                        value={val ?? ""}
-                        onChange={(e) => update(f.key, e.target.value)}
-                        className="input-begin w-full text-sm h-10"
-                      />
-                    )}
-                  </div>
+                  <TextField
+                    key={f.key}
+                    label={f.label}
+                    type={f.type === "date" ? "date" : "text"}
+                    value={val ?? ""}
+                    onChange={(e) => update(f.key, e.target.value)}
+                  />
                 );
               })}
             </div>
-          </section>
+          </SectionCard>
         ))}
-      </div>
+
+        <div className="flex justify-end">{saveButton}</div>
+      </PageContainer>
+      <AccessCredentialsDialog data={credentialsDialog} onClose={() => setCredentialsDialog(null)} />
     </AppLayout>
   );
 };

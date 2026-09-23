@@ -1,10 +1,13 @@
 import { useEffect, useState } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import { useNavigate, useParams } from "react-router-dom";
 import { AppLayout } from "@/components/AppLayout";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/hooks/useAuth";
 import { toast } from "sonner";
-import { CheckCircle2, ClipboardCheck, Loader2, Send } from "lucide-react";
+import { CheckCircle2, Loader2, Send } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { LoadingState, PageContainer, PageHeader, SectionCard, SelectField, TextAreaField } from "@/components/ds";
 
 type Booking = {
   id: string;
@@ -39,36 +42,46 @@ const emptyScores: ScoreState = {
 };
 
 const ScoreScale = ({
+  id,
+  label,
   value,
   onChange,
 }: {
+  id: string;
+  label: string;
   value: number | null;
   onChange: (n: number) => void;
 }) => (
-  <div className="flex flex-wrap gap-1.5">
-    {Array.from({ length: 11 }, (_, i) => i).map((n) => {
-      const active = value === n;
-      return (
-        <button
-          key={n}
-          type="button"
-          onClick={() => onChange(n)}
-          className={`h-9 min-w-9 px-2 rounded-lg border text-sm font-semibold transition-colors tabular-nums ${
-            active
-              ? "bg-primary text-primary-foreground border-primary"
-              : "bg-card border-border text-foreground hover:border-primary/40 hover:bg-muted"
-          }`}
-        >
-          {n}
-        </button>
-      );
-    })}
-  </div>
+  <fieldset className="space-y-2 border-0 p-0 m-0 min-w-0">
+    <legend id={id} className="text-sm font-medium text-foreground leading-snug">{label}</legend>
+    <div className="flex flex-wrap gap-1.5" role="group" aria-labelledby={id}>
+      {Array.from({ length: 11 }, (_, i) => i).map((n) => {
+        const active = value === n;
+        return (
+          <button
+            key={n}
+            type="button"
+            onClick={() => onChange(n)}
+            aria-pressed={active}
+            aria-label={`Nota ${n}`}
+            className={`h-11 min-w-[44px] px-2 rounded-ds border text-sm font-semibold transition-colors duration-ds-1 ease-ds tabular-nums focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 ring-offset-background ${
+              active
+                ? "bg-primary text-primary-foreground border-primary"
+                : "bg-card border-border text-foreground hover:bg-accent"
+            }`}
+          >
+            {n}
+          </button>
+        );
+      })}
+    </div>
+  </fieldset>
 );
 
 const NpsForm = () => {
   const { bookingId } = useParams<{ bookingId?: string }>();
   const navigate = useNavigate();
+  const queryClient = useQueryClient();
   const { profile } = useAuth();
 
   const [loading, setLoading] = useState(true);
@@ -173,6 +186,7 @@ const NpsForm = () => {
         would_recommend: wouldRecommend || null,
       });
       if (error) throw error;
+      queryClient.invalidateQueries({ queryKey: ["pending-nps"] });
       toast.success("Obrigado! Sua avaliação foi registrada.");
       navigate("/dashboard");
     } catch (e: any) {
@@ -184,131 +198,103 @@ const NpsForm = () => {
 
   return (
     <AppLayout role="liberty">
-      <div className="max-w-3xl mx-auto space-y-6">
-        <header className="space-y-1">
-          <div className="flex items-center gap-2 text-primary">
-            <ClipboardCheck className="h-5 w-5" />
-            <span className="text-xs font-semibold uppercase tracking-wide">Pesquisa de Satisfação</span>
-          </div>
-          <h1 className="text-2xl font-semibold text-foreground">Como foi sua sessão?</h1>
-          <p className="text-sm text-muted-foreground">
-            Sua opinião nos ajuda a evoluir a experiência do Liberty Begin. Leva menos de 2 minutos.
-          </p>
-        </header>
+      <PageContainer variant="narrow">
+        <PageHeader
+          eyebrow="Pesquisa de satisfação"
+          title="Como foi sua sessão?"
+          description="Sua opinião nos ajuda a evoluir a experiência do Liberty Begin. Leva menos de 2 minutos."
+          back
+        />
 
         {loading ? (
-          <div className="flex items-center gap-2 text-sm text-muted-foreground">
-            <Loader2 className="h-4 w-4 animate-spin" /> Carregando…
-          </div>
+          <LoadingState variant="cards" rows={3} />
         ) : alreadySent ? (
-          <div className="rounded-2xl border border-status-green/30 bg-status-green/5 p-6 text-center space-y-2">
-            <CheckCircle2 className="h-8 w-8 text-status-green mx-auto" />
-            <p className="text-sm font-semibold text-foreground">Você já respondeu essa avaliação.</p>
-            <p className="text-xs text-muted-foreground">Obrigado pelo feedback!</p>
-          </div>
+          <SectionCard tone="success" className="text-center space-y-2">
+            <CheckCircle2 className="h-8 w-8 text-status-green mx-auto" aria-hidden />
+            <p className="text-[17px] font-semibold text-foreground">Você já respondeu essa avaliação</p>
+            <p className="text-sm text-muted-foreground">Obrigado pelo feedback.</p>
+            <div className="pt-2">
+              <Button variant="outline" onClick={() => navigate("/dashboard")}>Voltar ao início</Button>
+            </div>
+          </SectionCard>
         ) : (
-          <div className="rounded-2xl border border-border bg-card/80 p-5 md:p-6 space-y-6">
-            <div className="grid gap-4 md:grid-cols-2">
-              <div className="space-y-1.5">
-                <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">
-                  Qual sessão você realizou?
-                </label>
-                <select
+          <form
+            className="space-y-6 pb-24 sm:pb-0"
+            onSubmit={(e) => { e.preventDefault(); submit(); }}
+          >
+            <SectionCard className="space-y-6">
+              <div className="grid gap-4 md:grid-cols-2">
+                <SelectField
+                  label="Qual sessão você realizou?"
                   value={selectedSessionId}
                   onChange={(e) => setSelectedSessionId(e.target.value)}
-                  className="w-full rounded-xl border border-border bg-background px-3 py-2.5 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary/40"
                 >
-                  <option value="">Selecione a sessão…</option>
+                  <option value="">Selecione a sessão</option>
                   {sessionsList.map((s) => (
                     <option key={s.id} value={s.id}>{s.name}</option>
                   ))}
-                </select>
-              </div>
-              <div className="space-y-1.5">
-                <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">
-                  Quem foi seu mentor?
-                </label>
-                <select
+                </SelectField>
+                <SelectField
+                  label="Quem foi seu mentor?"
                   value={selectedMentorId}
                   onChange={(e) => setSelectedMentorId(e.target.value)}
-                  className="w-full rounded-xl border border-border bg-background px-3 py-2.5 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary/40"
                 >
-                  <option value="">Selecione o mentor…</option>
+                  <option value="">Selecione o mentor</option>
                   {mentorsList.map((m) => (
                     <option key={m.id} value={m.id}>{m.full_name}</option>
                   ))}
-                </select>
+                </SelectField>
               </div>
-            </div>
 
-            {scoreQuestions.map((q) => (
-              <div key={q.key} className="space-y-2">
-                <label className="text-sm font-medium text-foreground">{q.label}</label>
+              {scoreQuestions.map((q) => (
                 <ScoreScale
+                  key={q.key}
+                  id={`nps-${q.key}`}
+                  label={q.label}
                   value={scores[q.key]}
                   onChange={(n) => setScores((s) => ({ ...s, [q.key]: n }))}
                 />
-              </div>
-            ))}
+              ))}
 
-            <div className="space-y-2">
-              <label className="text-sm font-medium text-foreground">
-                6. Qual foi a maior chave que você pegou na sessão de hoje?
-              </label>
-              <textarea
+              <TextAreaField
+                label="6. Qual foi a maior chave que você pegou na sessão de hoje?"
                 value={keyTakeaway}
                 onChange={(e) => setKeyTakeaway(e.target.value)}
                 rows={3}
-                className="w-full rounded-xl border border-border bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/40"
-                placeholder="Escreva aqui…"
+                placeholder="Escreva aqui"
               />
-            </div>
 
-            <div className="space-y-2">
-              <label className="text-sm font-medium text-foreground">
-                7. Tem algo que você acredita que poderia ser melhorado? Suas sugestões:
-              </label>
-              <textarea
+              <TextAreaField
+                label="7. Tem algo que você acredita que poderia ser melhorado? Suas sugestões:"
                 value={improvements}
                 onChange={(e) => setImprovements(e.target.value)}
                 rows={3}
-                className="w-full rounded-xl border border-border bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/40"
-                placeholder="Escreva aqui…"
+                placeholder="Escreva aqui"
               />
-            </div>
 
-            <div className="space-y-2">
-              <label className="text-sm font-medium text-foreground">
-                8. Você indicaria essa mentoria para outra pessoa que deseja prosperar?
-              </label>
-              <textarea
+              <TextAreaField
+                label="8. Você indicaria essa mentoria para outra pessoa que deseja prosperar?"
                 value={wouldRecommend}
                 onChange={(e) => setWouldRecommend(e.target.value)}
                 rows={2}
-                className="w-full rounded-xl border border-border bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/40"
-                placeholder="Sim / Não e por quê…"
+                placeholder="Sim ou não, e por quê"
               />
-            </div>
+            </SectionCard>
 
-            <div className="flex items-center justify-end gap-2 pt-2 border-t border-border">
-              <button
-                onClick={() => navigate(-1)}
-                className="px-4 py-2 rounded-xl border border-border text-sm text-foreground hover:bg-muted transition-colors"
-              >
-                Voltar
-              </button>
-              <button
-                onClick={submit}
-                disabled={submitting}
-                className="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-primary text-primary-foreground text-sm font-semibold hover:bg-primary/90 transition-colors disabled:opacity-50"
-              >
-                {submitting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
-                Enviar avaliação
-              </button>
+            <div className="fixed inset-x-0 bottom-0 z-30 border-t border-border bg-background/95 backdrop-blur px-4 pt-3 pb-[calc(env(safe-area-inset-bottom)+12px)] sm:static sm:border-0 sm:bg-transparent sm:p-0 sm:backdrop-blur-none">
+              <div className="mx-auto flex max-w-2xl flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+                <Button type="button" variant="outline" size="lg" onClick={() => navigate(-1)}>
+                  Voltar
+                </Button>
+                <Button type="submit" size="lg" disabled={submitting}>
+                  {submitting ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden /> : <Send className="h-4 w-4" aria-hidden />}
+                  Enviar avaliação
+                </Button>
+              </div>
             </div>
-          </div>
+          </form>
         )}
-      </div>
+      </PageContainer>
     </AppLayout>
   );
 };

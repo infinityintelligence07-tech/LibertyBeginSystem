@@ -182,16 +182,16 @@ export const DiagnosticRadar = ({
       {showSummary && (
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
           <div className="rounded-xl border border-primary/30 bg-primary/5 p-3">
-            <p className="text-[10px] uppercase tracking-wide text-muted-foreground">Média geral</p>
+            <p className="text-xs text-muted-foreground">Média geral</p>
             <p className="text-xl font-semibold text-primary tabular-nums">{total.toFixed(1)}<span className="text-xs text-muted-foreground">/5</span></p>
           </div>
           <div className="rounded-xl border border-border bg-card/60 p-3 col-span-2">
-            <p className="text-[10px] uppercase tracking-wide text-muted-foreground">Nível de maturidade</p>
+            <p className="text-xs text-muted-foreground">Nível de maturidade</p>
             <p className="text-sm font-semibold text-foreground">{level.label}</p>
-            <p className="text-[11px] text-muted-foreground leading-snug">{level.hint}</p>
+            <p className="text-xs text-muted-foreground leading-snug">{level.hint}</p>
           </div>
           <div className="rounded-xl border border-border bg-card/60 p-3">
-            <p className="text-[10px] uppercase tracking-wide text-muted-foreground">Pilares</p>
+            <p className="text-xs text-muted-foreground">Pilares</p>
             <p className="text-xl font-semibold text-foreground tabular-nums">{DIAGNOSTICO_BEGIN_PILLARS.length}</p>
           </div>
         </div>

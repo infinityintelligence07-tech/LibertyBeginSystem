@@ -2,6 +2,8 @@ import { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { Check, X, Clock3, Download, Users } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { Chip, EmptyState, ListRow, LoadingState, SectionCard } from "@/components/ds";
 
 type Tab = "going" | "not_going" | "pending";
 
@@ -71,44 +73,33 @@ export const EventAttendanceList = ({ eventId, eventTitle }: Props) => {
   ];
 
   return (
-    <div className="mt-4 pt-4 border-t border-border/40">
-      <div className="flex flex-wrap items-center gap-2 mb-3">
+    <div className="mt-4 pt-4 border-t border-border space-y-3">
+      <div className="flex flex-wrap items-center gap-2.5">
         {tabs.map((t) => (
-          <button
-            key={t.key}
-            onClick={() => setTab(t.key)}
-            className={`text-[11px] px-3 py-1.5 rounded-lg border flex items-center gap-1.5 transition-colors ${
-              tab === t.key
-                ? "border-primary/40 bg-primary/10 text-primary"
-                : "border-border text-muted-foreground hover:text-foreground"
-            }`}
-          >
-            <t.icon className="h-3 w-3" /> {t.label} ({t.count})
-          </button>
+          <Chip key={t.key} active={tab === t.key} onClick={() => setTab(t.key)} count={t.count}>
+            <t.icon className="h-3.5 w-3.5" aria-hidden /> {t.label}
+          </Chip>
         ))}
-        <button
-          onClick={exportCsv}
-          className="text-[11px] px-3 py-1.5 rounded-lg border border-border text-muted-foreground hover:text-foreground flex items-center gap-1.5 ml-auto"
-        >
-          <Download className="h-3 w-3" /> Exportar lista
-        </button>
+        <Button variant="outline" size="sm" onClick={exportCsv} className="ml-auto">
+          <Download className="h-3.5 w-3.5" /> Exportar lista
+        </Button>
       </div>
 
       {isLoading ? (
-        <p className="text-xs text-muted-foreground">Carregando lista…</p>
+        <LoadingState variant="list" rows={3} />
       ) : groups[tab].length === 0 ? (
-        <p className="text-xs text-muted-foreground flex items-center gap-1.5">
-          <Users className="h-3.5 w-3.5" /> Nenhum membro nesta categoria.
-        </p>
+        <EmptyState compact icon={Users} title="Nenhum membro nesta categoria" />
       ) : (
-        <ul className="grid sm:grid-cols-2 gap-1.5 max-h-56 overflow-y-auto">
-          {groups[tab].map((m) => (
-            <li key={m.id} className="rounded-lg border border-border bg-card/60 px-3 py-2">
-              <p className="text-xs font-medium text-foreground truncate">{m.full_name}</p>
-              <p className="text-[10px] text-muted-foreground truncate">{m.company_name || m.email || "—"}</p>
-            </li>
+        <SectionCard padding="none" className="max-h-64 overflow-y-auto">
+          {groups[tab].map((m, i) => (
+            <ListRow
+              key={m.id}
+              title={m.full_name}
+              subtitle={m.company_name || m.email || "Sem dados"}
+              last={i === groups[tab].length - 1}
+            />
           ))}
-        </ul>
+        </SectionCard>
       )}
     </div>
   );

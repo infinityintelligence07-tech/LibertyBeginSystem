@@ -1,6 +1,7 @@
 import { motion } from "framer-motion";
 import { Building2, CheckCircle2, Flame } from "lucide-react";
 import { fadeUpItem } from "@/lib/animations";
+import { PageHeader, SectionCard, Stat, StatusPill } from "@/components/ds";
 
 interface Milestone {
   key: string;
@@ -46,78 +47,45 @@ export const MentorImpactBar = ({
 }: Props) => {
   return (
     <motion.div variants={fadeUpItem} className="space-y-4">
-      <div>
-        <p className="text-[10px] uppercase tracking-[0.14em] text-muted-foreground font-semibold mb-1">
-          Mentoria
-        </p>
-        <h1 className="text-2xl font-semibold text-foreground">
-          {greetingByHour()}, {firstName}
-        </h1>
-        <p className="text-muted-foreground text-sm mt-1">
-          {contextPhrase()}
-        </p>
-      </div>
+      <PageHeader
+        eyebrow="Mentoria"
+        title={`${greetingByHour()}, ${firstName}`}
+        description={contextPhrase()}
+      />
 
-      <div className="rounded-2xl border border-primary/25 bg-gradient-to-br from-primary/10 via-card to-card p-5 shadow-[0_8px_30px_-18px_hsl(var(--primary)/0.35)]">
-        <div className="flex items-center gap-2 text-primary text-[10px] font-semibold uppercase tracking-wider mb-3">
-          <Flame className="h-3.5 w-3.5" /> Seu impacto acumulado
-        </div>
+      <SectionCard className="space-y-4">
+        <p className="text-sm font-semibold text-foreground flex items-center gap-2">
+          <Flame className="h-4 w-4 text-primary" aria-hidden /> Seu impacto acumulado
+        </p>
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-          <ImpactStat
+          <Stat
             icon={Building2}
             value={companiesImpacted}
-            label={companiesImpacted === 1 ? "empresa impactada" : "empresas impactadas"}
-            highlight
+            label={companiesImpacted === 1 ? "Empresa impactada" : "Empresas impactadas"}
+            tone="brand"
           />
-          <ImpactStat
+          <Stat
             icon={CheckCircle2}
             value={sessionsConducted}
-            label={sessionsConducted === 1 ? "sessão conduzida" : "sessões conduzidas"}
+            label={sessionsConducted === 1 ? "Sessão conduzida" : "Sessões conduzidas"}
           />
-          <ImpactStat
+          <Stat
             icon={Flame}
             value={studentTasksCompleted}
-            label={studentTasksCompleted === 1 ? "tarefa concluída pelos alunos" : "tarefas concluídas pelos alunos"}
+            label={studentTasksCompleted === 1 ? "Tarefa concluída pelos alunos" : "Tarefas concluídas pelos alunos"}
           />
         </div>
 
         {milestones.length > 0 && (
-          <div className="mt-4 pt-4 border-t border-border/40 flex flex-wrap gap-2">
+          <div className="pt-4 border-t border-border flex flex-wrap gap-2">
             {milestones.map((m) => (
-              <span
-                key={m.key}
-                className="inline-flex items-center gap-1.5 text-[11px] px-2.5 py-1 rounded-full border border-primary/25 bg-primary/5 text-foreground"
-                title={m.label}
-              >
-                <span>{m.icon}</span>
-                <span className="font-medium">{m.label}</span>
-              </span>
+              <StatusPill key={m.key} tone="brand" withDot={false} size="md">
+                <span aria-hidden>{m.icon}</span> {m.label}
+              </StatusPill>
             ))}
           </div>
         )}
-      </div>
+      </SectionCard>
     </motion.div>
   );
 };
-
-const ImpactStat = ({
-  icon: Icon,
-  value,
-  label,
-  highlight,
-}: {
-  icon: any;
-  value: number;
-  label: string;
-  highlight?: boolean;
-}) => (
-  <div className="flex items-start gap-3">
-    <div className={`h-10 w-10 rounded-xl flex items-center justify-center shrink-0 ${highlight ? "bg-primary/15 text-primary" : "bg-muted/50 text-foreground"}`}>
-      <Icon className="h-5 w-5" />
-    </div>
-    <div className="min-w-0">
-      <p className={`text-2xl font-semibold tabular-nums leading-none ${highlight ? "text-primary" : "text-foreground"}`}>{value}</p>
-      <p className="text-[11px] text-muted-foreground mt-1 leading-tight">{label}</p>
-    </div>
-  </div>
-);

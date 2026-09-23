@@ -1,10 +1,13 @@
 import { Link } from "react-router-dom";
-import { Lock, ArrowRight } from "lucide-react";
+import { Lock } from "lucide-react";
 import { useAuth } from "@/hooks/useAuth";
+import { Button } from "@/components/ui/button";
+import { Callout, PageContainer } from "@/components/ds";
 
 /**
- * Banner shown to liberty members that haven't completed their onboarding form yet.
- * They can navigate the platform but key actions stay disabled until completion.
+ * Aviso para membros liberty que ainda não concluíram o formulário de entrada.
+ * Renderizado pelo AppLayout acima do conteúdo da página; vive em um PageContainer
+ * próprio para alinhar com a largura padrão das páginas.
  */
 export const OnboardingGateBanner = () => {
   const { profile, roles } = useAuth();
@@ -17,25 +20,20 @@ export const OnboardingGateBanner = () => {
   if (!profile || profile.onboarding_completed !== false) return null;
 
   return (
-    <Link
-      to="/onboarding"
-      className="block mb-4 rounded-xl border border-status-yellow/45 bg-status-yellow/10 px-4 py-3 hover:bg-status-yellow/15 transition-colors"
-    >
-      <div className="flex items-center gap-3">
-        <Lock className="h-4 w-4 text-status-yellow shrink-0" />
-        <div className="flex-1 min-w-0">
-          <div className="text-sm font-semibold text-foreground">
-            Complete seu formulário para desbloquear a plataforma
-          </div>
-          <div className="text-xs text-muted-foreground">
-            Você ainda não consegue agendar sessões. Leva menos de 5 minutos.
-          </div>
-        </div>
-        <span className="hidden sm:inline-flex items-center gap-1 text-xs font-medium text-status-yellow">
-          Preencher <ArrowRight className="h-3 w-3" />
-        </span>
-      </div>
-    </Link>
+    <PageContainer className="mb-6">
+      <Callout
+        tone="warning"
+        icon={Lock}
+        title="Complete seu formulário para desbloquear a plataforma"
+        action={
+          <Button size="sm" asChild>
+            <Link to="/onboarding">Preencher formulário</Link>
+          </Button>
+        }
+      >
+        Você ainda não consegue agendar sessões. Leva menos de 5 minutos.
+      </Callout>
+    </PageContainer>
   );
 };
 

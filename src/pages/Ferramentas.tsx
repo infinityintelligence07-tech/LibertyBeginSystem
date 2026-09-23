@@ -1,9 +1,10 @@
 import { useState } from "react";
 import { motion } from "framer-motion";
 import { AppLayout } from "@/components/AppLayout";
-import { Wrench, ExternalLink, Lock, Loader2, Radar as RadarIcon, FileText } from "lucide-react";
-import { EmptyState } from "@/components/EmptyState";
+import { Wrench, ExternalLink, Lock, Radar as RadarIcon, FileText } from "lucide-react";
 import { staggerContainer, fadeUpItem } from "@/lib/animations";
+import { Button } from "@/components/ui/button";
+import { EmptyState, LoadingState, PageContainer, PageHeader, SectionCard, SectionHeader, StatusPill } from "@/components/ds";
 import { supabase } from "@/integrations/supabase/client";
 import { useQuery } from "@tanstack/react-query";
 import { useAuth } from "@/hooks/useAuth";
@@ -100,30 +101,32 @@ const FerramentasPage = () => {
 
   return (
     <AppLayout role="liberty">
+      <PageContainer>
       <motion.div variants={staggerContainer} initial="hidden" animate="show" className="space-y-8">
         <motion.div variants={fadeUpItem}>
-          <h1 className="text-2xl font-semibold text-foreground">Ferramentas</h1>
-          <p className="text-muted-foreground text-sm">Ferramentas aplicadas nas suas sessões de mentoria</p>
+          <PageHeader
+            title="Ferramentas"
+            description="Ferramentas aplicadas nas suas sessões de mentoria."
+          />
         </motion.div>
 
         {base && (
-          <motion.div variants={fadeUpItem} className="glass-card p-5 space-y-4">
-            <div className="flex items-start justify-between gap-3">
-              <div className="flex items-center gap-2">
-                <RadarIcon className="h-4 w-4 text-primary" />
-                <h2 className="text-lg font-semibold text-foreground">Mapeamento do Negócio</h2>
-              </div>
-              <button
-                type="button"
-                onClick={() => setOpenSheet(true)}
-                className="shrink-0 flex items-center gap-1.5 rounded-lg border border-border bg-background/60 px-2.5 py-1.5 text-[11px] font-medium text-muted-foreground hover:text-foreground hover:bg-muted/50 transition-colors"
-              >
-                <FileText className="h-3.5 w-3.5" /> Acessar a ferramenta
-              </button>
-            </div>
-            <p className="text-xs text-muted-foreground">
-              Retrato da maturidade do seu negócio construído junto com o seu mentor.
-            </p>
+          <motion.div variants={fadeUpItem}>
+          <SectionCard className="space-y-4">
+            <SectionHeader
+              title={
+                <span className="inline-flex items-center gap-2">
+                  <RadarIcon className="h-4 w-4 text-primary" aria-hidden />
+                  Mapeamento do Negócio
+                </span>
+              }
+              description="Retrato da maturidade do seu negócio construído junto com o seu mentor."
+              actions={
+                <Button variant="outline" size="sm" onClick={() => setOpenSheet(true)}>
+                  <FileText className="h-3.5 w-3.5" aria-hidden /> Acessar a ferramenta
+                </Button>
+              }
+            />
             <DiagnosticRadar
               scores={(inicial?.scores as any) || (base.scores as any) || {}}
               compareScores={inicial && final ? ((final.scores as any) || {}) : null}
@@ -134,6 +137,7 @@ const FerramentasPage = () => {
                 setOpenSheet(true);
               }}
             />
+          </SectionCard>
           </motion.div>
         )}
 
@@ -168,39 +172,48 @@ const FerramentasPage = () => {
 
 
         {isLoading ? (
-          <div className="flex justify-center py-20">
-            <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
-          </div>
+          <LoadingState variant="cards" rows={3} />
         ) : effectiveTools.length > 0 ? (
-          <motion.div variants={staggerContainer} className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-            {effectiveTools.map((tool: any) => {
-              const unlocked = tool.is_public || (tool.session_id && completedSessionIds.has(tool.session_id));
-              const Wrapper: any = unlocked && tool.url ? "a" : "div";
-              return (
-                <motion.div key={tool.id} variants={fadeUpItem}>
-                  <Wrapper
-                    {...(unlocked && tool.url
-                      ? { href: tool.url, target: "_blank", rel: "noopener noreferrer" }
-                      : {})}
-                    className={`glass-card p-5 flex flex-col gap-4 min-h-[132px] transition-all ${
-                      unlocked ? "hover:border-primary/30" : "opacity-60"
-                    }`}
-                  >
+          <motion.section variants={fadeUpItem} className="space-y-3" aria-labelledby="tools-title">
+            <SectionHeader title={<span id="tools-title">Biblioteca de ferramentas</span>} />
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+              {effectiveTools.map((tool: any) => {
+                const unlocked = tool.is_public || (tool.session_id && completedSessionIds.has(tool.session_id));
+                const isLink = Boolean(unlocked && tool.url);
+                const inner = (
+                  <>
                     <div className="flex items-start justify-between gap-2">
-                      <div className={`w-11 h-11 rounded-xl flex items-center justify-center ${unlocked ? "bg-status-green/10" : "bg-muted"}`}>
-                        {unlocked ? <Wrench className="h-4 w-4 text-status-green" /> : <Lock className="h-4 w-4 text-muted-foreground" />}
+                      <div className={`w-11 h-11 rounded-ds-lg flex items-center justify-center ${unlocked ? "bg-status-green/10" : "bg-muted"}`}>
+                        {unlocked ? <Wrench className="h-4 w-4 text-status-green" aria-hidden /> : <Lock className="h-4 w-4 text-muted-foreground" aria-hidden />}
                       </div>
-                      {unlocked && tool.url && <ExternalLink className="h-4 w-4 text-muted-foreground" />}
+                      {isLink && <ExternalLink className="h-4 w-4 text-muted-foreground" aria-hidden />}
                     </div>
-                    <p className="text-base font-semibold text-foreground leading-snug line-clamp-2">{tool.title}</p>
+                    <p className="text-[17px] font-semibold text-foreground leading-snug line-clamp-2">{tool.title}</p>
                     {!unlocked && (
-                      <span className="text-[11px] text-muted-foreground">Disponível após a sessão</span>
+                      <StatusPill tone="neutral" size="sm" withDot={false}>Disponível após a sessão</StatusPill>
                     )}
-                  </Wrapper>
-                </motion.div>
-              );
-            })}
-          </motion.div>
+                  </>
+                );
+                return isLink ? (
+                  <a
+                    key={tool.id}
+                    href={tool.url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="block rounded-ds-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 ring-offset-background"
+                  >
+                    <SectionCard interactive className="flex flex-col gap-4 min-h-[132px] h-full">
+                      {inner}
+                    </SectionCard>
+                  </a>
+                ) : (
+                  <SectionCard key={tool.id} className={`flex flex-col gap-4 min-h-[132px] ${unlocked ? "" : "opacity-70"}`}>
+                    {inner}
+                  </SectionCard>
+                );
+              })}
+            </div>
+          </motion.section>
         ) : !hasSessionTools ? (
           <EmptyState
             icon={Wrench}
@@ -210,6 +223,7 @@ const FerramentasPage = () => {
         ) : null}
 
       </motion.div>
+      </PageContainer>
     </AppLayout>
   );
 };

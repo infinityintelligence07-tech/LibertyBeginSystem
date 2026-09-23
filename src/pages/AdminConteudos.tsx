@@ -1,18 +1,32 @@
 import { useState, useMemo } from "react";
-import { motion } from "framer-motion";
 import { AppLayout } from "@/components/AppLayout";
-import { staggerContainer, fadeUpItem } from "@/lib/animations";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { useSessionCatalog } from "@/hooks/useAdminData";
 import { shortName } from "@/lib/formatName";
-import {
-  FileText, Wrench, AlertTriangle, ArrowRight, CheckCircle2, Clock, Plus, Edit, Trash2, Save, X
-} from "lucide-react";
+import { FileText, Wrench, AlertTriangle, CheckCircle2, Clock, Plus, Edit, Trash2, ExternalLink } from "lucide-react";
 import { toast } from "sonner";
-import { EmptyState } from "@/components/EmptyState";
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
+import { Switch } from "@/components/ui/switch";
+import {
+  PageContainer,
+  PageHeader,
+  SectionHeader,
+  SectionCard,
+  Callout,
+  ListRow,
+  DateBlock,
+  StatusPill,
+  IconButton,
+  BottomSheet,
+  ConfirmDialog,
+  TextField,
+  TextAreaField,
+  SelectField,
+  LoadingState,
+  EmptyState,
+  ErrorState,
+} from "@/components/ds";
 
 interface ContentForm {
   title: string;
@@ -36,6 +50,18 @@ const contentTypes = [
   { value: "documento", label: "Documento" },
 ];
 
+const contentTypeLabel = (value: string) => contentTypes.find((c) => c.value === value)?.label ?? value;
+
+const formatDateBR = (date: string) => new Date(date + "T12:00:00").toLocaleDateString("pt-BR");
+
+const ReportField = ({ label, value }: { label: string; value: string | null | undefined }) =>
+  value ? (
+    <div>
+      <p className="text-xs font-medium text-muted-foreground mb-1">{label}</p>
+      <p className="text-sm text-foreground whitespace-pre-wrap leading-relaxed">{value}</p>
+    </div>
+  ) : null;
+
 const AdminConteudosPage = () => {
   const { data: sessions } = useSessionCatalog();
   const queryClient = useQueryClient();
@@ -44,8 +70,11 @@ const AdminConteudosPage = () => {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [form, setForm] = useState<ContentForm>(emptyForm);
   const [saving, setSaving] = useState(false);
+  const [deleteTarget, setDeleteTarget] = useState<{ id: string; title: string } | null>(null);
+  const [deleting, setDeleting] = useState(false);
+  const [openReportId, setOpenReportId] = useState<string | null>(null);
 
-  const { data: reports, isLoading } = useQuery({
+  const { data: reports, isLoading, isError, refetch } = useQuery({
     queryKey: ["admin-all-reports"],
     queryFn: async () => {
       const { data, error } = await supabase
@@ -57,7 +86,7 @@ const AdminConteudosPage = () => {
     },
   });
 
-  const { data: contents } = useQuery({
+  const { data: contents, isLoading: contentsLoading, isError: contentsError, refetch: refetchContents } = useQuery({
     queryKey: ["admin-contents"],
     queryFn: async () => {
       const { data, error } = await supabase.from("contents").select("*, sessions(name)").order("created_at", { ascending: false });
@@ -65,8 +94,6 @@ const AdminConteudosPage = () => {
       return data || [];
     },
   });
-
-  const tools = contents?.filter((c: any) => ["ferramenta", "checklist", "template"].includes(c.content_type)) || [];
 
   const sessionsMissingTools = useMemo(() => {
     if (!sessions || !contents) return [];
@@ -128,59 +155,56 @@ const AdminConteudosPage = () => {
     }
   };
 
-  const handleDelete = async (id: string, title: string) => {
-    if (!confirm(`Excluir "${title}"?`)) return;
+  const handleDelete = async (id: string) => {
+    setDeleting(true);
     try {
       const { error } = await supabase.from("contents").delete().eq("id", id);
       if (error) throw error;
       toast.success("Conteúdo excluído");
+      setDeleteTarget(null);
       queryClient.invalidateQueries({ queryKey: ["admin-contents"] });
     } catch (e: any) {
       toast.error("Erro: " + e.message);
+    } finally {
+      setDeleting(false);
     }
   };
 
+  const openReport = (reports || []).find((r: any) => r.id === openReportId) as any | undefined;
+
   return (
     <AppLayout role="admin">
-      <motion.div variants={staggerContainer} initial="hidden" animate="show" className="space-y-6">
-        <motion.div variants={fadeUpItem} className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
-          <div>
-            <h1 className="text-2xl font-semibold text-foreground">Relatórios & Ferramentas</h1>
-            <p className="text-muted-foreground text-sm mt-1">
-              Relatórios das sessões preenchidos pelos mentores e ferramentas do programa
-            </p>
-          </div>
-        </motion.div>
+      <PageContainer>
+        <PageHeader
+          title="Relatórios e ferramentas"
+          description="Relatórios das sessões preenchidos pelos mentores e ferramentas do programa."
+          actions={
+            <Button onClick={openAdd}>
+              <Plus aria-hidden /> Novo conteúdo
+            </Button>
+          }
+        />
 
-        {/* Tool alert */}
         {sessionsMissingTools.length > 0 && (
-          <motion.div variants={fadeUpItem} className="glass-card p-4 border-status-yellow/30">
-            <div className="flex items-center gap-2 text-status-yellow text-sm font-medium mb-2">
-              <AlertTriangle className="h-4 w-4" />
-              {sessionsMissingTools.length} sessões sem ferramenta cadastrada
-            </div>
-            <div className="flex flex-wrap gap-2">
+          <Callout
+            tone="warning"
+            icon={AlertTriangle}
+            title={`${sessionsMissingTools.length} ${sessionsMissingTools.length === 1 ? "sessão sem ferramenta cadastrada" : "sessões sem ferramenta cadastrada"}`}
+          >
+            <div className="flex flex-wrap gap-1.5 pt-1">
               {sessionsMissingTools.map(s => (
-                <span key={s.id} className="text-xs px-3 py-1.5 rounded-full bg-status-yellow/10 text-status-yellow border border-status-yellow/20 flex items-center gap-1">
-                  {s.name} <ArrowRight className="h-3 w-3" />
-                </span>
+                <StatusPill key={s.id} tone="warning" withDot={false}>{s.name}</StatusPill>
               ))}
             </div>
-          </motion.div>
+          </Callout>
         )}
 
-        {/* Relatórios section */}
-        <motion.div variants={fadeUpItem}>
-          <h2 className="text-base font-semibold text-foreground flex items-center gap-2 mb-4">
-            <FileText className="h-4 w-4 text-primary" /> Relatórios das sessões
-          </h2>
-
+        <section className="space-y-3">
+          <SectionHeader title="Relatórios das sessões" description="Toque em um relatório para ler o conteúdo completo." />
           {isLoading ? (
-            <div className="space-y-2">
-              {Array.from({ length: 4 }).map((_, i) => (
-                <div key={i} className="glass-card p-4 animate-pulse h-16" />
-              ))}
-            </div>
+            <LoadingState variant="list" rows={4} />
+          ) : isError ? (
+            <ErrorState title="Não foi possível carregar os relatórios" onRetry={() => refetch()} />
           ) : !reports || reports.length === 0 ? (
             <EmptyState
               icon={FileText}
@@ -188,172 +212,213 @@ const AdminConteudosPage = () => {
               description="Os relatórios aparecem aqui automaticamente quando os mentores os preenchem após as sessões."
             />
           ) : (
-            <div className="space-y-2">
-              {reports.map((r: any) => {
+            <SectionCard padding="none">
+              {reports.map((r: any, index: number) => {
                 const booking = r.bookings;
                 const sessionName = booking?.sessions?.name || "Sem dados";
                 const mentorName = booking?.mentor?.full_name || "Sem dados";
                 const libertyName = booking?.liberty?.full_name || "Sem dados";
-                const date = booking?.scheduled_date;
+                const date = booking?.scheduled_date as string | undefined;
                 const hasContent = r.summary || r.goals || r.action_plan;
-
                 return (
-                  <div key={r.id} className="glass-card p-4">
-                    <div className="flex items-center gap-3">
-                      <div className={`w-8 h-8 rounded-lg flex items-center justify-center shrink-0 ${hasContent ? "bg-status-green/10" : "bg-muted"}`}>
-                        {hasContent ? <CheckCircle2 className="h-4 w-4 text-status-green" /> : <Clock className="h-4 w-4 text-muted-foreground" />}
-                      </div>
-                      <div className="flex-1 min-w-0">
-                        <div className="flex items-center gap-2 flex-wrap">
-                          <span className="text-sm font-medium text-foreground">{sessionName}</span>
-                          <span className="text-[10px] text-muted-foreground">·</span>
-                          <span className="text-xs text-muted-foreground">{shortName(libertyName)}</span>
-                          <span className="text-[10px] text-muted-foreground">·</span>
-                          <span className="text-xs text-muted-foreground">Mentor: {shortName(mentorName)}</span>
+                  <ListRow
+                    key={r.id}
+                    last={index === reports.length - 1}
+                    onPress={() => setOpenReportId(r.id)}
+                    leading={
+                      date ? (
+                        <DateBlock date={date} />
+                      ) : (
+                        <div className="h-10 w-10 rounded-[var(--ds-radius-md)] bg-muted flex items-center justify-center">
+                          <FileText className="h-4 w-4 text-muted-foreground" aria-hidden />
                         </div>
-                        {date && (
-                          <p className="text-[10px] text-muted-foreground mt-0.5">
-                            {new Date(date + "T12:00:00").toLocaleDateString("pt-BR")}
-                          </p>
-                        )}
-                        {r.summary && (
-                          <p className="text-xs text-muted-foreground mt-1 line-clamp-2">{r.summary}</p>
-                        )}
-                      </div>
-                    </div>
-                    {(r.goals || r.action_plan || r.mentor_impressions) && (
-                      <div className="mt-3 pt-3 border-t border-border grid grid-cols-1 lg:grid-cols-3 gap-3 text-xs">
-                        {r.goals && (
-                          <div>
-                            <span className="font-semibold text-foreground block mb-0.5">Metas</span>
-                            <p className="text-muted-foreground line-clamp-3">{r.goals}</p>
-                          </div>
-                        )}
-                        {r.action_plan && (
-                          <div>
-                            <span className="font-semibold text-foreground block mb-0.5">Plano de ação</span>
-                            <p className="text-muted-foreground line-clamp-3">{r.action_plan}</p>
-                          </div>
-                        )}
-                        {r.mentor_impressions && (
-                          <div>
-                            <span className="font-semibold text-foreground block mb-0.5">Impressões do mentor</span>
-                            <p className="text-muted-foreground line-clamp-3">{r.mentor_impressions}</p>
-                          </div>
-                        )}
-                      </div>
-                    )}
-                  </div>
+                      )
+                    }
+                    title={sessionName}
+                    subtitle={`${shortName(libertyName)} · Mentor: ${shortName(mentorName)}${r.summary ? ` · ${r.summary}` : ""}`}
+                    trailing={
+                      hasContent ? (
+                        <StatusPill tone="success">Preenchido</StatusPill>
+                      ) : (
+                        <StatusPill tone="neutral">Sem conteúdo</StatusPill>
+                      )
+                    }
+                  />
                 );
               })}
-            </div>
+            </SectionCard>
           )}
-        </motion.div>
+        </section>
 
-        {/* Ferramentas section */}
-        <motion.div variants={fadeUpItem}>
-          <div className="flex items-center justify-between mb-4">
-            <h2 className="text-base font-semibold text-foreground flex items-center gap-2">
-              <Wrench className="h-4 w-4 text-primary" /> Ferramentas do programa
-            </h2>
-            <button onClick={openAdd} className="btn-silver text-xs px-3 py-2 flex items-center gap-1.5 rounded-lg">
-              <Plus className="h-3.5 w-3.5" /> Novo conteúdo
-            </button>
-          </div>
-
-          {!contents || contents.length === 0 ? (
+        <section className="space-y-3">
+          <SectionHeader title="Ferramentas do programa" description="Conteúdos que os membros acessam nas trilhas." />
+          {contentsLoading ? (
+            <LoadingState variant="list" rows={3} />
+          ) : contentsError ? (
+            <ErrorState title="Não foi possível carregar as ferramentas" onRetry={() => refetchContents()} />
+          ) : !contents || contents.length === 0 ? (
             <EmptyState
               icon={Wrench}
               title="Nenhuma ferramenta cadastrada"
               description="Adicione conteúdos para que os membros os acessem nas trilhas."
               action={
-                <button onClick={openAdd} className="btn-silver text-sm px-4 py-2 inline-flex items-center gap-2">
-                  <Plus className="h-4 w-4" /> Adicionar conteúdo
-                </button>
+                <Button onClick={openAdd}>
+                  <Plus aria-hidden /> Adicionar conteúdo
+                </Button>
               }
             />
           ) : (
-            <div className="space-y-2">
-              {contents.map((t: any) => (
-                <div key={t.id} className="glass-card p-4 flex items-center gap-3">
-                  <div className="w-8 h-8 rounded-lg bg-primary/10 flex items-center justify-center shrink-0">
-                    <Wrench className="h-4 w-4 text-primary" />
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-2 flex-wrap">
-                      <span className="text-sm font-medium text-foreground">{t.title}</span>
-                      <span className="text-[10px] px-2 py-0.5 rounded-full bg-muted text-muted-foreground border border-border">{t.content_type}</span>
+            <SectionCard padding="none">
+              {contents.map((t: any, index: number) => (
+                <ListRow
+                  key={t.id}
+                  last={index === contents.length - 1}
+                  leading={
+                    <div className="h-10 w-10 rounded-[var(--ds-radius-md)] bg-primary/10 text-primary flex items-center justify-center">
+                      <Wrench className="h-4 w-4" aria-hidden />
                     </div>
-                    {(t as any).sessions?.name && (
-                      <span className="text-[10px] px-2 py-0.5 rounded-full bg-primary/10 text-primary border border-primary/20 inline-block mt-1">{(t as any).sessions.name}</span>
-                    )}
-                    {t.description && <p className="text-xs text-muted-foreground mt-0.5 truncate">{t.description}</p>}
-                  </div>
-                  <div className="flex items-center gap-1 shrink-0">
-                    {t.url && (
-                      <a href={t.url} target="_blank" rel="noopener noreferrer" className="text-xs text-primary hover:text-silver-light px-2">
-                        Abrir ↗
-                      </a>
-                    )}
-                    <button onClick={() => openEdit(t)} className="p-2 rounded-lg hover:bg-muted text-muted-foreground hover:text-foreground transition-colors">
-                      <Edit className="h-3.5 w-3.5" />
-                    </button>
-                    <button onClick={() => handleDelete(t.id, t.title)} className="p-2 rounded-lg hover:bg-destructive/10 text-muted-foreground hover:text-destructive transition-colors">
-                      <Trash2 className="h-3.5 w-3.5" />
-                    </button>
-                  </div>
-                </div>
+                  }
+                  title={t.title}
+                  subtitle={[contentTypeLabel(t.content_type), t.sessions?.name, t.description].filter(Boolean).join(" · ")}
+                  trailing={
+                    <>
+                      {t.is_public && <StatusPill tone="info" className="hidden sm:inline-flex">Público</StatusPill>}
+                      {t.url && (
+                        <Button asChild variant="ghost" size="sm">
+                          <a href={t.url} target="_blank" rel="noopener noreferrer">
+                            <ExternalLink aria-hidden /> Abrir
+                          </a>
+                        </Button>
+                      )}
+                      <IconButton aria-label={`Editar ${t.title}`} size="sm" onClick={() => openEdit(t)}>
+                        <Edit className="h-4 w-4" />
+                      </IconButton>
+                      <IconButton
+                        aria-label={`Excluir ${t.title}`}
+                        size="sm"
+                        className="hover:text-destructive hover:bg-destructive/10"
+                        onClick={() => setDeleteTarget({ id: t.id, title: t.title })}
+                      >
+                        <Trash2 className="h-4 w-4" />
+                      </IconButton>
+                    </>
+                  }
+                />
               ))}
-            </div>
+            </SectionCard>
           )}
-        </motion.div>
-      </motion.div>
+        </section>
+      </PageContainer>
 
-      {/* Add/Edit Content Dialog */}
-      <Dialog open={formOpen} onOpenChange={setFormOpen}>
-        <DialogContent className="max-w-md">
-          <DialogHeader>
-            <DialogTitle className="text-lg">{editingId ? "Editar conteúdo" : "Novo conteúdo"}</DialogTitle>
-          </DialogHeader>
+      <BottomSheet
+        open={openReportId !== null}
+        onOpenChange={(open) => !open && setOpenReportId(null)}
+        title={openReport?.bookings?.sessions?.name || "Relatório da sessão"}
+        description={
+          openReport
+            ? `${shortName(openReport.bookings?.liberty?.full_name || "Sem dados")} · Mentor: ${shortName(openReport.bookings?.mentor?.full_name || "Sem dados")}${
+                openReport.bookings?.scheduled_date ? ` · ${formatDateBR(openReport.bookings.scheduled_date)}` : ""
+              }`
+            : undefined
+        }
+        size="lg"
+      >
+        {openReport && (
           <div className="space-y-4">
-            <div>
-              <label className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider block mb-1.5">Título *</label>
-              <input value={form.title} onChange={e => setForm(f => ({ ...f, title: e.target.value }))} className="input-begin text-sm h-10 w-full" placeholder="Título" />
+            <div className="flex items-center gap-2">
+              {openReport.summary || openReport.goals || openReport.action_plan ? (
+                <StatusPill tone="success">Preenchido</StatusPill>
+              ) : (
+                <StatusPill tone="neutral">Sem conteúdo</StatusPill>
+              )}
             </div>
-            <div>
-              <label className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider block mb-1.5">Descrição</label>
-              <textarea value={form.description} onChange={e => setForm(f => ({ ...f, description: e.target.value }))} className="input-begin text-sm w-full h-16 resize-none" placeholder="Descrição" />
-            </div>
-            <div className="grid grid-cols-2 gap-3">
-              <div>
-                <label className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider block mb-1.5">Tipo</label>
-                <select value={form.content_type} onChange={e => setForm(f => ({ ...f, content_type: e.target.value }))} className="input-begin text-sm h-10 w-full">
-                  {contentTypes.map(ct => <option key={ct.value} value={ct.value}>{ct.label}</option>)}
-                </select>
+            <ReportField label="Resumo" value={openReport.summary} />
+            <ReportField label="Metas" value={openReport.goals} />
+            <ReportField label="Plano de ação" value={openReport.action_plan} />
+            <ReportField label="Impressões do mentor" value={openReport.mentor_impressions} />
+            {!openReport.summary && !openReport.goals && !openReport.action_plan && !openReport.mentor_impressions && (
+              <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                <Clock className="h-4 w-4" aria-hidden /> O mentor ainda não preencheu este relatório.
               </div>
-              <div>
-                <label className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider block mb-1.5">Sessão vinculada</label>
-                <select value={form.session_id} onChange={e => setForm(f => ({ ...f, session_id: e.target.value }))} className="input-begin text-sm h-10 w-full">
-                  <option value="">Nenhuma</option>
-                  {(sessions || []).map((s: any) => <option key={s.id} value={s.id}>{s.name}</option>)}
-                </select>
+            )}
+            {openReport.summary || openReport.goals || openReport.action_plan ? (
+              <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                <CheckCircle2 className="h-3.5 w-3.5 text-status-green" aria-hidden /> Relatório entregue pelo mentor.
               </div>
-            </div>
-            <div>
-              <label className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider block mb-1.5">URL</label>
-              <input value={form.url} onChange={e => setForm(f => ({ ...f, url: e.target.value }))} className="input-begin text-sm h-10 w-full" placeholder="https://..." />
-            </div>
-            <label className="flex items-center gap-2 text-sm text-foreground cursor-pointer">
-              <input type="checkbox" checked={form.is_public} onChange={e => setForm(f => ({ ...f, is_public: e.target.checked }))} className="rounded border-border" />
-              Conteúdo público
-            </label>
+            ) : null}
           </div>
-          <DialogFooter>
-            <Button variant="ghost" size="sm" onClick={() => setFormOpen(false)}>Cancelar</Button>
-            <Button size="sm" onClick={handleSave} disabled={saving}>{saving ? "Salvando..." : editingId ? "Salvar" : "Criar"}</Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+        )}
+      </BottomSheet>
+
+      <BottomSheet
+        open={formOpen}
+        onOpenChange={setFormOpen}
+        title={editingId ? "Editar conteúdo" : "Novo conteúdo"}
+        locked={saving}
+        footer={
+          <>
+            <Button variant="ghost" onClick={() => setFormOpen(false)} disabled={saving}>Cancelar</Button>
+            <Button onClick={handleSave} disabled={saving}>{saving ? "Salvando..." : editingId ? "Salvar" : "Criar conteúdo"}</Button>
+          </>
+        }
+      >
+        <div className="space-y-4">
+          <TextField
+            label="Título"
+            required
+            value={form.title}
+            onChange={e => setForm(f => ({ ...f, title: e.target.value }))}
+            placeholder="Título"
+          />
+          <TextAreaField
+            label="Descrição"
+            value={form.description}
+            onChange={e => setForm(f => ({ ...f, description: e.target.value }))}
+            className="h-16 resize-none"
+            placeholder="Descrição"
+          />
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <SelectField
+              label="Tipo"
+              value={form.content_type}
+              onChange={e => setForm(f => ({ ...f, content_type: e.target.value }))}
+            >
+              {contentTypes.map(ct => <option key={ct.value} value={ct.value}>{ct.label}</option>)}
+            </SelectField>
+            <SelectField
+              label="Sessão vinculada"
+              value={form.session_id}
+              onChange={e => setForm(f => ({ ...f, session_id: e.target.value }))}
+            >
+              <option value="">Nenhuma</option>
+              {(sessions || []).map((s: any) => <option key={s.id} value={s.id}>{s.name}</option>)}
+            </SelectField>
+          </div>
+          <TextField
+            label="URL"
+            type="url"
+            inputMode="url"
+            value={form.url}
+            onChange={e => setForm(f => ({ ...f, url: e.target.value }))}
+            placeholder="https://..."
+          />
+          <div className="flex items-center justify-between gap-3 min-h-[44px]">
+            <label htmlFor="content-public" className="text-sm font-medium text-foreground cursor-pointer flex-1">Conteúdo público</label>
+            <Switch id="content-public" checked={form.is_public} onCheckedChange={(v) => setForm(f => ({ ...f, is_public: v }))} />
+          </div>
+        </div>
+      </BottomSheet>
+
+      <ConfirmDialog
+        open={deleteTarget !== null}
+        onOpenChange={(open) => !open && setDeleteTarget(null)}
+        title="Excluir conteúdo?"
+        description={deleteTarget ? `"${deleteTarget.title}" deixará de aparecer para os membros. Essa ação não pode ser desfeita.` : undefined}
+        confirmLabel="Excluir"
+        destructive
+        loading={deleting}
+        onConfirm={() => deleteTarget && handleDelete(deleteTarget.id)}
+      />
     </AppLayout>
   );
 };

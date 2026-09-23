@@ -1,8 +1,7 @@
 import { useMemo, useState } from "react";
-import { Link } from "react-router-dom";
+import { useNavigate } from "react-router-dom";
 import { AppLayout } from "@/components/AppLayout";
 import { useMembers } from "@/hooks/useAdminData";
-import { EmptyState } from "@/components/EmptyState";
 import { UserAvatar } from "@/components/UserAvatar";
 import { shortName } from "@/lib/formatName";
 import { supabase } from "@/integrations/supabase/client";
@@ -10,6 +9,20 @@ import { useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { CalendarClock, AlertTriangle, Save, ChevronLeft, ChevronRight } from "lucide-react";
+import {
+  PageContainer,
+  PageHeader,
+  SectionHeader,
+  SectionCard,
+  ListRow,
+  StatusPill,
+  IconButton,
+  TextField,
+  LoadingState,
+  EmptyState,
+  ErrorState,
+} from "@/components/ds";
+import type { PillTone } from "@/components/ds";
 
 const MONTHS_PT = [
   "Janeiro", "Fevereiro", "Março", "Abril", "Maio", "Junho",
@@ -22,16 +35,17 @@ const monthLabel = (key: string) => {
   return `${MONTHS_PT[m - 1]} ${y}`;
 };
 
-const memberPace = (member: any, key: string) => {
+const memberPace = (member: any, key: string): { label: string; tone: PillTone } => {
   const count = member.monthly_counts?.[key] || 0;
-  if (count >= 2) return { label: "No ritmo", card: "border-status-green/35 bg-status-green/10", badge: "bg-status-green/15 text-status-green" };
-  if (count === 1) return { label: "Parcial", card: "border-status-yellow/40 bg-status-yellow/10", badge: "bg-status-yellow/15 text-status-yellow" };
-  return { label: "Sem sessão", card: "border-destructive/35 bg-destructive/10", badge: "bg-destructive/15 text-destructive" };
+  if (count >= 2) return { label: "No ritmo", tone: "success" };
+  if (count === 1) return { label: "Parcial", tone: "warning" };
+  return { label: "Sem sessão", tone: "danger" };
 };
 
 const AdminEncerramentosPage = () => {
-  const { data: members, isLoading } = useMembers();
+  const { data: members, isLoading, isError, refetch } = useMembers();
   const queryClient = useQueryClient();
+  const navigate = useNavigate();
   const now = new Date();
   const [anchor, setAnchor] = useState<Date>(new Date(now.getFullYear(), now.getMonth(), 1));
   const [savingId, setSavingId] = useState<string | null>(null);
@@ -107,199 +121,182 @@ const AdminEncerramentosPage = () => {
     }
   };
 
+  const currentKey = monthKey(new Date(now.getFullYear(), now.getMonth(), 1));
+
   return (
     <AppLayout role="admin">
-      <div className="max-w-[1600px] mx-auto space-y-6">
-        <header className="flex flex-col sm:flex-row sm:items-end sm:justify-between gap-3">
-          <div>
-            <h1 className="text-2xl font-semibold flex items-center gap-2">
-              <CalendarClock className="h-6 w-6 text-primary" />
-              Encerramentos do Programa
-            </h1>
-            <p className="text-sm text-muted-foreground mt-1">
-              Visão Kanban mês a mês de quando cada membro <strong>Begin</strong> conclui o programa. Membros Liberty não expiram e ficam de fora.
-            </p>
-          </div>
-          <div className="flex items-center gap-2">
-            <Button variant="outline" size="sm" onClick={() => shift(-1)} className="h-9 px-2">
-              <ChevronLeft className="h-4 w-4" />
-            </Button>
-            <div className="text-sm font-medium min-w-[220px] text-center px-3 py-2 rounded-lg bg-muted capitalize">
-              {monthLabel(monthKeys[0])} → {monthLabel(monthKeys[monthKeys.length - 1])}
-            </div>
-            <Button variant="outline" size="sm" onClick={() => shift(1)} className="h-9 px-2">
-              <ChevronRight className="h-4 w-4" />
-            </Button>
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={() => setAnchor(new Date(now.getFullYear(), now.getMonth(), 1))}
-            >
-              Hoje
-            </Button>
-          </div>
-        </header>
+      <PageContainer>
+        <PageHeader
+          title="Encerramentos do programa"
+          description="Visão mês a mês de quando cada membro Begin conclui o programa. Membros Liberty não expiram e ficam de fora."
+          actions={
+            <>
+              <IconButton aria-label="Período anterior" variant="outline" onClick={() => shift(-1)}>
+                <ChevronLeft className="h-4 w-4" />
+              </IconButton>
+              <span className="hidden md:inline-block text-sm font-medium text-foreground text-center px-3 min-w-[200px]">
+                {monthLabel(monthKeys[0])} a {monthLabel(monthKeys[monthKeys.length - 1])}
+              </span>
+              <IconButton aria-label="Próximo período" variant="outline" onClick={() => shift(1)}>
+                <ChevronRight className="h-4 w-4" />
+              </IconButton>
+              <Button variant="ghost" onClick={() => setAnchor(new Date(now.getFullYear(), now.getMonth(), 1))}>
+                Hoje
+              </Button>
+            </>
+          }
+        />
+
+        <p className="md:hidden text-sm font-medium text-foreground -mt-2">
+          {monthLabel(monthKeys[0])} a {monthLabel(monthKeys[monthKeys.length - 1])}
+        </p>
 
         {isLoading ? (
-          <div className="text-sm text-muted-foreground">Carregando…</div>
+          <LoadingState variant="cards" rows={3} />
+        ) : isError ? (
+          <ErrorState title="Não foi possível carregar os encerramentos" onRetry={() => refetch()} />
         ) : (
           <>
-            {/* Kanban */}
-            <div className="overflow-x-auto pb-2">
-              <div className="grid grid-flow-col auto-cols-[minmax(260px,1fr)] gap-4 min-w-full">
+            <div className="overflow-x-auto pb-2 -mx-4 px-4 sm:mx-0 sm:px-0">
+              <div className="grid grid-flow-col auto-cols-[minmax(272px,1fr)] gap-4 min-w-full">
                 {monthKeys.map((key) => {
                   const items = grouped[key] || [];
+                  const isCurrent = key === currentKey;
                   return (
-                    <div
-                      key={key}
-                      className="rounded-xl border border-border bg-card/50 flex flex-col min-h-[300px]"
-                    >
-                      <div className="px-4 py-3 border-b border-border flex items-center justify-between sticky top-0 bg-card/80 backdrop-blur rounded-t-xl">
-                        <div>
-                          <div className="text-sm font-semibold capitalize">{monthLabel(key)}</div>
-                          <div className="text-xs text-muted-foreground">
-                            {items.length} {items.length === 1 ? "membro" : "membros"}
-                          </div>
-                        </div>
-                        <div className="h-8 w-8 rounded-full bg-primary/10 text-primary flex items-center justify-center text-sm font-semibold">
+                    <SectionCard key={key} padding="none" as="section" className="flex flex-col min-h-[300px]" tone={isCurrent ? "brand" : "default"}>
+                      <div className="px-4 py-3 border-b border-border flex items-center justify-between gap-3">
+                        <SectionHeader
+                          as="h3"
+                          title={monthLabel(key)}
+                          description={`${items.length} ${items.length === 1 ? "membro" : "membros"}`}
+                        />
+                        <StatusPill tone={items.length > 0 ? "brand" : "neutral"} withDot={false} size="md">
                           {items.length}
-                        </div>
+                        </StatusPill>
                       </div>
-                      <div className="p-3 space-y-2 flex-1">
+                      <div className="flex-1">
                         {items.length === 0 ? (
-                          <div className="text-xs text-muted-foreground text-center py-8">
-                            Nenhum encerramento
-                          </div>
+                          <p className="text-xs text-muted-foreground text-center py-10 px-4">Nenhum encerramento</p>
                         ) : (
-                          items.map((m) => {
+                          items.map((m, index) => {
                             const day = (m.program_end_date || "").slice(8, 10);
                             const pace = memberPace(m, key);
                             return (
-                              <Link
+                              <ListRow
                                 key={m.id}
-                                to={`/admin/membros/${m.id}/editar`}
-                                className={`block rounded-lg border hover:shadow-sm transition-all p-3 ${pace.card}`}
-                              >
-                                <div className="flex items-center gap-3">
-                                  <UserAvatar
-                                    name={m.full_name}
-                                    avatarUrl={m.avatar_url || undefined}
-                                    size={36}
-                                  />
-                                  <div className="min-w-0 flex-1">
-                                    <div className="text-sm font-medium truncate">
-                                      {shortName(m.full_name)}
-                                    </div>
-                                    <div className="text-xs text-muted-foreground truncate">
-                                      {m.company_name || "Sem dados"}
-                                    </div>
-                                  </div>
-                                  <div className="text-right">
-                                    <div className="text-[10px] uppercase text-muted-foreground">Dia</div>
-                                    <div className="text-sm font-semibold text-primary">{day}</div>
-                                  </div>
-                                </div>
-                                <div className="mt-2 flex items-center gap-1.5 text-[11px]">
-                                  <span className={`px-2 py-0.5 rounded-full font-medium ${pace.badge}`}>
-                                    {pace.label}
+                                last={index === items.length - 1}
+                                onPress={() => navigate(`/admin/membros/${m.id}/editar`)}
+                                leading={<UserAvatar name={m.full_name} avatarUrl={m.avatar_url || undefined} size={40} />}
+                                title={shortName(m.full_name)}
+                                subtitle={
+                                  <span className="flex items-center gap-1.5">
+                                    <span className="tabular-nums">Dia {day}</span>
+                                    <span aria-hidden>·</span>
+                                    <span className="tabular-nums">{m.total_completed}/12 sessões</span>
+                                    {m.company_name && (
+                                      <>
+                                        <span aria-hidden>·</span>
+                                        <span className="truncate">{m.company_name}</span>
+                                      </>
+                                    )}
                                   </span>
-                                  {!m.has_next_session && (
-                                    <span className="px-2 py-0.5 rounded-full bg-destructive/15 text-destructive">Sem próxima sessão</span>
-                                  )}
-                                  <span className="text-muted-foreground">
-                                    {m.total_completed}/12 sessões
+                                }
+                                trailing={
+                                  <span className="flex flex-col items-end gap-1">
+                                    <StatusPill tone={pace.tone}>{pace.label}</StatusPill>
+                                    {!m.has_next_session && (
+                                      <StatusPill tone="danger" withDot={false}>Sem próxima sessão</StatusPill>
+                                    )}
                                   </span>
-                                </div>
-                              </Link>
+                                }
+                              />
                             );
                           })
                         )}
                       </div>
-                    </div>
+                    </SectionCard>
                   );
                 })}
               </div>
             </div>
 
             {outOfWindow.length > 0 && (
-              <div className="text-xs text-muted-foreground">
+              <p className="text-xs text-muted-foreground">
                 + {outOfWindow.length} membro(s) encerram fora deste período. Use as setas para navegar.
-              </div>
+              </p>
             )}
 
-            {/* Missing dates */}
-            <section className="rounded-xl border border-amber-500/30 bg-amber-500/5">
-              <div className="px-4 py-3 border-b border-amber-500/20 flex items-center gap-2">
-                <AlertTriangle className="h-4 w-4 text-amber-500" />
-                <h2 className="text-sm font-semibold">
-                  Sem datas definidas ({missing.length})
-                </h2>
-              </div>
+            <section className="space-y-3">
+              <SectionHeader
+                title={`Sem datas definidas (${missing.length})`}
+                description="Membros Begin ativos sem data de início ou de término do programa."
+              />
               {missing.length === 0 ? (
-                <div className="p-6">
-                  <EmptyState
-                    icon={CalendarClock}
-                    title="Todos os membros com datas!"
-                    description="Nenhum membro sem data de início ou término."
-                  />
-                </div>
+                <EmptyState
+                  icon={CalendarClock}
+                  compact
+                  title="Todos os membros com datas"
+                  description="Nenhum membro sem data de início ou término."
+                />
               ) : (
-                <div className="divide-y divide-border">
-                  {missing.map((m) => {
+                <SectionCard padding="none" tone="warning">
+                  <div className="px-4 py-3 border-b border-border flex items-center gap-2 text-sm text-status-yellow">
+                    <AlertTriangle className="h-4 w-4" aria-hidden />
+                    <span className="font-medium">Defina as datas para que o membro entre no planejamento.</span>
+                  </div>
+                  {missing.map((m, index) => {
                     const d = drafts[m.id] || {
                       start: m.program_start_date || "",
                       end: m.program_end_date || "",
                     };
                     const dirty = !!drafts[m.id];
+                    const busy = savingId === m.id;
                     return (
-                      <div key={m.id} className="p-3 flex flex-col md:flex-row md:items-center gap-3">
-                        <div className="flex items-center gap-3 flex-1 min-w-0">
-                          <UserAvatar name={m.full_name} avatarUrl={m.avatar_url || undefined} size={36} />
+                      <div
+                        key={m.id}
+                        className={`px-4 py-3 flex flex-col md:flex-row md:items-end gap-3 ${index < missing.length - 1 ? "border-b border-border" : ""}`}
+                      >
+                        <div className="flex items-center gap-3 flex-1 min-w-0 md:pb-2">
+                          <UserAvatar name={m.full_name} avatarUrl={m.avatar_url || undefined} size={40} />
                           <div className="min-w-0">
-                            <div className="text-sm font-medium truncate">{shortName(m.full_name)}</div>
-                            <div className="text-xs text-muted-foreground truncate">
-                              {m.company_name || m.email || "Sem dados"}
-                            </div>
+                            <p className="text-sm font-medium text-foreground truncate">{shortName(m.full_name)}</p>
+                            <p className="text-xs text-muted-foreground truncate">{m.company_name || m.email || "Sem dados"}</p>
                           </div>
                         </div>
-                        <div className="flex flex-wrap items-center gap-2">
-                          <label className="text-xs text-muted-foreground flex flex-col">
-                            Início
-                            <input
-                              type="date"
-                              value={d.start}
-                              onChange={(e) => setDraft(m.id, { start: e.target.value })}
-                              className="mt-1 h-9 rounded-md border border-border bg-background px-2 text-sm"
-                            />
-                          </label>
-                          <label className="text-xs text-muted-foreground flex flex-col">
-                            Término
-                            <input
-                              type="date"
-                              value={d.end}
-                              onChange={(e) => setDraft(m.id, { end: e.target.value })}
-                              className="mt-1 h-9 rounded-md border border-border bg-background px-2 text-sm"
-                            />
-                          </label>
+                        <div className="grid grid-cols-2 gap-3 md:flex md:items-end">
+                          <TextField
+                            label="Início"
+                            type="date"
+                            value={d.start}
+                            onChange={(e) => setDraft(m.id, { start: e.target.value })}
+                            containerClassName="md:w-44"
+                          />
+                          <TextField
+                            label="Término"
+                            type="date"
+                            value={d.end}
+                            onChange={(e) => setDraft(m.id, { end: e.target.value })}
+                            containerClassName="md:w-44"
+                          />
                           <Button
                             size="sm"
                             onClick={() => saveDates(m.id)}
-                            disabled={!dirty || savingId === m.id}
-                            className="h-9 mt-4"
+                            disabled={!dirty || busy}
+                            className="col-span-2 md:col-span-1 md:mb-1"
                           >
-                            <Save className="h-3.5 w-3.5 mr-1" />
-                            {savingId === m.id ? "Salvando…" : "Salvar"}
+                            <Save aria-hidden />
+                            {busy ? "Salvando..." : "Salvar"}
                           </Button>
                         </div>
                       </div>
                     );
                   })}
-                </div>
+                </SectionCard>
               )}
             </section>
           </>
         )}
-      </div>
+      </PageContainer>
     </AppLayout>
   );
 };

@@ -122,11 +122,11 @@ export const TrailPath = ({ answers, onSelect, activeIndex }: Props) => {
               <span
                 className={`absolute w-16 sm:w-28 text-center ${below ? "top-[38px] sm:top-[62px]" : "bottom-[38px] sm:bottom-[62px]"}`}
               >
-                <span className="block text-[9px] sm:text-[11px] font-semibold text-foreground leading-tight">
+                <span className="block text-[11px] sm:text-xs font-semibold text-foreground leading-tight">
                   {n.isGoal ? "Mapeamento concluído" : n.pillar.short}
                 </span>
                 {!n.isGoal && (
-                  <span className="block text-[9px] sm:text-[10px] text-muted-foreground tabular-nums">
+                  <span className="block text-[11px] sm:text-xs text-muted-foreground tabular-nums">
                     {count}/{n.pillar.questions.length}
                   </span>
                 )}

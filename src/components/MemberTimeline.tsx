@@ -1,12 +1,24 @@
 import { useMemo, useState } from "react";
-import { CalendarDays, Target, FileText, TrendingUp, TrendingDown, Minus, Star, Lock, LockOpen } from "lucide-react";
-import { getEffectiveBookingStatus } from "@/lib/bookingStatus";
+import { CalendarDays, Target, FileText, TrendingUp, TrendingDown, Minus, Star, Lock, LockOpen, CheckCircle2, XCircle, FileWarning } from "lucide-react";
+import { useQueryClient } from "@tanstack/react-query";
+import { toast } from "sonner";
+import { supabase } from "@/integrations/supabase/client";
+import {
+  bookingRequiresReport,
+  bookingStatusConfig,
+  daysSinceBookingEnd,
+  getEffectiveBookingStatus,
+  isBookingPast,
+  isPendingConfirmationOverdue,
+  isVisibleSessionBooking,
+  PENDING_CONFIRMATION_HINT,
+} from "@/lib/bookingStatus";
+import { translateBookingError } from "@/components/MemberSessionEditor";
 import { shortName } from "@/lib/formatName";
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Button } from "@/components/ui/button";
+import { BottomSheet, Callout, ConfirmDialog, EmptyState, SectionCard, SectionHeader, StatusPill } from "@/components/ds";
 import { useNavigate } from "react-router-dom";
 import { ResponsiveContainer, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip } from "recharts";
-
-
 
 interface Booking {
   id: string;
@@ -14,7 +26,12 @@ interface Booking {
   mentor_id?: string | null;
   scheduled_date: string;
   start_time?: string | null;
+  end_time?: string | null;
   status: string;
+  is_retroactive?: boolean | null;
+  report_required?: boolean | null;
+  /** Vem do join `sessions(is_kickoff, name, order, duration_minutes)` quando o caller o traz. */
+  sessions?: { is_kickoff?: boolean | null; name?: string | null; order?: number | null; duration_minutes?: number | null } | null;
 }
 
 interface Props {
@@ -28,6 +45,10 @@ interface Props {
   hideReportButton?: boolean;
   /** Ids das sessões que compõem a jornada (order > 0). Onboarding fica de fora. */
   journeySessionIds?: Set<string> | string[];
+  /** Ids das sessões de Mapeamento (kickoff), para callers cujo select não traz `sessions(is_kickoff)`. */
+  kickoffSessionIds?: Set<string> | string[];
+  /** Chamado após o admin/mentor fechar uma sessão "A confirmar" pelo modal. */
+  onChanged?: () => void;
 }
 
 const fmtDate = (iso?: string | null) => {
@@ -38,10 +59,13 @@ const fmtDate = (iso?: string | null) => {
 
 export const MemberTimeline = ({
   profile, bookings, sessionNames, mentorNames, reports, reportRoute,
-  totalSessions = 12, hideReportButton = false, journeySessionIds,
+  totalSessions = 12, hideReportButton = false, journeySessionIds, kickoffSessionIds, onChanged,
 }: Props) => {
   const navigate = useNavigate();
+  const queryClient = useQueryClient();
   const [openBookingId, setOpenBookingId] = useState<string | null>(null);
+  const [closing, setClosing] = useState(false);
+  const [pendingClose, setPendingClose] = useState<{ booking: Booking; status: "completed" | "not_realized" } | null>(null);
 
   const explicitStart = profile?.program_start_date ? new Date(profile.program_start_date + "T12:00:00") : null;
   const explicitEnd = profile?.program_end_date ? new Date(profile.program_end_date + "T12:00:00") : null;
@@ -53,40 +77,40 @@ export const MemberTimeline = ({
   const startDate = explicitStart ?? new Date();
   const endDate = explicitEnd ?? new Date(startDate.getFullYear(), startDate.getMonth() + projectedMonths, startDate.getDate());
 
-  // A jornada tem 12 sessões e começa no Mapeamento do Negócio.
-  // O Onboarding (order 0) NUNCA entra na trilha nem ocupa o slot 1.
+  // A jornada tem 12 sessões. O Onboarding (order 0) NUNCA entra na trilha.
   const journeyIds = useMemo(
-    () => (journeySessionIds ? new Set(Array.from(journeySessionIds as any)) : null),
+    () => (journeySessionIds ? new Set(Array.from(journeySessionIds as Iterable<string>)) : null),
     [journeySessionIds]
   );
+  const kickoffIds = useMemo(
+    () => (kickoffSessionIds ? new Set(Array.from(kickoffSessionIds as Iterable<string>)) : null),
+    [kickoffSessionIds]
+  );
 
+  // A estrela depende de `sessions.is_kickoff`, nunca da posição na trilha (alguns membros nunca fazem o Mapeamento).
+  const isKickoffBooking = (b: Booking) => b.sessions?.is_kickoff === true || Boolean(kickoffIds?.has(b.session_id));
+
+  // Numeração CRONOLÓGICA: a 1ª sessão que aconteceu é a bolinha 1.
   const chronological = useMemo(() => [...bookings]
-    .filter((b) => getEffectiveBookingStatus(b) !== "cancelled")
+    .filter(isVisibleSessionBooking)
     .filter((b) => {
       if (journeyIds) return journeyIds.has(b.session_id);
       // Fallback: sem os ids da jornada, exclui pelo nome da sessão.
-      return !/^onboarding$/i.test((sessionNames[b.session_id] || "").trim());
+      return !/^onboarding$/i.test((sessionNames[b.session_id] || b.sessions?.name || "").trim());
     })
     .sort((a, b) => `${a.scheduled_date}T${a.start_time || ""}`.localeCompare(`${b.scheduled_date}T${b.start_time || ""}`)),
   [bookings, journeyIds, sessionNames]);
 
-
   const statusFor = (booking: Booking) => getEffectiveBookingStatus(booking, { hasReport: Boolean(reports[booking.id]) });
-  const reachedCount = chronological.filter((b) => {
-    const status = statusFor(b);
-    return status === "completed" || status === "awaiting_report";
-  }).length;
-  const completedCount = chronological.filter((b) => statusFor(b) === "completed").length;
+  const isRealized = (status: string) => status === "completed" || status === "awaiting_report";
+  const reachedCount = chronological.filter((b) => isRealized(statusFor(b))).length;
   const progressPct = Math.min(100, Math.round((reachedCount / totalSessions) * 100));
 
   // Monthly cadence: each month of the program expects 2 sessions.
   const monthCycles = useMemo(() => {
     const endTs = endDate.getTime();
     const done = chronological
-      .filter((b) => {
-        const status = statusFor(b);
-        return status === "completed" || status === "awaiting_report";
-      })
+      .filter((b) => isRealized(statusFor(b)))
       .map((b) => new Date(b.scheduled_date + "T12:00:00").getTime())
       .sort((a, b) => a - b);
 
@@ -108,8 +132,6 @@ export const MemberTimeline = ({
     return cycles;
   }, [chronological, startDate, endDate, totalSessions, reports]);
 
-
-
   // Cumulative chart: projected 2/month vs realized
   const chartData = useMemo(() => {
     const now = Date.now();
@@ -127,51 +149,62 @@ export const MemberTimeline = ({
   }, [monthCycles, totalSessions]);
 
   const paceInfo = useMemo(() => {
-    if (!startDate || !endDate) return null;
-    const now = Date.now();
+    // Sem datas do programa não há ritmo esperado; não inventar "Atrasado" com datas fictícias.
+    if (!hasProgramDates) return null;
+    const now = new Date();
     const start = startDate.getTime();
-    const end = endDate.getTime();
-    if (now < start) return { label: "Ainda não iniciou", tone: "neutral" as const, expected: 0 };
-    const elapsedMonths = Math.max(0, (new Date(now).getFullYear() - startDate.getFullYear()) * 12 + new Date(now).getMonth() - startDate.getMonth());
+    if (now.getTime() < start) return { label: "Ainda não iniciou", tone: "neutral" as const, expected: 0 };
+    let elapsedMonths = (now.getFullYear() - startDate.getFullYear()) * 12 + now.getMonth() - startDate.getMonth();
+    if (now.getDate() < startDate.getDate()) elapsedMonths -= 1; // mês corrente ainda não fechou
+    elapsedMonths = Math.max(0, elapsedMonths);
     const expected = Math.min(totalSessions, elapsedMonths * 2);
     const diff = reachedCount - expected;
     if (diff >= 1) return { label: `Adiantado (+${diff})`, tone: "green" as const, expected };
     if (diff <= -1) return { label: `Atrasado (${diff})`, tone: "red" as const, expected };
     return { label: "No ritmo", tone: "neutral" as const, expected };
-  }, [startDate, endDate, reachedCount, totalSessions]);
+  }, [hasProgramDates, startDate, reachedCount, totalSessions]);
 
   const openBooking = openBookingId ? chronological.find((b) => b.id === openBookingId) : null;
   const openBookingIndex = openBooking ? chronological.findIndex((b) => b.id === openBooking.id) + 1 : 0;
   const openReport = openBooking ? reports[openBooking.id] : null;
+  const openStatus = openBooking ? statusFor(openBooking) : null;
 
   const paceIcon = paceInfo?.tone === "green" ? TrendingUp : paceInfo?.tone === "red" ? TrendingDown : Minus;
   const paceColor = paceInfo?.tone === "green" ? "text-status-green" : paceInfo?.tone === "red" ? "text-destructive" : "text-muted-foreground";
 
-
   const statusMeta = (status: string) => {
+    const cfg = bookingStatusConfig[status];
     switch (status) {
-      case "completed": return { label: "Realizada", color: "hsl(var(--status-green))", chip: "bg-status-green/15 text-status-green border-status-green/30" };
-      case "awaiting_report": return { label: "Realizada · aguardando relatório", color: "hsl(var(--status-green))", chip: "bg-status-yellow/15 text-status-yellow border-status-yellow/30" };
-      case "not_realized": return { label: "Não realizada", color: "hsl(var(--destructive))", chip: "bg-destructive/15 text-destructive border-destructive/30" };
-      case "pending_approval": return { label: "Pendente", color: "hsl(var(--status-yellow))", chip: "bg-status-yellow/15 text-status-yellow border-status-yellow/30" };
-      default: return { label: "Agendada", color: "hsl(var(--status-blue))", chip: "bg-status-blue/15 text-status-blue border-status-blue/30" };
+      case "completed":
+        return { label: cfg.label, color: "hsl(var(--status-green))", chip: "bg-status-green/15 text-status-green border-status-green/30" };
+      case "awaiting_report":
+        return { label: cfg.label, color: "hsl(var(--status-green))", chip: "bg-status-green/15 text-status-green border-status-green/30" };
+      case "pending_confirmation":
+        return { label: cfg.label, color: "hsl(var(--status-orange))", chip: "bg-status-orange/15 text-status-orange border-status-orange/30" };
+      case "not_realized":
+        return { label: cfg.label, color: "hsl(var(--destructive))", chip: "bg-destructive/15 text-destructive border-destructive/30" };
+      case "pending_approval":
+        return { label: cfg.label, color: "hsl(var(--status-yellow))", chip: "bg-status-yellow/15 text-status-yellow border-status-yellow/30" };
+      default:
+        return { label: "Agendada", color: "hsl(var(--status-blue))", chip: "bg-status-blue/15 text-status-blue border-status-blue/30" };
     }
   };
 
-  // 12 fixed slots: fill with actual bookings in order, remaining slots stay empty
+  // 12 fixed slots: fill with actual bookings in chronological order, remaining slots stay empty
   const slots = useMemo(() => {
     return Array.from({ length: totalSessions }, (_, i) => {
       const b = chronological[i];
       if (!b) return { index: i + 1, booking: null as Booking | null, status: "empty" as string };
       return { index: i + 1, booking: b, status: statusFor(b) };
     });
-  }, [chronological, totalSessions]);
+  }, [chronological, totalSessions, reports]);
 
   const slotCounts = useMemo(() => {
-    const c = { completed: 0, scheduled: 0, pending: 0, not_realized: 0, empty: 0 };
+    const c = { completed: 0, pending_confirmation: 0, scheduled: 0, pending: 0, not_realized: 0, empty: 0 };
     slots.forEach((s) => {
       if (!s.booking) c.empty++;
-      else if (s.status === "completed" || s.status === "awaiting_report") c.completed++;
+      else if (isRealized(s.status)) c.completed++;
+      else if (s.status === "pending_confirmation") c.pending_confirmation++;
       else if (s.status === "pending_approval") c.pending++;
       else if (s.status === "not_realized") c.not_realized++;
       else c.scheduled++;
@@ -179,48 +212,91 @@ export const MemberTimeline = ({
     return c;
   }, [slots]);
 
+  const hasKickoffInTrack = chronological.some(isKickoffBooking);
 
-  const noDataYet = !startDate && chronological.length === 0;
+  /** Fechamento de uma sessão "A confirmar" pelo admin/mentor: realizada (sem relatório) ou não realizada. */
+  const closePending = (booking: Booking, status: "completed" | "not_realized") => {
+    setPendingClose({ booking, status });
+  };
+
+  const performClosePending = async (booking: Booking, status: "completed" | "not_realized") => {
+    setClosing(true);
+    try {
+      const { error } = await supabase
+        .from("bookings")
+        .update({ status, ...(status === "completed" ? { approval_required: false } : {}) })
+        .eq("id", booking.id);
+      if (error) throw error;
+      toast.success(status === "completed" ? "Sessão marcada como realizada" : "Sessão marcada como não realizada");
+      setOpenBookingId(null);
+      queryClient.invalidateQueries({ queryKey: ["admin-members"] });
+      queryClient.invalidateQueries({ queryKey: ["member-bookings-manager"] });
+      onChanged?.();
+    } catch (e) {
+      const err = e as { message?: string };
+      toast.error(translateBookingError(err) || "Erro ao atualizar: " + (err?.message ?? "erro desconhecido"));
+    } finally {
+      setClosing(false);
+    }
+  };
+
+  const pendingCloseLabel = pendingClose
+    ? sessionNames[pendingClose.booking.session_id] || pendingClose.booking.sessions?.name || "Sessão"
+    : "";
+
+  const canFillReport = (b: Booking) => bookingRequiresReport(b) && isBookingPast(b) && !reports[b.id];
+
+  const PaceIcon = paceIcon;
+  const paceTone: "success" | "danger" | "neutral" = paceInfo?.tone === "green" ? "success" : paceInfo?.tone === "red" ? "danger" : "neutral";
+
+  const summaryItems = [
+    { key: "completed", n: slotCounts.completed, label: "Realizadas", hint: "Confirmadas pelo mentor", dot: "bg-status-green border-status-green", text: "text-status-green" },
+    { key: "pending_confirmation", n: slotCounts.pending_confirmation, label: "A confirmar", hint: "Passaram do horário, sem confirmação", dot: "border-status-orange", text: "text-status-orange" },
+    { key: "scheduled", n: slotCounts.scheduled, label: "Agendadas", hint: "Data confirmada", dot: "border-status-blue", text: "text-status-blue" },
+    { key: "pending", n: slotCounts.pending, label: "Pendentes", hint: "Aguardando o mentor aceitar", dot: "border-status-yellow", text: "text-status-yellow" },
+    { key: "not_realized", n: slotCounts.not_realized, label: "Não realizadas", hint: "Aluno ou mentor faltou", dot: "border-destructive", text: "text-destructive" },
+    { key: "empty", n: slotCounts.empty, label: "A agendar", hint: "Sessões que faltam marcar", dot: "border-dashed border-border", text: "text-muted-foreground" },
+  ].filter((i) => i.n > 0);
 
   return (
     <>
-      <div className="rounded-2xl border border-border bg-card/70 p-5 md:p-6 space-y-6">
+      <SectionCard as="section" className="space-y-6">
         {/* Header */}
-        <div className="flex items-start justify-between gap-4 flex-wrap">
-          <div className="space-y-1.5">
-            <div className="flex items-center gap-2 text-primary text-[10px] font-semibold uppercase tracking-wider">
-              <Target className="h-3.5 w-3.5" /> Jornada
-            </div>
-            <h2 className="text-lg font-semibold text-foreground leading-tight">Linha do tempo</h2>
-            <p className="text-xs text-muted-foreground">
-              {profile?.program_start_date ? (
-                <>
-                  Início {fmtDate(profile.program_start_date)}
-                  {profile?.program_end_date && ` · término ${fmtDate(profile.program_end_date)}`}
-                </>
-              ) : (
-                "Datas do programa ainda não definidas"
-              )}
-            </p>
-          </div>
-          {paceInfo && (
-            <div className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-border bg-background/40 text-xs font-semibold ${paceColor}`}>
-              {(() => { const Icon = paceIcon; return <Icon className="h-3.5 w-3.5" />; })()}
-              {paceInfo.label}
-            </div>
-          )}
-        </div>
+        <SectionHeader
+          title={
+            <span className="inline-flex items-center gap-2">
+              <Target className="h-4 w-4 text-primary" aria-hidden /> Linha do tempo
+            </span>
+          }
+          description={
+            profile?.program_start_date ? (
+              <>
+                Início {fmtDate(profile.program_start_date)}
+                {profile?.program_end_date && ` · término ${fmtDate(profile.program_end_date)}`}
+              </>
+            ) : (
+              "Datas do programa ainda não definidas"
+            )
+          }
+          actions={
+            paceInfo ? (
+              <StatusPill tone={paceTone === "neutral" ? "neutral" : paceTone} withDot={false}>
+                <PaceIcon className="h-3.5 w-3.5" aria-hidden /> {paceInfo.label}
+              </StatusPill>
+            ) : undefined
+          }
+        />
 
-        {/* Projetado x Realizado — gráfico acumulado (2 sessões/mês) */}
+        {/* Projetado x Realizado: gráfico acumulado (2 sessões/mês) */}
         {hasProgramDates ? (
           <div className="space-y-3">
             <div className="flex items-center justify-between gap-3 flex-wrap">
               <p className="text-xs text-muted-foreground">
                 Projetado: <span className="text-foreground font-medium">2 sessões por mês</span> · 12 sessões em 6 meses
               </p>
-              <div className="flex items-center gap-3 text-[10px] text-muted-foreground">
-                <span className="flex items-center gap-1"><span className="h-0.5 w-4 rounded bg-status-green" /> realizado</span>
-                <span className="flex items-center gap-1"><span className="h-0.5 w-4 rounded bg-muted-foreground/60" style={{ backgroundImage: "repeating-linear-gradient(90deg,currentColor 0 3px,transparent 3px 6px)" }} /> projetado</span>
+              <div className="flex items-center gap-3 text-xs text-muted-foreground">
+                <span className="flex items-center gap-1.5"><span className="h-0.5 w-4 rounded bg-status-green" aria-hidden /> Realizado</span>
+                <span className="flex items-center gap-1.5"><span className="h-0.5 w-4 rounded border-t-2 border-dashed border-muted-foreground" aria-hidden /> Projetado</span>
               </div>
             </div>
 
@@ -266,7 +342,7 @@ export const MemberTimeline = ({
               </ResponsiveContainer>
             </div>
 
-            <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-[11px] text-muted-foreground">
+            <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-muted-foreground">
               <span>
                 Acumulado: <span className="text-foreground font-medium tabular-nums">{reachedCount} de {totalSessions}</span>
               </span>
@@ -275,170 +351,248 @@ export const MemberTimeline = ({
             </div>
           </div>
         ) : (
-          <div className="rounded-xl border border-dashed border-border bg-background/40 p-6 text-center text-xs text-muted-foreground">
-            Defina a <span className="text-foreground font-medium">data de início</span> e <span className="text-foreground font-medium">término</span> do programa deste aluno para exibir a linha do tempo.
-          </div>
-
+          <EmptyState
+            compact
+            icon={CalendarDays}
+            title="Datas do programa não definidas"
+            description="Defina a data de início e término do programa deste aluno para exibir a linha do tempo."
+          />
         )}
 
-
-
-
         {/* Session map: one dot per session of the journey */}
-        <div className="space-y-4 rounded-xl border border-border/70 bg-background/30 p-4">
+        <SectionCard padding="compact" className="space-y-4 bg-background/30">
           <div className="flex items-start justify-between gap-3 flex-wrap">
             <div className="space-y-0.5">
               <h3 className="text-sm font-semibold text-foreground">Mapa das 12 sessões</h3>
-              <p className="text-[11px] text-muted-foreground">
-                Cada círculo é uma sessão da jornada. Clique para ver os detalhes e o relatório.
+              <p className="text-xs text-muted-foreground">
+                Cada círculo é uma sessão da jornada, na ordem em que aconteceu. Toque para ver os detalhes e o relatório.
               </p>
             </div>
             <div className="text-right">
               <p className="text-lg font-bold text-foreground tabular-nums leading-none">
                 {reachedCount}<span className="text-sm font-medium text-muted-foreground">/{totalSessions}</span>
               </p>
-              <p className="text-[10px] uppercase tracking-wider text-muted-foreground mt-1">sessões alcançadas · {progressPct}%</p>
+              <p className="text-xs text-muted-foreground mt-1">Sessões realizadas · {progressPct}%</p>
             </div>
           </div>
 
           {/* Track + fill + inline dots */}
-          <div className="relative h-7 w-full px-3">
+          <div className="relative h-8 w-full px-3">
             <div className="absolute left-3 right-3 top-1/2 -translate-y-1/2 h-2 rounded-full bg-muted/50 overflow-hidden">
               <div
-                className="h-full rounded-full bg-gradient-to-r from-status-green/80 to-status-green transition-all duration-500"
+                className="h-full rounded-full bg-status-green transition-all duration-ds-3 ease-ds"
                 style={{ width: `${progressPct}%` }}
               />
             </div>
             <div className="relative flex items-center justify-between h-full">
               {slots.map((s) => {
-                const isKickoff = s.index === 1;
                 if (!s.booking) {
                   return (
                     <div
                       key={s.index}
                       title={`Sessão ${s.index} · ainda não agendada`}
-                      className={`relative z-10 h-5 w-5 rounded-full border-2 border-dashed bg-card flex items-center justify-center text-[9px] font-semibold tabular-nums text-muted-foreground/70 ${
-                        isKickoff ? "border-status-yellow/50" : "border-border"
-                      }`}
+                      className="relative z-10 h-6 w-6 rounded-full border border-dashed border-border bg-card flex items-center justify-center text-[11px] font-semibold tabular-nums text-muted-foreground"
                     >
                       {s.index}
                     </div>
                   );
                 }
                 const meta = statusMeta(s.status);
-                const isCompleted = s.status === "completed" || s.status === "awaiting_report";
-                const sessionLabel = sessionNames[s.booking.session_id] || "Sessão";
+                const isCompleted = isRealized(s.status);
+                const isKickoff = isKickoffBooking(s.booking);
+                const missingReport = s.status === "awaiting_report";
+                const sessionLabel = sessionNames[s.booking.session_id] || s.booking.sessions?.name || "Sessão";
                 return (
                   <button
                     key={s.index}
                     type="button"
                     onClick={() => setOpenBookingId(s.booking.id)}
+                    aria-label={`Sessão ${s.index}: ${sessionLabel}, ${fmtDate(s.booking.scheduled_date)}, ${meta.label}`}
                     title={`Sessão ${s.index} · ${sessionLabel} · ${fmtDate(s.booking.scheduled_date)} · ${meta.label}`}
-                    className={`relative z-10 h-5 w-5 rounded-full border-2 flex items-center justify-center text-[9px] font-bold tabular-nums transition-transform hover:scale-125 focus:outline-none focus:ring-2 focus:ring-primary/40 ${
-                      isCompleted ? "text-white" : "text-foreground"
+                    className={`relative z-10 h-6 w-6 rounded-full border flex items-center justify-center text-[11px] font-bold tabular-nums transition-transform duration-ds-1 ease-ds hover:scale-110 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 ring-offset-background ${
+                      isCompleted ? "text-primary-foreground" : "text-foreground"
                     }`}
                     style={{
                       borderColor: meta.color,
-                      backgroundColor: isCompleted ? meta.color : `color-mix(in srgb, ${meta.color} 22%, hsl(var(--card)))`,
+                      backgroundColor: isCompleted ? meta.color : `color-mix(in srgb, ${meta.color} 20%, hsl(var(--card)))`,
                     }}
                   >
                     {s.index}
                     {isKickoff && (
-                      <Star className="absolute -top-2 -right-2 h-2.5 w-2.5 text-status-yellow drop-shadow" />
+                      <Star className="absolute -top-2 -right-2 h-3 w-3 text-status-yellow fill-status-yellow" aria-hidden />
+                    )}
+                    {missingReport && (
+                      <span
+                        className="absolute -bottom-1.5 -right-1.5 h-3.5 w-3.5 rounded-full bg-card border border-border flex items-center justify-center"
+                        aria-hidden
+                      >
+                        <FileWarning className="h-2.5 w-2.5 text-status-yellow" />
+                      </span>
                     )}
                   </button>
                 );
               })}
               <div
                 title={reachedCount >= totalSessions ? "Presente desbloqueado" : "Presente bloqueado: conclua as 12 sessões"}
-                className={`relative z-10 flex h-6 w-6 items-center justify-center rounded-full border-2 ${
+                className={`relative z-10 flex h-7 w-7 items-center justify-center rounded-full border ${
                   reachedCount >= totalSessions
                     ? "border-status-green bg-status-green text-primary-foreground"
                     : "border-dashed border-muted-foreground/50 bg-card text-muted-foreground"
                 }`}
                 aria-label={reachedCount >= totalSessions ? "Presente desbloqueado" : "Presente bloqueado"}
               >
-                {reachedCount >= totalSessions ? <LockOpen className="h-3 w-3" /> : <Lock className="h-3 w-3" />}
-                <span className="absolute top-7 whitespace-nowrap text-[9px] font-semibold text-muted-foreground">Presente</span>
+                {reachedCount >= totalSessions ? <LockOpen className="h-3.5 w-3.5" /> : <Lock className="h-3.5 w-3.5" />}
+                <span className="absolute top-8 whitespace-nowrap text-[11px] font-medium text-muted-foreground">Presente</span>
               </div>
             </div>
           </div>
 
           {/* Status summary: only what actually exists, with counts and meaning */}
-          <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
-            {[
-              { key: "completed", n: slotCounts.completed, label: "Realizadas", hint: "com relatório enviado", dot: "bg-status-green border-status-green", text: "text-status-green" },
-              { key: "scheduled", n: slotCounts.scheduled, label: "Agendadas", hint: "data confirmada", dot: "border-status-blue", text: "text-status-blue" },
-              { key: "pending", n: slotCounts.pending, label: "Pendentes", hint: "aguardando o mentor confirmar", dot: "border-status-yellow", text: "text-status-yellow" },
-              { key: "not_realized", n: slotCounts.not_realized, label: "Não realizadas", hint: "aluno ou mentor faltou", dot: "border-destructive", text: "text-destructive" },
-              { key: "empty", n: slotCounts.empty, label: "A agendar", hint: "sessões que faltam marcar", dot: "border-dashed border-border", text: "text-muted-foreground" },
-            ]
-              .filter((i) => i.n > 0)
-              .map((i) => (
-                <div key={i.key} className="flex items-start gap-2 rounded-lg border border-border/60 bg-card/50 px-2.5 py-2">
-                  <span className={`mt-1 w-2.5 h-2.5 shrink-0 rounded-full border-2 ${i.dot}`} />
-                  <div className="min-w-0">
-                    <p className="text-xs font-semibold text-foreground leading-tight">
-                      <span className={`tabular-nums ${i.text}`}>{i.n}</span> {i.label}
-                    </p>
-                    <p className="text-[10px] text-muted-foreground leading-tight truncate">{i.hint}</p>
-                  </div>
+          <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 pt-2">
+            {summaryItems.map((i) => (
+              <div key={i.key} className="flex items-start gap-2 rounded-ds border border-border bg-card/50 px-3 py-2">
+                <span className={`mt-1 w-2.5 h-2.5 shrink-0 rounded-full border-2 ${i.dot}`} aria-hidden />
+                <div className="min-w-0">
+                  <p className="text-xs font-semibold text-foreground leading-tight">
+                    <span className={`tabular-nums ${i.text}`}>{i.n}</span> {i.label}
+                  </p>
+                  <p className="text-[11px] text-muted-foreground leading-tight truncate">{i.hint}</p>
                 </div>
-              ))}
+              </div>
+            ))}
           </div>
 
-          <p className="flex items-center gap-1.5 text-[10px] text-muted-foreground">
-            <Star className="h-3 w-3 text-status-yellow" /> Sessão 1 é o Mapeamento do Negócio, obrigatória para abrir a jornada.
-          </p>
-        </div>
+          <div className="flex flex-wrap gap-x-4 gap-y-1 text-[11px] text-muted-foreground">
+            {hasKickoffInTrack && (
+              <span className="flex items-center gap-1.5">
+                <Star className="h-3 w-3 text-status-yellow fill-status-yellow" aria-hidden /> Mapeamento do Negócio (sessão de 3h)
+              </span>
+            )}
+            {slots.some((s) => s.status === "awaiting_report") && (
+              <span className="flex items-center gap-1.5">
+                <FileWarning className="h-3 w-3 text-status-yellow" aria-hidden /> Realizada sem relatório
+              </span>
+            )}
+          </div>
+        </SectionCard>
+      </SectionCard>
 
-      </div>
-
-      {/* Session details modal */}
-      <Dialog open={!!openBookingId} onOpenChange={(o) => !o && setOpenBookingId(null)}>
-        <DialogContent className="sm:max-w-lg">
-          <DialogHeader>
-            <DialogTitle>{openBooking ? `Sessão ${openBookingIndex} · ${sessionNames[openBooking.session_id] || "Detalhes"}` : "Sessão"}</DialogTitle>
-          </DialogHeader>
-          {openBooking && (
-            <div className="space-y-3 text-sm">
-              <div className="flex items-center gap-4 text-xs text-muted-foreground">
-                <span className="flex items-center gap-1.5"><CalendarDays className="h-3.5 w-3.5" /> {fmtDate(openBooking.scheduled_date)}{openBooking.start_time ? ` · ${openBooking.start_time.slice(0,5)}` : ""}</span>
-                {openBooking.mentor_id && mentorNames[openBooking.mentor_id] && (
-                  <span>Mentor: <span className="text-foreground font-medium">{shortName(mentorNames[openBooking.mentor_id])}</span></span>
-                )}
-              </div>
-              <div className="rounded-lg border border-border bg-background/50 p-3">
-                <p className="text-[10px] uppercase tracking-wider text-muted-foreground font-semibold mb-1">Status</p>
-                <p className="text-sm text-foreground">{statusMeta(statusFor(openBooking)).label}</p>
-              </div>
-              {openBookingIndex === 1 && (
-                <div className="rounded-lg border border-status-yellow/30 bg-status-yellow/10 p-3">
-                  <p className="text-[10px] uppercase tracking-wider text-status-yellow font-semibold mb-1">Kickoff</p>
-                  <p className="text-xs text-foreground leading-relaxed">Sessão de 3h para aprofundar diagnóstico, metas e direção do programa.</p>
-                </div>
+      {/* Session details */}
+      <BottomSheet
+        open={!!openBookingId}
+        onOpenChange={(o) => !o && setOpenBookingId(null)}
+        title={
+          openBooking
+            ? `Sessão ${openBookingIndex} · ${sessionNames[openBooking.session_id] || openBooking.sessions?.name || "Detalhes"}`
+            : "Sessão"
+        }
+        description={
+          openBooking ? (
+            <span className="inline-flex items-center gap-3 flex-wrap">
+              <span className="inline-flex items-center gap-1.5">
+                <CalendarDays className="h-3.5 w-3.5" aria-hidden /> {fmtDate(openBooking.scheduled_date)}
+                {openBooking.start_time ? ` · ${openBooking.start_time.slice(0, 5)}` : ""}
+              </span>
+              {openBooking.mentor_id && mentorNames[openBooking.mentor_id] && (
+                <span>Mentor: <span className="text-foreground font-medium">{shortName(mentorNames[openBooking.mentor_id])}</span></span>
               )}
-              {openReport?.summary && (
-                <div className="rounded-lg border border-border bg-background/50 p-3">
-                  <p className="text-[10px] uppercase tracking-wider text-muted-foreground font-semibold mb-1">Resumo</p>
-                  <p className="text-xs text-foreground whitespace-pre-wrap leading-relaxed">{openReport.summary}</p>
-                </div>
+            </span>
+          ) : undefined
+        }
+        size="sm"
+        footer={
+          openBooking && !hideReportButton && reportRoute && (openReport?.summary || canFillReport(openBooking)) ? (
+            <Button
+              className="w-full sm:w-auto"
+              onClick={() => { const bid = openBooking.id; setOpenBookingId(null); navigate(reportRoute(bid)); }}
+            >
+              <FileText className="h-4 w-4" /> {openReport?.summary ? "Abrir relatório completo" : "Preencher relatório"}
+            </Button>
+          ) : undefined
+        }
+      >
+        {openBooking && openStatus && (
+          <div className="space-y-3">
+            <div className="flex items-center gap-2 flex-wrap">
+              <StatusPill status={openStatus} />
+              {isPendingConfirmationOverdue(openBooking) && (
+                <span className="text-xs text-muted-foreground">Há {daysSinceBookingEnd(openBooking)} dias sem confirmação</span>
               )}
-              {!hideReportButton && reportRoute && (
-                <button
-                  onClick={() => { const bid = openBooking.id; setOpenBookingId(null); navigate(reportRoute(bid)); }}
-                  className="btn-silver w-full text-xs flex items-center justify-center gap-2"
-                >
-                  <FileText className="h-3.5 w-3.5" /> {openReport?.summary ? "Abrir relatório completo" : "Preencher relatório"}
-                </button>
-              )}
-              {hideReportButton && openReport?.summary === undefined && (
-                <p className="text-[11px] text-muted-foreground italic text-center">Aguardando relatório.</p>
+              {openStatus === "awaiting_report" && (
+                <span className="inline-flex items-center gap-1 text-xs text-status-yellow">
+                  <FileWarning className="h-3.5 w-3.5" aria-hidden /> Sem relatório
+                </span>
               )}
             </div>
-          )}
-        </DialogContent>
-      </Dialog>
+            {openStatus === "pending_confirmation" && (
+              <p className="text-xs text-muted-foreground leading-relaxed">{PENDING_CONFIRMATION_HINT}</p>
+            )}
+
+            {isKickoffBooking(openBooking) && (
+              <Callout tone="warning" icon={Star} title="Mapeamento do Negócio">
+                Sessão de 3h para aprofundar diagnóstico, metas e direção do programa. Não exige relatório.
+              </Callout>
+            )}
+
+            {openReport?.summary && (
+              <SectionCard padding="compact">
+                <p className="ds-kicker mb-1">Resumo</p>
+                <p className="text-sm text-foreground whitespace-pre-wrap leading-relaxed">{openReport.summary}</p>
+              </SectionCard>
+            )}
+
+            {/* Ações do admin/mentor sobre uma sessão que passou e ainda não foi confirmada */}
+            {!hideReportButton && openStatus === "pending_confirmation" && (
+              <div className="flex flex-col sm:flex-row gap-2">
+                {!bookingRequiresReport(openBooking) && (
+                  <Button
+                    variant="outline"
+                    className="flex-1 text-status-green"
+                    disabled={closing}
+                    onClick={() => closePending(openBooking, "completed")}
+                  >
+                    <CheckCircle2 className="h-4 w-4" /> Marcar realizada
+                  </Button>
+                )}
+                <Button
+                  variant="outline"
+                  className="flex-1 text-status-yellow"
+                  disabled={closing}
+                  onClick={() => closePending(openBooking, "not_realized")}
+                >
+                  <XCircle className="h-4 w-4" /> Não realizada
+                </Button>
+              </div>
+            )}
+
+            {hideReportButton && !openReport?.summary && openStatus === "awaiting_report" && (
+              <p className="text-xs text-muted-foreground text-center">Aguardando relatório do mentor.</p>
+            )}
+          </div>
+        )}
+      </BottomSheet>
+
+      <ConfirmDialog
+        open={!!pendingClose}
+        onOpenChange={(o) => !o && setPendingClose(null)}
+        title={pendingClose?.status === "completed" ? "Confirmar sessão realizada?" : "Marcar como não realizada?"}
+        description={
+          pendingClose
+            ? pendingClose.status === "completed"
+              ? `A sessão "${pendingCloseLabel}" de ${fmtDate(pendingClose.booking.scheduled_date)} passa a contar como realizada.`
+              : `A sessão "${pendingCloseLabel}" de ${fmtDate(pendingClose.booking.scheduled_date)} deixa de ocupar a vaga na jornada.`
+            : undefined
+        }
+        confirmLabel={pendingClose?.status === "completed" ? "Marcar realizada" : "Marcar não realizada"}
+        destructive={pendingClose?.status === "not_realized"}
+        loading={closing}
+        onConfirm={async () => {
+          if (!pendingClose) return;
+          const action = pendingClose;
+          setPendingClose(null);
+          await performClosePending(action.booking, action.status);
+        }}
+      />
     </>
   );
 };

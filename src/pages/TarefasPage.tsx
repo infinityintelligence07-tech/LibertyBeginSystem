@@ -13,15 +13,46 @@ import {
   demoBookingsForMember, demoBookingsForMentor, demoTasksForBookings,
   demoMentorProfiles, demoLibertyProfiles, demoSessionsCatalog,
 } from "@/lib/demoForUser";
+import { Button } from "@/components/ui/button";
+import {
+  Chip,
+  EmptyState,
+  ErrorState,
+  LoadingState,
+  PageContainer,
+  PageHeader,
+  SectionCard,
+  SelectField,
+  Stat,
+  StatusPill,
+  TextField,
+} from "@/components/ds";
 
 
-const statusChips: { key: TaskStatus | "all"; label: string; classes: string }[] = [
-  { key: "all", label: "Todas", classes: "border-border text-muted-foreground" },
-  { key: "pending", label: "Pendentes", classes: "border-muted-foreground/30 text-muted-foreground" },
-  { key: "in_progress", label: "Em andamento", classes: "border-status-blue/30 text-status-blue" },
-  { key: "done_by_student", label: "Aguardando validação", classes: "border-status-yellow/30 text-status-yellow" },
-  { key: "validated", label: "Concluídas", classes: "border-status-green/30 text-status-green" },
+const statusChips: { key: TaskStatus | "all"; label: string }[] = [
+  { key: "all", label: "Todas" },
+  { key: "pending", label: "Pendentes" },
+  { key: "in_progress", label: "Em andamento" },
+  { key: "done_by_student", label: "Aguardando validação" },
+  { key: "validated", label: "Concluídas" },
 ];
+
+const taskStatusTone = (status: TaskStatus): "success" | "info" | "warning" | "neutral" => {
+  switch (status) {
+    case "validated":
+      return "success";
+    case "in_progress":
+      return "info";
+    case "done_by_student":
+      return "warning";
+    case "pending":
+      return "neutral";
+    default: {
+      const exhaustive: never = status;
+      return exhaustive;
+    }
+  }
+};
 
 interface TarefasPageProps { role: "mentor" | "liberty" }
 
@@ -32,7 +63,7 @@ const TarefasPage = ({ role }: TarefasPageProps) => {
   const [studentFilter, setStudentFilter] = useState<string>("all");
   const [search, setSearch] = useState("");
 
-  const { data: rows = [], isLoading } = useQuery({
+  const { data: rows = [], isLoading, isError, refetch } = useQuery({
     queryKey: ["all-tasks-scoped", role, profile?.id],
     enabled: !!profile?.id,
     queryFn: async () => {
@@ -137,89 +168,102 @@ const TarefasPage = ({ role }: TarefasPageProps) => {
 
   const today = new Date().toISOString().slice(0, 10);
 
+  const hasActiveFilters = studentFilter !== "all" || search.length > 0;
+
   return (
     <AppLayout role={role}>
-      <div className="max-w-4xl mx-auto space-y-4">
-        <div>
-          <div className="flex items-center gap-2 text-primary text-[10px] font-semibold uppercase tracking-wider">
-            <ListTodo className="h-3.5 w-3.5" /> {role === "mentor" ? "Acompanhamento de tarefas" : "Central de tarefas"}
-          </div>
-          <h1 className="text-2xl font-semibold text-foreground mt-1">
-            {role === "mentor" ? "Tarefas dos meus mentorados" : "Minhas tarefas"}
-          </h1>
-          <p className="text-sm text-muted-foreground mt-1">
-            {role === "liberty"
+      <PageContainer>
+        <PageHeader
+          eyebrow={role === "mentor" ? "Acompanhamento de tarefas" : "Central de tarefas"}
+          title={role === "mentor" ? "Tarefas dos meus mentorados" : "Minhas tarefas"}
+          description={
+            role === "liberty"
               ? "Todas as tarefas das suas sessões. Organize por status e prazo."
-              : "Acompanhe o que cada aluno está fazendo. Filtre por aluno, status e busque por palavra-chave."}
-          </p>
-        </div>
+              : "Acompanhe o que cada aluno está fazendo. Filtre por aluno, status e busque por palavra-chave."
+          }
+        />
 
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-          <Stat icon={Clock} label="Pendentes" value={counts.pending} tone="muted" />
-          <Stat icon={PlayCircle} label="Em andamento" value={counts.in_progress} tone="blue" />
-          <Stat icon={ShieldCheck} label="Aguardando" value={counts.awaiting} tone="yellow" />
-          <Stat icon={CheckCircle2} label="Concluídas" value={counts.validated} tone="green" />
-        </div>
+        {isError && <ErrorState compact onRetry={() => refetch()} />}
 
-        {/* Filters row: student (mentor only) + search */}
-        <div className="flex flex-col sm:flex-row gap-2">
+        {isLoading ? (
+          <LoadingState variant="stats" rows={4} />
+        ) : (
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+            <SectionCard padding="compact"><Stat icon={Clock} label="Pendentes" value={counts.pending} size="sm" /></SectionCard>
+            <SectionCard padding="compact"><Stat icon={PlayCircle} label="Em andamento" value={counts.in_progress} tone="info" size="sm" /></SectionCard>
+            <SectionCard padding="compact"><Stat icon={ShieldCheck} label="Aguardando" value={counts.awaiting} tone="warning" size="sm" /></SectionCard>
+            <SectionCard padding="compact"><Stat icon={CheckCircle2} label="Concluídas" value={counts.validated} tone="success" size="sm" /></SectionCard>
+          </div>
+        )}
+
+        {/* Filtros: aluno (só mentor) + busca */}
+        <div className="flex flex-col sm:flex-row sm:items-end gap-2">
           {role === "mentor" && (
-            <select
+            <SelectField
+              label="Aluno"
               value={studentFilter}
               onChange={(e) => setStudentFilter(e.target.value)}
-              className="bg-card border border-border rounded-lg px-3 py-2 text-sm text-foreground focus:border-primary/40 focus:outline-none sm:w-56"
+              containerClassName="sm:w-56"
             >
               <option value="all">Todos os alunos ({students.length})</option>
               {students.map((s) => (
                 <option key={s.id} value={s.id}>{shortName(s.name)}</option>
               ))}
-            </select>
+            </SelectField>
           )}
-          <input
-            type="text"
+          <TextField
+            type="search"
+            label="Buscar"
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            placeholder="Buscar tarefa por palavra-chave…"
-            className="flex-1 bg-card border border-border rounded-lg px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:border-primary/40 focus:outline-none"
+            placeholder="Buscar tarefa por palavra-chave"
+            containerClassName="flex-1"
           />
-          {(studentFilter !== "all" || search) && (
-            <button
-              onClick={() => { setStudentFilter("all"); setSearch(""); }}
-              className="text-[11px] px-3 py-2 rounded-lg border border-border text-muted-foreground hover:text-foreground hover:bg-foreground/5"
-            >
+          {hasActiveFilters && (
+            <Button variant="ghost" size="sm" className="sm:h-11" onClick={() => { setStudentFilter("all"); setSearch(""); }}>
               Limpar filtros
-            </button>
+            </Button>
           )}
         </div>
 
-        <div className="flex flex-wrap items-center gap-2 text-[10px] uppercase tracking-wider">
+        <div className="flex flex-wrap items-center gap-2" role="group" aria-label="Filtrar por status">
           {statusChips.map((c) => {
-            const active = filter === c.key;
             const count = c.key === "all" ? counts.total : c.key === "pending" ? counts.pending : c.key === "in_progress" ? counts.in_progress : c.key === "done_by_student" ? counts.awaiting : counts.validated;
             return (
-              <button
-                key={c.key}
-                onClick={() => setFilter(c.key)}
-                className={`px-2.5 py-1 rounded-full border transition-colors ${c.classes} ${active ? "bg-foreground/10 ring-1 ring-foreground/20" : "hover:bg-foreground/5"}`}
-              >
-                {c.label} <span className="ml-1 font-semibold">{count}</span>
-              </button>
+              <Chip key={c.key} active={filter === c.key} onClick={() => setFilter(c.key)} count={count}>
+                {c.label}
+              </Chip>
             );
           })}
         </div>
 
         {isLoading ? (
-          <p className="text-center py-8 text-muted-foreground text-sm">Carregando…</p>
+          <LoadingState variant="list" rows={4} />
         ) : filtered.length === 0 ? (
-          <p className="text-center py-8 text-muted-foreground text-sm italic">Nenhuma tarefa {filter === "all" ? "cadastrada" : "nesse filtro"}.</p>
+          <EmptyState
+            icon={ListTodo}
+            title={filter === "all" ? "Nenhuma tarefa cadastrada" : "Nenhuma tarefa nesse filtro"}
+            description={
+              filter === "all"
+                ? "As tarefas combinadas nas sessões aparecem aqui."
+                : "Escolha outro status ou limpe os filtros para ver todas."
+            }
+            action={
+              filter !== "all" || hasActiveFilters ? (
+                <Button variant="outline" size="sm" onClick={() => { setFilter("all"); setStudentFilter("all"); setSearch(""); }}>
+                  Ver todas
+                </Button>
+              ) : undefined
+            }
+          />
         ) : (
           <div className="space-y-3">
             {role === "liberty" ? libertyGroups.map(([bookingId, group]) => (
-              <section key={bookingId} className="rounded-lg border border-border bg-card/70 p-3 min-w-0 overflow-hidden">
+              <SectionCard key={bookingId} as="section" padding="compact" className="min-w-0 overflow-hidden">
                 <div className="mb-3 min-w-0">
-                  <p className="text-sm font-medium text-foreground truncate">{group[0]?.session_name || "Sessão"}</p>
+                  <h2 className="text-[15px] font-semibold text-foreground truncate">{group[0]?.session_name || "Sessão"}</h2>
                   {group[0]?.counterpart_name && (
-                    <p className="text-[10px] text-muted-foreground mt-0.5">com {shortName(group[0].counterpart_name)}</p>
+                    <p className="text-xs text-muted-foreground mt-0.5">com {shortName(group[0].counterpart_name)}</p>
                   )}
                 </div>
                 <TaskChecklist
@@ -230,50 +274,47 @@ const TarefasPage = ({ role }: TarefasPageProps) => {
                   hideAdd
                   invalidateKeys={[["all-tasks-scoped", role, profile?.id]]}
                 />
-              </section>
-            )) : filtered.map((t: any) => {
-              const status = getTaskStatus(t);
-              const overdue = t.due_date && t.due_date < today && status !== "validated";
-              const detailsHref = role === "mentor" && t.counterpart_id ? `/mentor/alunos/${t.counterpart_id}` : null;
-              return (
-                <div key={t.id} className="rounded-xl border border-border bg-card/70 p-3 flex items-start gap-3">
-                  <div className={`w-2 h-2 mt-2 rounded-full shrink-0 ${status === "validated" ? "bg-status-green" : status === "in_progress" ? "bg-status-blue" : status === "done_by_student" ? "bg-status-yellow" : "bg-muted-foreground/40"}`} />
-                  <div className="flex-1 min-w-0">
-                    <p className="text-sm text-foreground">{t.description}</p>
-                    <div className="flex flex-wrap items-center gap-2 mt-1 text-[10px] text-muted-foreground">
-                      <span>{t.session_name}</span>
-                      {t.counterpart_name && (
-                        detailsHref
-                          ? <Link to={detailsHref} className="text-primary hover:underline">· {shortName(t.counterpart_name)}</Link>
-                          : <span>· {shortName(t.counterpart_name)}</span>
-                      )}
-                      {t.due_date && (
-                        <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full border bg-muted/50 text-muted-foreground border-border">
-                          <Calendar className="h-2.5 w-2.5" />
-                          Prazo {new Date(t.due_date + "T12:00:00").toLocaleDateString("pt-BR", { day: "2-digit", month: "short" })}
-                          {overdue && " · vencido"}
-                        </span>
-                      )}
-                    </div>
-                  </div>
-                </div>
-              );
-            })}
+              </SectionCard>
+            )) : (
+              <SectionCard padding="none">
+                <ul className="list-none m-0 p-0 divide-y divide-border">
+                  {filtered.map((t: any) => {
+                    const status = getTaskStatus(t);
+                    const overdue = t.due_date && t.due_date < today && status !== "validated";
+                    const detailsHref = role === "mentor" && t.counterpart_id ? `/mentor/alunos/${t.counterpart_id}` : null;
+                    return (
+                      <li key={t.id} className="flex items-start gap-3 px-4 py-3 min-h-[56px]">
+                        <StatusPill tone={taskStatusTone(status)} size="sm" className="mt-0.5 shrink-0">
+                          {statusChips.find((c) => c.key === status)?.label ?? status}
+                        </StatusPill>
+                        <div className="flex-1 min-w-0">
+                          <p className="text-sm text-foreground">{t.description}</p>
+                          <div className="flex flex-wrap items-center gap-2 mt-1 text-xs text-muted-foreground">
+                            <span>{t.session_name}</span>
+                            {t.counterpart_name && (
+                              detailsHref
+                                ? <Link to={detailsHref} className="text-primary hover:underline">· {shortName(t.counterpart_name)}</Link>
+                                : <span>· {shortName(t.counterpart_name)}</span>
+                            )}
+                            {t.due_date && (
+                              <span className={overdue ? "inline-flex items-center gap-1 text-destructive" : "inline-flex items-center gap-1"}>
+                                <Calendar className="h-3 w-3" aria-hidden />
+                                Prazo {new Date(t.due_date + "T12:00:00").toLocaleDateString("pt-BR", { day: "2-digit", month: "short" })}
+                                {overdue && " · vencido"}
+                              </span>
+                            )}
+                          </div>
+                        </div>
+                      </li>
+                    );
+                  })}
+                </ul>
+              </SectionCard>
+            )}
           </div>
         )}
-      </div>
+      </PageContainer>
     </AppLayout>
-  );
-};
-
-const Stat = ({ icon: Icon, label, value, tone }: { icon: any; label: string; value: number; tone: "green" | "blue" | "yellow" | "muted" }) => {
-  const color = tone === "green" ? "text-status-green" : tone === "blue" ? "text-status-blue" : tone === "yellow" ? "text-status-yellow" : "text-muted-foreground";
-  return (
-    <div className="glass-card p-3">
-      <Icon className={`h-4 w-4 mb-1.5 ${color}`} />
-      <p className="text-lg font-semibold text-foreground tabular-nums">{value}</p>
-      <p className="text-[10px] uppercase tracking-wider text-muted-foreground">{label}</p>
-    </div>
   );
 };
 

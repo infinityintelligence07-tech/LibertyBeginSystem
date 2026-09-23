@@ -5,6 +5,23 @@ import { format, parseISO } from "date-fns";
 import { ptBR } from "date-fns/locale";
 import { ClipboardCheck, Send, Star, TrendingUp, Users } from "lucide-react";
 import { toast } from "sonner";
+import { Button } from "@/components/ui/button";
+import {
+  PageContainer,
+  PageHeader,
+  SectionHeader,
+  SectionCard,
+  ListRow,
+  DateBlock,
+  StatusPill,
+  Stat,
+  ProgressBar,
+  BottomSheet,
+  SelectField,
+  LoadingState,
+  EmptyState,
+} from "@/components/ds";
+import type { PillTone } from "@/components/ds";
 
 type NpsRow = {
   id: string;
@@ -30,15 +47,28 @@ const scoreLabels: { key: keyof NpsRow; label: string }[] = [
   { key: "score_overall", label: "Sessão" },
   { key: "score_content", label: "Conteúdo" },
   { key: "score_mentor", label: "Mentor" },
-  { key: "score_action_plan", label: "Plano de Ação" },
+  { key: "score_action_plan", label: "Plano de ação" },
   { key: "score_tool", label: "Ferramenta" },
 ];
 
-const scoreTone = (n: number | null) => {
-  if (n == null) return "text-muted-foreground bg-muted";
-  if (n >= 9) return "text-status-green bg-status-green/10";
-  if (n >= 7) return "text-status-yellow bg-status-yellow/10";
-  return "text-status-red bg-status-red/10";
+const scoreTone = (n: number | null): PillTone => {
+  if (n == null) return "neutral";
+  if (n >= 9) return "success";
+  if (n >= 7) return "warning";
+  return "danger";
+};
+
+const scoreBarTone = (n: number): "success" | "warning" | "pending" => {
+  if (n >= 9) return "success";
+  if (n >= 7) return "warning";
+  return "pending";
+};
+
+const statTone = (n: number | null): "default" | "success" | "warning" | "danger" => {
+  if (n == null) return "default";
+  if (n >= 9) return "success";
+  if (n >= 7) return "warning";
+  return "danger";
 };
 
 const avg = (rows: NpsRow[], key: keyof NpsRow) => {
@@ -57,7 +87,10 @@ type PendingRow = {
 };
 
 const monthKey = (iso: string) => iso.slice(0, 7);
-const monthLabel = (key: string) => format(parseISO(`${key}-01`), "MMMM 'de' yyyy", { locale: ptBR });
+const monthLabel = (key: string) => {
+  const label = format(parseISO(`${key}-01`), "MMMM 'de' yyyy", { locale: ptBR });
+  return label.charAt(0).toUpperCase() + label.slice(1);
+};
 
 const AdminNps = () => {
   const [rows, setRows] = useState<NpsRow[]>([]);
@@ -108,6 +141,16 @@ const AdminNps = () => {
     const detractors = rows.filter((r) => (r.score_overall ?? 0) <= 6).length;
     const nps = rows.length ? Math.round(((promoters - detractors) / rows.length) * 100) : null;
     return { overall, promoters, detractors, nps, total: rows.length };
+  }, [rows]);
+
+  // Distribuição da nota geral (0 a 10), apenas para leitura visual.
+  const distribution = useMemo(() => {
+    const counts = Array.from({ length: 11 }, () => 0);
+    rows.forEach((r) => {
+      if (typeof r.score_overall === "number" && r.score_overall >= 0 && r.score_overall <= 10) counts[r.score_overall]++;
+    });
+    const scored = counts.reduce((a, b) => a + b, 0);
+    return { counts, scored };
   }, [rows]);
 
   const months = useMemo(() => {
@@ -175,201 +218,191 @@ const AdminNps = () => {
     }
   };
 
+  const openResponse = rows.find((r) => r.id === expanded);
+
   return (
     <AppLayout role="admin">
-      <div className="space-y-6">
-        <header className="flex items-center gap-3">
-          <div className="h-10 w-10 rounded-xl bg-primary/10 border border-primary/20 flex items-center justify-center text-primary">
-            <ClipboardCheck className="h-5 w-5" />
-          </div>
-          <div>
-            <h1 className="text-2xl font-semibold text-foreground">Pesquisas de NPS</h1>
-            <p className="text-sm text-muted-foreground">
-              Respostas de satisfação enviadas pelos membros dentro do app.
-            </p>
-          </div>
-        </header>
-
-        <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
-          <StatCard icon={Users} label="Respostas" value={String(stats.total)} tone="primary" />
-          <StatCard icon={Star} label="Nota média" value={stats.overall != null ? stats.overall.toFixed(1) : "Sem dados"} tone="yellow" />
-          <StatCard icon={TrendingUp} label="Promotores" value={String(stats.promoters)} tone="green" />
-          <StatCard icon={TrendingUp} label="NPS" value={stats.nps != null ? String(stats.nps) : "Sem dados"} tone="primary" />
-          <StatCard icon={ClipboardCheck} label="Sem resposta" value={String(pending.length)} tone="red" />
-        </div>
-
-        {/* ===== DISPARO DE NPS POR MÊS ===== */}
-        <div className="rounded-2xl border border-primary/25 bg-gradient-to-br from-primary/10 via-card to-card p-5 space-y-4">
-          <div className="flex items-start gap-3">
-            <div className="h-9 w-9 rounded-xl bg-primary/15 border border-primary/25 flex items-center justify-center text-primary shrink-0">
-              <Send className="h-4 w-4" />
-            </div>
-            <div>
-              <p className="text-sm font-semibold text-foreground">Disparo de NPS</p>
-              <p className="text-xs text-muted-foreground">
-                Escolha o mês e envie o convite para todos os alunos que ainda não responderam. O aviso aparece
-                destacado no início da plataforma do aluno.
-              </p>
-            </div>
-          </div>
-
-          <div className="flex flex-wrap items-end gap-3">
-            <div className="space-y-1.5">
-              <label className="text-[11px] uppercase tracking-wide font-semibold text-muted-foreground block">
-                Mês
-              </label>
-              <select
-                value={selectedMonth}
-                onChange={(e) => setSelectedMonth(e.target.value)}
-                className="rounded-xl border border-border bg-background px-3 py-2 text-sm text-foreground capitalize focus:outline-none focus:ring-2 focus:ring-primary/40"
-              >
-                {months.map((m) => (
-                  <option key={m} value={m} className="capitalize">
-                    {monthLabel(m)}
-                  </option>
-                ))}
-              </select>
-            </div>
-            <div className="rounded-xl border border-border bg-card px-4 py-2">
-              <p className="text-[11px] uppercase tracking-wide text-muted-foreground">Alunos pendentes</p>
-              <p className="text-xl font-bold text-foreground tabular-nums">{monthTargets.length}</p>
-            </div>
-            <button
-              onClick={dispatchMonth}
-              disabled={dispatching || monthTargets.length === 0}
-              className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-primary text-primary-foreground text-sm font-semibold hover:bg-primary/90 transition-colors disabled:opacity-50"
-            >
-              <Send className="h-4 w-4" />
-              {dispatching ? "Enviando…" : `Disparar para ${monthTargets.length} aluno(s)`}
-            </button>
-          </div>
-
-          {monthTargets.length > 0 && (
-            <p className="text-xs text-muted-foreground">
-              {monthTargets.map((t) => t.liberty_name).join(" · ")}
-            </p>
-          )}
-        </div>
-
-        {pending.length > 0 && (
-          <div className="rounded-2xl border border-border bg-card/60 overflow-hidden">
-            <div className="px-4 py-3 border-b border-border">
-              <p className="text-sm font-semibold text-foreground">Sessões realizadas sem NPS respondido</p>
-              <p className="text-xs text-muted-foreground">O convite fica disponível no app do membro até ele responder.</p>
-            </div>
-            <ul className="divide-y divide-border/40 max-h-72 overflow-y-auto">
-              {pending.map((p) => (
-                <li key={p.booking_id} className="px-4 py-2.5 flex items-center justify-between gap-3 text-sm">
-                  <div className="min-w-0">
-                    <p className="font-medium text-foreground truncate">{p.liberty_name}</p>
-                    <p className="text-xs text-muted-foreground truncate">{p.session_name} · {p.mentor_name}</p>
-                  </div>
-                  <span className="text-xs text-muted-foreground tabular-nums shrink-0">
-                    {format(parseISO(p.date), "dd MMM", { locale: ptBR })}
-                  </span>
-                </li>
-              ))}
-            </ul>
-          </div>
-        )}
+      <PageContainer>
+        <PageHeader
+          title="Pesquisas de NPS"
+          description="Respostas de satisfação enviadas pelos membros dentro do app."
+        />
 
         {loading ? (
-          <div className="text-center py-12 text-sm text-muted-foreground">Carregando…</div>
-        ) : rows.length === 0 ? (
-          <div className="text-center py-16 rounded-2xl border border-dashed border-border text-sm text-muted-foreground">
-            Nenhuma resposta de NPS registrada ainda.
-          </div>
+          <>
+            <LoadingState variant="stats" rows={4} />
+            <LoadingState variant="list" rows={4} />
+          </>
         ) : (
-          <div className="rounded-2xl border border-border bg-card/80 overflow-hidden">
-            <div className="grid grid-cols-[1fr,1fr,auto,auto] gap-4 px-4 py-3 border-b border-border text-[11px] uppercase tracking-wide font-semibold text-muted-foreground">
-              <span>Membro / Sessão</span>
-              <span>Mentor</span>
-              <span className="text-right">Nota</span>
-              <span className="text-right">Data</span>
+          <>
+            <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
+              <SectionCard padding="compact">
+                <Stat icon={Users} label="Respostas" value={stats.total} />
+              </SectionCard>
+              <SectionCard padding="compact">
+                <Stat
+                  icon={Star}
+                  label="Nota média"
+                  value={stats.overall != null ? stats.overall.toFixed(1) : "Sem dados"}
+                  hint={stats.overall != null ? "de 10" : undefined}
+                  tone={statTone(stats.overall)}
+                />
+              </SectionCard>
+              <SectionCard padding="compact">
+                <Stat icon={TrendingUp} label="Promotores" value={stats.promoters} hint={stats.total ? `de ${stats.total}` : undefined} tone="success" />
+              </SectionCard>
+              <SectionCard padding="compact">
+                <Stat icon={TrendingUp} label="NPS" value={stats.nps != null ? stats.nps : "Sem dados"} tone={stats.nps != null ? "brand" : "default"} />
+              </SectionCard>
+              <SectionCard padding="compact" className="col-span-2 md:col-span-1">
+                <Stat icon={ClipboardCheck} label="Sem resposta" value={pending.length} tone={pending.length > 0 ? "pending" : "default"} />
+              </SectionCard>
             </div>
-            <ul className="divide-y divide-border/40">
-              {rows.map((r) => {
-                const isOpen = expanded === r.id;
+
+            <SectionCard tone="brand" as="section" className="space-y-4">
+              <SectionHeader
+                as="h3"
+                title="Disparo de NPS"
+                description="Escolha o mês e envie o convite para todos os alunos que ainda não responderam. O aviso aparece destacado no início da plataforma do aluno."
+              />
+              <div className="grid grid-cols-1 sm:grid-cols-[minmax(0,1fr)_auto_auto] sm:items-end gap-3">
+                <SelectField label="Mês" value={selectedMonth} onChange={(e) => setSelectedMonth(e.target.value)}>
+                  {months.map((m) => (
+                    <option key={m} value={m}>{monthLabel(m)}</option>
+                  ))}
+                </SelectField>
+                <div className="px-4 py-2 rounded-ds border border-border bg-card">
+                  <Stat size="sm" label="Alunos pendentes" value={monthTargets.length} />
+                </div>
+                <Button onClick={dispatchMonth} disabled={dispatching || monthTargets.length === 0} className="sm:h-11">
+                  <Send aria-hidden />
+                  {dispatching ? "Enviando..." : `Disparar para ${monthTargets.length} aluno(s)`}
+                </Button>
+              </div>
+              {monthTargets.length > 0 && (
+                <div className="flex flex-wrap gap-1.5">
+                  {monthTargets.map((t) => (
+                    <StatusPill key={t.booking_id} tone="neutral" withDot={false}>{t.liberty_name}</StatusPill>
+                  ))}
+                </div>
+              )}
+            </SectionCard>
+
+            {rows.length > 0 && (
+              <SectionCard as="section" className="space-y-4">
+                <SectionHeader as="h3" title="Distribuição das notas" description={`Nota geral da sessão · ${distribution.scored} ${distribution.scored === 1 ? "resposta com nota" : "respostas com nota"}`} />
+                <ul className="space-y-2">
+                  {distribution.counts.map((count, note) => note).reverse().map((note) => {
+                    const count = distribution.counts[note];
+                    return (
+                      <li key={note} className="grid grid-cols-[2rem_minmax(0,1fr)_3rem] items-center gap-3">
+                        <span className="text-sm font-medium tabular-nums text-foreground text-right">{note}</span>
+                        <ProgressBar value={count} max={distribution.scored} tone={scoreBarTone(note)} label={`Nota ${note}: ${count}`} />
+                        <span className="text-xs text-muted-foreground tabular-nums text-right">{count}</span>
+                      </li>
+                    );
+                  })}
+                </ul>
+              </SectionCard>
+            )}
+
+            {pending.length > 0 && (
+              <section className="space-y-3">
+                <SectionHeader
+                  title="Sessões realizadas sem NPS respondido"
+                  description="O convite fica disponível no app do membro até ele responder."
+                />
+                <SectionCard padding="none" className="max-h-80 overflow-y-auto">
+                  {pending.map((p, index) => (
+                    <ListRow
+                      key={p.booking_id}
+                      last={index === pending.length - 1}
+                      leading={<DateBlock date={p.date} tone="muted" />}
+                      title={p.liberty_name}
+                      subtitle={`${p.session_name} · ${p.mentor_name}`}
+                      trailing={<StatusPill tone="pending">Sem resposta</StatusPill>}
+                    />
+                  ))}
+                </SectionCard>
+              </section>
+            )}
+
+            <section className="space-y-3">
+              <SectionHeader title="Respostas" description="Toque em uma resposta para ver todas as notas e comentários." />
+              {rows.length === 0 ? (
+                <EmptyState
+                  icon={ClipboardCheck}
+                  title="Nenhuma resposta de NPS registrada ainda"
+                  description="As respostas aparecem aqui assim que os membros preencherem a pesquisa."
+                />
+              ) : (
+                <SectionCard padding="none">
+                  {rows.map((r, index) => (
+                    <ListRow
+                      key={r.id}
+                      last={index === rows.length - 1}
+                      onPress={() => setExpanded(r.id)}
+                      leading={<DateBlock date={r.created_at.slice(0, 10)} />}
+                      title={r.liberty_name || "Membro"}
+                      subtitle={`${r.session_name || "Sem dados"} · ${r.mentor_name || "Sem dados"}`}
+                      trailing={
+                        <>
+                          <span className="hidden sm:inline text-xs text-muted-foreground tabular-nums">
+                            {format(parseISO(r.created_at), "dd/MM · HH:mm", { locale: ptBR })}
+                          </span>
+                          <StatusPill tone={scoreTone(r.score_overall)} withDot={false} size="md">
+                            {r.score_overall != null ? `Nota ${r.score_overall}` : "Sem nota"}
+                          </StatusPill>
+                        </>
+                      }
+                    />
+                  ))}
+                </SectionCard>
+              )}
+            </section>
+          </>
+        )}
+      </PageContainer>
+
+      <BottomSheet
+        open={expanded !== null}
+        onOpenChange={(open) => !open && setExpanded(null)}
+        title={openResponse?.liberty_name || "Resposta de NPS"}
+        description={
+          openResponse
+            ? `${openResponse.session_name || "Sem dados"} · ${openResponse.mentor_name || "Sem dados"} · ${format(parseISO(openResponse.created_at), "dd/MM/yyyy 'às' HH:mm", { locale: ptBR })}`
+            : undefined
+        }
+        size="lg"
+      >
+        {openResponse && (
+          <div className="space-y-5">
+            <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
+              {scoreLabels.map((s) => {
+                const value = openResponse[s.key] as number | null;
                 return (
-                  <li key={r.id}>
-                    <button
-                      onClick={() => setExpanded(isOpen ? null : r.id)}
-                      className="w-full grid grid-cols-[1fr,1fr,auto,auto] gap-4 px-4 py-3 items-center text-left hover:bg-muted/40 transition-colors"
-                    >
-                      <div className="min-w-0">
-                        <p className="text-sm font-semibold text-foreground truncate">{r.liberty_name || "Membro"}</p>
-                        <p className="text-xs text-muted-foreground truncate">{r.session_name || "Sem dados"}</p>
-                      </div>
-                      <div className="text-sm text-foreground/90 truncate">{r.mentor_name || "Sem dados"}</div>
-                      <div className={`text-sm font-bold px-2.5 py-1 rounded-lg tabular-nums ${scoreTone(r.score_overall)}`}>
-                        {r.score_overall ?? "Sem dados"}
-                      </div>
-                      <div className="text-xs text-muted-foreground tabular-nums text-right">
-                        {format(parseISO(r.created_at), "dd MMM · HH:mm", { locale: ptBR })}
-                      </div>
-                    </button>
-                    {isOpen && (
-                      <div className="px-4 pb-4 pt-1 bg-muted/20 border-t border-border/40 space-y-4">
-                        <div className="grid grid-cols-2 md:grid-cols-5 gap-2">
-                          {scoreLabels.map((s) => (
-                            <div key={s.key} className="rounded-xl border border-border bg-card px-3 py-2">
-                              <p className="text-[10px] uppercase tracking-wide text-muted-foreground">{s.label}</p>
-                              <p className={`text-lg font-bold tabular-nums ${scoreTone(r[s.key] as number | null).split(" ")[0]}`}>
-                                {(r[s.key] as number | null) ?? "Sem dados"}
-                              </p>
-                            </div>
-                          ))}
-                        </div>
-                        <ResponseField label="Maior chave da sessão" value={r.key_takeaway} />
-                        <ResponseField label="Sugestões de melhoria" value={r.improvements} />
-                        <ResponseField label="Indicaria a mentoria?" value={r.would_recommend} />
-                      </div>
-                    )}
-                  </li>
+                  <SectionCard key={s.key} padding="compact">
+                    <Stat size="sm" label={s.label} value={value ?? "Sem dados"} tone={statTone(value)} />
+                  </SectionCard>
                 );
               })}
-            </ul>
+            </div>
+            <ResponseField label="Maior chave da sessão" value={openResponse.key_takeaway} />
+            <ResponseField label="Sugestões de melhoria" value={openResponse.improvements} />
+            <ResponseField label="Indicaria a mentoria?" value={openResponse.would_recommend} />
           </div>
         )}
-      </div>
+      </BottomSheet>
     </AppLayout>
-  );
-};
-
-const StatCard = ({
-  icon: Icon,
-  label,
-  value,
-  tone,
-}: {
-  icon: any;
-  label: string;
-  value: string;
-  tone: "primary" | "green" | "yellow" | "red";
-}) => {
-  const toneMap: Record<string, string> = {
-    primary: "text-primary bg-primary/10 border-primary/20",
-    green: "text-status-green bg-status-green/10 border-status-green/20",
-    yellow: "text-status-yellow bg-status-yellow/10 border-status-yellow/20",
-    red: "text-status-red bg-status-red/10 border-status-red/20",
-  };
-  return (
-    <div className="rounded-2xl border border-border bg-card/80 p-4 flex items-center gap-3">
-      <div className={`h-10 w-10 rounded-xl border flex items-center justify-center ${toneMap[tone]}`}>
-        <Icon className="h-4 w-4" />
-      </div>
-      <div className="min-w-0">
-        <p className="text-[11px] uppercase tracking-wide text-muted-foreground">{label}</p>
-        <p className="text-xl font-bold text-foreground tabular-nums">{value}</p>
-      </div>
-    </div>
   );
 };
 
 const ResponseField = ({ label, value }: { label: string; value: string | null }) => (
   <div>
-    <p className="text-[11px] uppercase tracking-wide font-semibold text-muted-foreground mb-1">{label}</p>
-    <p className="text-sm text-foreground whitespace-pre-wrap">{value || <span className="text-muted-foreground italic">sem resposta</span>}</p>
+    <p className="text-xs font-medium text-muted-foreground mb-1">{label}</p>
+    <p className="text-sm text-foreground whitespace-pre-wrap leading-relaxed">
+      {value || <span className="text-muted-foreground">Sem resposta</span>}
+    </p>
   </div>
 );
 

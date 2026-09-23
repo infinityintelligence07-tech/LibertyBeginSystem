@@ -1,6 +1,8 @@
 import { useEffect, useState } from "react";
 import { Download, X, Smartphone } from "lucide-react";
 import { toast } from "sonner";
+import { Button } from "@/components/ui/button";
+import { BottomSheet, IconButton, SectionCard } from "@/components/ds";
 
 interface BIPEvent extends Event {
   prompt: () => Promise<void>;
@@ -91,73 +93,46 @@ export const InstallPromptBanner = () => {
   return (
     <>
       <div
-        className="fixed left-0 right-0 z-40 px-4 pointer-events-none"
-        style={{
-          bottom: "calc(env(safe-area-inset-bottom, 0px) + 5.5rem)",
-        }}
+        role="region"
+        aria-label="Instalar aplicativo"
+        className="fixed inset-x-0 z-40 px-4 pointer-events-none bottom-[calc(env(safe-area-inset-bottom,0px)_+_4.5rem)] lg:bottom-6 lg:left-60"
       >
-        <div className="max-w-md mx-auto pointer-events-auto animate-in slide-in-from-bottom-4 fade-in duration-500">
-          <div className="glass-card border border-primary/30 shadow-2xl p-3 flex items-center gap-3">
-            <div className="w-10 h-10 rounded-lg bg-primary/15 flex items-center justify-center shrink-0">
-              <Smartphone className="h-5 w-5 text-primary" />
-            </div>
-            <div className="flex-1 min-w-0">
-              <p className="text-sm font-medium text-foreground leading-tight">
-                Instalar Liberty Begin
-              </p>
-              <p className="text-xs text-muted-foreground leading-tight mt-0.5">
-                Acesso rápido pelo ícone, como um app real
-              </p>
-            </div>
-            <button
-              onClick={handleInstall}
-              className="btn-silver text-xs px-3 py-2 flex items-center gap-1.5 shrink-0"
-            >
-              <Download className="h-3.5 w-3.5" />
-              Instalar
-            </button>
-            <button
-              onClick={dismiss}
-              className="p-1.5 rounded-md text-muted-foreground hover:text-foreground hover:bg-sidebar-accent transition-colors shrink-0"
-              aria-label="Dispensar"
-            >
-              <X className="h-4 w-4" />
-            </button>
+        <SectionCard padding="compact" className="max-w-md mx-auto pointer-events-auto shadow-ds-2 flex items-center gap-3">
+          <Smartphone className="h-5 w-5 text-primary shrink-0" aria-hidden />
+          <div className="flex-1 min-w-0">
+            <p className="text-sm font-semibold text-foreground leading-tight">Instalar Liberty Begin</p>
+            <p className="text-xs text-muted-foreground leading-tight mt-0.5">Acesso rápido pelo ícone, como um app.</p>
           </div>
-        </div>
+          <Button size="sm" onClick={handleInstall} className="shrink-0">
+            <Download aria-hidden />
+            Instalar
+          </Button>
+          <IconButton aria-label="Dispensar" size="sm" onClick={dismiss} className="-mr-1">
+            <X className="h-4 w-4" />
+          </IconButton>
+        </SectionCard>
       </div>
 
-      {showIosSheet && (
-        <div
-          className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/60 backdrop-blur-sm px-4 pb-4"
-          onClick={dismiss}
-        >
-          <div
-            className="glass-card border border-border p-5 max-w-sm w-full space-y-3"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <div className="flex items-center gap-2">
-              <Smartphone className="h-5 w-5 text-primary" />
-              <h3 className="text-base font-semibold text-foreground">Instalar no iPhone</h3>
-            </div>
-            <ol className="text-sm text-muted-foreground space-y-2 list-decimal list-inside">
-              <li>
-                Toque no ícone <span className="text-primary font-medium">Compartilhar</span> na barra do Safari
-              </li>
-              <li>
-                Role e escolha <span className="text-foreground font-medium">"Adicionar à Tela de Início"</span>
-              </li>
-              <li>Toque em <span className="text-foreground font-medium">Adicionar</span></li>
-            </ol>
-            <button
-              onClick={dismiss}
-              className="w-full btn-silver text-sm py-2 mt-2"
-            >
-              Entendi
-            </button>
-          </div>
-        </div>
-      )}
+      <BottomSheet
+        open={showIosSheet}
+        onOpenChange={(next) => { if (!next) dismiss(); }}
+        title="Instalar no iPhone"
+        description="Leva menos de um minuto."
+        size="sm"
+        footer={<Button onClick={dismiss} className="w-full sm:w-auto">Entendi</Button>}
+      >
+        <ol className="text-sm text-muted-foreground space-y-2.5 list-decimal list-inside leading-relaxed">
+          <li>
+            Toque no ícone <span className="text-foreground font-medium">Compartilhar</span> na barra do Safari.
+          </li>
+          <li>
+            Role e escolha <span className="text-foreground font-medium">"Adicionar à Tela de Início"</span>.
+          </li>
+          <li>
+            Toque em <span className="text-foreground font-medium">Adicionar</span>.
+          </li>
+        </ol>
+      </BottomSheet>
     </>
   );
 };

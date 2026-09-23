@@ -1,8 +1,9 @@
 import { motion } from "framer-motion";
-import { Flag, ChevronRight } from "lucide-react";
+import { Flag } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { shortName } from "@/lib/formatName";
 import { fadeUpItem } from "@/lib/animations";
+import { ListRow, SectionCard, SectionHeader, StatusPill } from "@/components/ds";
 
 export interface ClosingStudent {
   id: string;
@@ -15,46 +16,39 @@ interface Props {
   students: ClosingStudent[];
 }
 
+const daysLabel = (d: number) => (d <= 0 ? "Hoje" : d === 1 ? "Amanhã" : `${d} dias`);
+
 export const MentorClosingSoon = ({ students }: Props) => {
   const navigate = useNavigate();
   if (students.length === 0) return null;
 
   return (
-    <motion.div variants={fadeUpItem}>
-      <div className="flex items-end justify-between mb-3">
-        <div>
-          <div className="flex items-center gap-2 text-primary text-[10px] font-semibold uppercase tracking-wider">
-            <Flag className="h-3.5 w-3.5" /> Encerramentos
-          </div>
-          <h2 className="text-lg font-semibold text-foreground">Jornadas terminando em breve</h2>
-        </div>
-        <span className="text-[10px] uppercase tracking-wider text-muted-foreground">
-          próximos 30 dias
-        </span>
-      </div>
-
-      <div className="rounded-2xl border border-border bg-card/70 overflow-hidden">
+    <motion.section variants={fadeUpItem} className="space-y-3">
+      <SectionHeader
+        title="Encerramentos próximos"
+        description="Jornadas que terminam nos próximos 30 dias"
+      />
+      <SectionCard padding="none">
         {students.map((s, idx) => (
-          <button
+          <ListRow
             key={s.id}
-            onClick={() => navigate(`/mentor/alunos/${s.id}`)}
-            className={`w-full flex items-center justify-between gap-3 px-4 py-3 text-left hover:bg-muted/30 transition-colors ${idx > 0 ? "border-t border-border/40" : ""}`}
-          >
-            <div className="min-w-0 flex-1">
-              <p className="text-sm font-medium text-foreground truncate">{shortName(s.full_name)}</p>
-              <p className="text-[11px] text-muted-foreground">
-                Encerra em {s.endDateLabel}
-              </p>
-            </div>
-            <div className="flex items-center gap-2 shrink-0">
-              <span className={`text-[10px] uppercase tracking-wider font-semibold px-2 py-1 rounded-full border ${s.daysLeft <= 7 ? "border-status-yellow/30 bg-status-yellow/5 text-status-yellow" : "border-border text-muted-foreground"}`}>
-                {s.daysLeft <= 0 ? "hoje" : s.daysLeft === 1 ? "amanhã" : `${s.daysLeft} dias`}
+            last={idx === students.length - 1}
+            leading={
+              <span className="h-10 w-10 rounded-[var(--ds-radius-md)] bg-muted text-muted-foreground flex items-center justify-center">
+                <Flag className="h-4 w-4" aria-hidden />
               </span>
-              <ChevronRight className="h-4 w-4 text-muted-foreground" />
-            </div>
-          </button>
+            }
+            title={shortName(s.full_name)}
+            subtitle={`Encerra em ${s.endDateLabel}`}
+            trailing={
+              <StatusPill tone={s.daysLeft <= 7 ? "warning" : "neutral"} withDot={false}>
+                {daysLabel(s.daysLeft)}
+              </StatusPill>
+            }
+            onPress={() => navigate(`/mentor/alunos/${s.id}`)}
+          />
         ))}
-      </div>
-    </motion.div>
+      </SectionCard>
+    </motion.section>
   );
 };

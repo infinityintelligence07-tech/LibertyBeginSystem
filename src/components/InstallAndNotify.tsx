@@ -2,6 +2,8 @@ import { useEffect, useState } from "react";
 import { Download, Bell, BellOff, Check } from "lucide-react";
 import { toast } from "sonner";
 import { enablePushNotifications } from "@/lib/pushRegistration";
+import { Button } from "@/components/ui/button";
+import { Callout, IconButton } from "@/components/ds";
 
 interface BIPEvent extends Event {
   prompt: () => Promise<void>;
@@ -108,61 +110,53 @@ export const InstallAndNotify = ({ compact = false }: { compact?: boolean }) => 
     }
   };
 
+  const notifLabel =
+    notifState === "granted" ? "Notificações ativadas" : notifState === "denied" ? "Notificações bloqueadas" : "Ativar notificações";
+
   if (compact) {
     return (
-      <div className="flex items-center gap-2">
+      <div className="flex items-center gap-1">
         {!installed && (
-          <button
-            onClick={handleInstall}
-            className="flex items-center gap-1.5 px-2 py-1.5 rounded-md text-xs text-muted-foreground hover:text-foreground hover:bg-sidebar-accent transition-colors"
-            title="Instalar app"
-          >
-            <Download className="h-3.5 w-3.5" />
-            <span className="hidden sm:inline">Instalar</span>
-          </button>
+          <IconButton aria-label="Instalar app" onClick={handleInstall}>
+            <Download className="h-4 w-4" aria-hidden />
+          </IconButton>
         )}
-        <button
-          onClick={handleNotifications}
-          className="flex items-center gap-1.5 px-2 py-1.5 rounded-md text-xs text-muted-foreground hover:text-foreground hover:bg-sidebar-accent transition-colors"
-          title="Notificações"
-        >
+        <IconButton aria-label={notifLabel} onClick={handleNotifications}>
           {notifState === "granted" ? (
-            <Check className="h-3.5 w-3.5 text-primary" />
+            <Check className="h-4 w-4 text-primary" aria-hidden />
           ) : notifState === "denied" ? (
-            <BellOff className="h-3.5 w-3.5" />
+            <BellOff className="h-4 w-4" aria-hidden />
           ) : (
-            <Bell className="h-3.5 w-3.5" />
+            <Bell className="h-4 w-4" aria-hidden />
           )}
-        </button>
+        </IconButton>
       </div>
     );
   }
 
+  const showInstall = !installed;
+  const showNotify = notifState !== "granted" && notifState !== "unsupported";
+  if (!showInstall && !showNotify && !iosTip) return null;
+
   return (
     <div className="space-y-2">
-      {!installed && (
-        <button
-          onClick={handleInstall}
-          className="w-full flex items-center justify-center gap-2 px-3 py-2.5 rounded-lg bg-sidebar-accent border border-border text-sm text-foreground hover:border-primary/50 transition-colors"
-        >
-          <Download className="h-4 w-4" />
-          <span>Instalar app</span>
-        </button>
+      {showInstall && (
+        <Button variant="outline" onClick={handleInstall} className="w-full justify-start text-muted-foreground hover:text-foreground">
+          <Download aria-hidden />
+          Instalar app
+        </Button>
       )}
-      {notifState !== "granted" && notifState !== "unsupported" && (
-        <button
-          onClick={handleNotifications}
-          className="w-full flex items-center justify-center gap-2 px-3 py-2.5 rounded-lg bg-sidebar-accent border border-border text-sm text-muted-foreground hover:text-foreground hover:border-primary/50 transition-colors"
-        >
-          <Bell className="h-4 w-4" />
-          <span>Ativar notificações</span>
-        </button>
+      {showNotify && (
+        <Button variant="outline" onClick={handleNotifications} className="w-full justify-start text-muted-foreground hover:text-foreground">
+          <Bell aria-hidden />
+          Ativar notificações
+        </Button>
       )}
       {iosTip && (
-        <div className="text-xs text-muted-foreground p-3 rounded-lg bg-sidebar-accent border border-border">
-          No iPhone: toque no ícone de compartilhar <span className="text-primary">⎙</span> e escolha
-          <span className="text-foreground"> "Adicionar à Tela de Início"</span>.
-        </div>
+        <Callout tone="info">
+          No iPhone: toque em <span className="text-foreground font-medium">Compartilhar</span> e escolha{" "}
+          <span className="text-foreground font-medium">"Adicionar à Tela de Início"</span>.
+        </Callout>
       )}
     </div>
   );

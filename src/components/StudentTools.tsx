@@ -12,6 +12,11 @@ import {
 import {
   Tooltip, TooltipContent, TooltipProvider, TooltipTrigger,
 } from "@/components/ui/tooltip";
+import { Button } from "@/components/ui/button";
+import {
+  BottomSheet, Chip, ConfirmDialog, EmptyState, IconButton, ListRow, LoadingState,
+  SectionCard, SectionHeader, SelectField, TextAreaField, TextField,
+} from "@/components/ds";
 
 type Tool = {
   id: string;
@@ -57,6 +62,12 @@ export const StudentTools = ({
   const [draftUrl, setDraftUrl] = useState("");
   const [draftBookingId, setDraftBookingId] = useState<string>("");
   const [uploading, setUploading] = useState(false);
+  const [editTool, setEditTool] = useState<Tool | null>(null);
+  const [editTitle, setEditTitle] = useState("");
+  const [editDescription, setEditDescription] = useState("");
+  const [editUrl, setEditUrl] = useState("");
+  const [editSaving, setEditSaving] = useState(false);
+  const [deleteTool, setDeleteTool] = useState<Tool | null>(null);
 
   const { data: tools = [], isLoading } = useQuery({
     queryKey: ["student-tools", libertyId, bookingId ?? null],
@@ -100,10 +111,40 @@ export const StudentTools = ({
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["student-tools", libertyId] });
+      setDeleteTool(null);
       toast.success("Ferramenta removida");
     },
     onError: () => toast.error("Erro ao remover"),
   });
+
+  const openEdit = (tool: Tool) => {
+    setEditTool(tool);
+    setEditTitle(tool.title);
+    setEditDescription(tool.description || "");
+    setEditUrl(tool.external_url || "");
+  };
+
+  const saveEdit = async () => {
+    if (!editTool) return;
+    let newUrl: string | null = editTool.external_url;
+    if (editTool.file_type === "link") newUrl = normalizeUrl(editUrl);
+    setEditSaving(true);
+    const { error } = await supabase
+      .from("student_tools")
+      .update({
+        title: editTitle.trim() || editTool.title,
+        description: editDescription.trim() || null,
+        external_url: newUrl,
+      })
+      .eq("id", editTool.id);
+    setEditSaving(false);
+    if (error) toast.error("Erro ao editar");
+    else {
+      toast.success("Ferramenta atualizada");
+      queryClient.invalidateQueries({ queryKey: ["student-tools", libertyId] });
+      setEditTool(null);
+    }
+  };
 
   const reset = () => {
     setDraftTitle("");
@@ -279,294 +320,276 @@ export const StudentTools = ({
     window.open(data.signedUrl, "_blank", "noopener,noreferrer");
   };
 
-  const wrapper = variant === "card" ? "rounded-2xl border border-border bg-card/70 p-5" : "";
+  const Wrapper = variant === "card" ? SectionCard : "div";
 
-  const iconForTool = (t: Tool) => {
-    if (t.file_type === "link") return <LinkIcon className="h-4 w-4" />;
-    if (t.file_type === "image") return <ImageIcon className="h-4 w-4" />;
-    return <FileText className="h-4 w-4" />;
+  const iconForTool = (t: Tool, className = "h-4 w-4") => {
+    if (t.file_type === "link") return <LinkIcon className={className} aria-hidden />;
+    if (t.file_type === "image") return <ImageIcon className={className} aria-hidden />;
+    return <FileText className={className} aria-hidden />;
   };
 
+  const heading = title || (bookingId ? "Ferramentas desta sessão" : "Ferramentas do aluno");
+
   return (
-    <div className={wrapper}>
-      <div className="flex items-center justify-between mb-3 gap-3 flex-wrap">
-        <h2 className="text-sm font-semibold text-foreground uppercase tracking-wider flex items-center gap-2">
-          <Wrench className="h-4 w-4 text-primary" />
-          {title || (bookingId ? "Ferramentas desta sessão" : "Ferramentas do aluno")}
-        </h2>
-        {canManage && !adding && (
-          <button
-            onClick={() => setAdding(true)}
-            className="text-[10px] text-primary hover:underline flex items-center gap-1"
-          >
-            <Plus className="h-3 w-3" /> Adicionar ferramenta
-          </button>
-        )}
-      </div>
+    <Wrapper className="space-y-3">
+      <SectionHeader
+        as="h3"
+        title={
+          <span className="flex items-center gap-2">
+            <Wrench className="h-4 w-4 text-primary" aria-hidden />
+            {heading}
+          </span>
+        }
+        actions={
+          canManage && !adding ? (
+            <Button variant="outline" size="sm" onClick={() => setAdding(true)}>
+              <Plus className="h-3.5 w-3.5" /> Adicionar ferramenta
+            </Button>
+          ) : undefined
+        }
+      />
 
       {canManage && adding && (
-        <div className="rounded-xl border border-primary/30 bg-primary/5 p-3 space-y-2 mb-3">
-          {/* Mode toggle */}
-          <div className="flex gap-1 p-1 bg-card border border-border rounded-lg w-fit">
-            <button
-              onClick={() => setMode("file")}
-              className={`px-3 py-1 rounded-md text-xs font-medium flex items-center gap-1.5 transition-all ${
-                mode === "file" ? "bg-primary/15 text-primary" : "text-muted-foreground hover:text-foreground"
-              }`}
-            >
-              <Upload className="h-3 w-3" /> Arquivo
-            </button>
-            <button
-              onClick={() => setMode("link")}
-              className={`px-3 py-1 rounded-md text-xs font-medium flex items-center gap-1.5 transition-all ${
-                mode === "link" ? "bg-primary/15 text-primary" : "text-muted-foreground hover:text-foreground"
-              }`}
-            >
-              <LinkIcon className="h-3 w-3" /> Link
-            </button>
+        <SectionCard tone="brand" padding="compact" className="space-y-3">
+          <div className="flex gap-2" role="group" aria-label="Tipo de ferramenta">
+            <Chip active={mode === "file"} onClick={() => setMode("file")}>
+              <Upload className="h-3.5 w-3.5" aria-hidden /> Arquivo
+            </Chip>
+            <Chip active={mode === "link"} onClick={() => setMode("link")}>
+              <LinkIcon className="h-3.5 w-3.5" aria-hidden /> Link
+            </Chip>
           </div>
 
-          <input
+          <TextField
+            label="Título"
             value={draftTitle}
             onChange={(e) => setDraftTitle(e.target.value)}
-            placeholder="Título (ex: Planilha de DRE)"
-            className="w-full bg-card border border-border rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-primary/30"
+            placeholder="Ex: Planilha de DRE"
           />
-          <textarea
+          <TextAreaField
+            label="Descrição"
+            hint="Opcional"
             value={draftDescription}
             onChange={(e) => setDraftDescription(e.target.value)}
-            placeholder="Descrição (opcional)"
             rows={2}
-            className="w-full bg-card border border-border rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-primary/30 resize-none"
+            className="resize-none"
           />
 
           {mode === "link" && (
-            <input
+            <TextField
+              label="Link"
+              type="url"
+              inputMode="url"
               value={draftUrl}
               onChange={(e) => setDraftUrl(e.target.value)}
               placeholder="https://... (Notion, Drive, Figma, etc.)"
-              className="w-full bg-card border border-border rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-primary/30"
             />
           )}
 
           {!bookingId && (
-            <div>
-              <label className="text-[10px] text-muted-foreground uppercase tracking-wider block mb-1">
-                Vincular à sessão (opcional)
-              </label>
-              <select
-                value={draftBookingId}
-                onChange={(e) => setDraftBookingId(e.target.value)}
-                className="w-full bg-card border border-border rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-primary/30"
-              >
-                <option value="">Sem sessão vinculada</option>
-                {studentBookings.map((b: any) => {
-                  const dateStr = format(parseISO(b.scheduled_date), "dd/MM/yyyy", { locale: ptBR });
-                  const time = (b.start_time || "").slice(0, 5);
-                  const sessName = b.sessions?.name || "Sessão";
-                  const mentorName = b.mentor?.full_name || "Mentor";
-                  return (
-                    <option key={b.id} value={b.id}>
-                      {dateStr} {time} · {sessName} · {mentorName}
-                    </option>
-                  );
-                })}
-              </select>
+            <SelectField
+              label="Vincular à sessão"
+              hint="Opcional"
+              value={draftBookingId}
+              onChange={(e) => setDraftBookingId(e.target.value)}
+            >
+              <option value="">Sem sessão vinculada</option>
+              {studentBookings.map((b: any) => {
+                const dateStr = format(parseISO(b.scheduled_date), "dd/MM/yyyy", { locale: ptBR });
+                const time = (b.start_time || "").slice(0, 5);
+                const sessName = b.sessions?.name || "Sessão";
+                const mentorName = b.mentor?.full_name || "Mentor";
+                return (
+                  <option key={b.id} value={b.id}>
+                    {dateStr} {time} · {sessName} · {mentorName}
+                  </option>
+                );
+              })}
+            </SelectField>
+          )}
+
+          {mode === "file" && (
+            <div className="space-y-1.5">
+              <Button variant="outline" size="sm" onClick={() => fileInputRef.current?.click()} className="max-w-full">
+                <Upload className="h-3.5 w-3.5" />
+                <span className="truncate">{draftFile ? draftFile.name : "Escolher arquivo"}</span>
+              </Button>
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept="image/*,application/pdf,.xlsx,.xls,.xlsm,.xlsb,.csv,.tsv,.doc,.docx,.odt,.rtf,.txt,.ppt,.pptx,.odp,.numbers,.pages,.key,.zip,.json,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/msword,application/vnd.openxmlformats-officedocument.presentationml.presentation,application/vnd.ms-powerpoint"
+                onChange={(e) => setDraftFile(e.target.files?.[0] || null)}
+                className="hidden"
+              />
+              <p className="text-xs text-muted-foreground">Imagem, PDF, Excel, Word, PPT, CSV... até 15 MB</p>
             </div>
           )}
 
-          <div className="flex items-center gap-2 flex-wrap">
-            {mode === "file" && (
-              <>
-                <label className="text-xs text-primary cursor-pointer flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-primary/30 hover:bg-primary/10 transition-colors">
-                  <Upload className="h-3.5 w-3.5" />
-                  {draftFile ? draftFile.name : "Escolher arquivo"}
-                  <input
-                    ref={fileInputRef}
-                    type="file"
-                    accept="image/*,application/pdf,.xlsx,.xls,.xlsm,.xlsb,.csv,.tsv,.doc,.docx,.odt,.rtf,.txt,.ppt,.pptx,.odp,.numbers,.pages,.key,.zip,.json,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/msword,application/vnd.openxmlformats-officedocument.presentationml.presentation,application/vnd.ms-powerpoint"
-                    onChange={(e) => setDraftFile(e.target.files?.[0] || null)}
-                    className="hidden"
-                  />
-                </label>
-                <span className="text-[10px] text-muted-foreground">Imagem, PDF, Excel, Word, PPT, CSV... até 15 MB</span>
-              </>
-            )}
-            <div className="ml-auto flex items-center gap-2">
-              <button
-                onClick={reset}
-                disabled={uploading}
-                className="text-xs px-3 py-1.5 rounded-lg border border-border text-muted-foreground hover:text-foreground"
-              >
-                Cancelar
-              </button>
-              <button
-                onClick={handleSave}
-                disabled={
-                  uploading ||
-                  !draftTitle.trim() ||
-                  (mode === "file" ? !draftFile : !draftUrl.trim())
-                }
-                className="btn-silver text-xs px-3 py-1.5 flex items-center gap-1.5 disabled:opacity-40"
-              >
-                {uploading ? (
-                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                ) : mode === "link" ? (
-                  <LinkIcon className="h-3.5 w-3.5" />
-                ) : (
-                  <Upload className="h-3.5 w-3.5" />
-                )}
-                Salvar
-              </button>
-            </div>
+          <div className="flex flex-col-reverse sm:flex-row gap-2 sm:justify-end pt-1">
+            <Button variant="outline" onClick={reset} disabled={uploading}>
+              Cancelar
+            </Button>
+            <Button
+              onClick={handleSave}
+              disabled={
+                uploading ||
+                !draftTitle.trim() ||
+                (mode === "file" ? !draftFile : !draftUrl.trim())
+              }
+            >
+              {uploading ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : mode === "link" ? (
+                <LinkIcon className="h-4 w-4" />
+              ) : (
+                <Upload className="h-4 w-4" />
+              )}
+              Salvar
+            </Button>
           </div>
-        </div>
+        </SectionCard>
       )}
 
       {isLoading ? (
-        <p className="text-xs text-muted-foreground italic">Carregando...</p>
+        <LoadingState variant="list" rows={2} />
       ) : tools.length === 0 ? (
-        <p className="text-xs text-muted-foreground italic">
-          {canManage
-            ? "Nenhuma ferramenta adicionada. Use o botão acima para enviar um arquivo ou link."
-            : "Nenhuma ferramenta disponível ainda."}
-        </p>
+        <EmptyState
+          compact
+          icon={Wrench}
+          title="Nenhuma ferramenta ainda"
+          description={
+            canManage
+              ? "Use Adicionar ferramenta para enviar um arquivo ou link."
+              : "Seu mentor ainda não compartilhou ferramentas."
+          }
+        />
       ) : !canManage ? (
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
           {tools.map((t) => (
-            <button
+            <SectionCard
               key={t.id}
-              type="button"
+              as="button"
+              interactive
+              padding="compact"
               onClick={() => openTool(t)}
-              className="group text-left rounded-2xl border border-border bg-background/40 hover:bg-muted/40 hover:border-primary/30 transition-all p-5 flex flex-col gap-4 min-h-[132px]"
+              className="flex flex-col gap-3 min-h-[120px]"
             >
               <div className="flex items-start justify-between gap-2">
-                <div className="w-11 h-11 rounded-xl bg-primary/10 text-primary flex items-center justify-center shrink-0">
+                <div className="w-10 h-10 rounded-ds bg-primary/10 text-primary flex items-center justify-center shrink-0">
                   {iconForTool(t)}
                 </div>
-                <span className="text-muted-foreground group-hover:text-foreground transition-colors">
+                <span className="text-muted-foreground">
                   {t.file_type === "link" ? (
-                    <ExternalLink className="h-4 w-4" />
+                    <ExternalLink className="h-4 w-4" aria-hidden />
                   ) : (
-                    <Download className="h-4 w-4" />
+                    <Download className="h-4 w-4" aria-hidden />
                   )}
                 </span>
               </div>
-              <p className="text-base font-semibold text-foreground leading-snug line-clamp-2">
+              <p className="text-[15px] font-semibold text-foreground leading-snug line-clamp-2">
                 {t.title}
               </p>
-            </button>
+            </SectionCard>
           ))}
         </div>
       ) : (
-
-        <ul className="space-y-2">
-          {tools.map((t) => (
-            <li
-              key={t.id}
-              className="flex items-start gap-3 px-3 py-2.5 rounded-lg border border-border bg-background/40 group"
-            >
-              <div className="w-9 h-9 rounded-lg bg-primary/10 text-primary flex items-center justify-center shrink-0">
-                {iconForTool(t)}
-              </div>
-              <div className="flex-1 min-w-0">
-                <p className="text-sm text-foreground font-medium truncate">{t.title}</p>
-                {t.description && (
-                  <p className="text-xs text-muted-foreground line-clamp-2">{t.description}</p>
-                )}
-                {!bookingId && t.booking_id && (() => {
-                  const b: any = bookingMap.get(t.booking_id);
-                  if (!b) return null;
-                  const dateStr = format(parseISO(b.scheduled_date), "dd/MM/yyyy", { locale: ptBR });
-                  return (
-                    <p className="text-[10px] text-primary/80 mt-0.5 truncate">
-                      Sessão: {b.sessions?.name || "Sem dados"} · {dateStr} · Mentor: {b.mentor?.full_name || "Sem dados"}
-                    </p>
-                  );
-                })()}
-                <p className="text-[10px] text-muted-foreground mt-0.5 truncate">
-                  {t.file_type === "link"
-                    ? t.external_url
-                    : `${t.file_name || ""} · ${format(parseISO(t.created_at), "dd MMM yyyy", { locale: ptBR })}`}
-                </p>
-              </div>
-              <div className="flex items-center gap-1 shrink-0">
-                <TooltipProvider delayDuration={200}>
-                  <Tooltip>
-                    <TooltipTrigger asChild>
-                      <button
-                        onClick={() => openTool(t)}
-                        className="p-1.5 rounded hover:bg-muted text-muted-foreground hover:text-foreground transition-colors"
-                      >
-                        {t.file_type === "link" ? (
-                          <ExternalLink className="h-3.5 w-3.5" />
-                        ) : (
-                          <Download className="h-3.5 w-3.5" />
-                        )}
-                      </button>
-                    </TooltipTrigger>
-                    <TooltipContent>
-                      {t.file_type === "link" ? "Abrir link" : "Abrir / baixar"}
-                    </TooltipContent>
-                  </Tooltip>
-                  {canManage && (
-                    <>
+        <SectionCard padding="none">
+          <TooltipProvider delayDuration={200}>
+            {tools.map((t, index) => {
+              const booking: any = !bookingId && t.booking_id ? bookingMap.get(t.booking_id) : null;
+              const bookingLine = booking
+                ? `Sessão: ${booking.sessions?.name || "Sem dados"} · ${format(parseISO(booking.scheduled_date), "dd/MM/yyyy", { locale: ptBR })} · Mentor: ${booking.mentor?.full_name || "Sem dados"}`
+                : null;
+              const metaLine =
+                t.file_type === "link"
+                  ? t.external_url
+                  : `${t.file_name || ""} · ${format(parseISO(t.created_at), "dd MMM yyyy", { locale: ptBR })}`;
+              return (
+                <ListRow
+                  key={t.id}
+                  last={index === tools.length - 1}
+                  leading={
+                    <div className="w-10 h-10 rounded-ds bg-primary/10 text-primary flex items-center justify-center">
+                      {iconForTool(t)}
+                    </div>
+                  }
+                  title={t.title}
+                  subtitle={
+                    <span className="block space-y-0.5">
+                      {t.description && <span className="block text-foreground/80 whitespace-normal line-clamp-2">{t.description}</span>}
+                      {bookingLine && <span className="block truncate text-primary">{bookingLine}</span>}
+                      <span className="block truncate">{metaLine}</span>
+                    </span>
+                  }
+                  trailing={
+                    <div className="flex items-center gap-1">
                       <Tooltip>
                         <TooltipTrigger asChild>
-                          <button
-                            onClick={async () => {
-                              const newTitle = prompt("Novo título:", t.title);
-                              if (newTitle === null) return;
-                              const newDesc = prompt("Descrição (opcional):", t.description || "");
-                              if (newDesc === null) return;
-                              let newUrl: string | null = t.external_url;
-                              if (t.file_type === "link") {
-                                const u = prompt("Link:", t.external_url || "");
-                                if (u === null) return;
-                                newUrl = normalizeUrl(u);
-                              }
-                              const { error } = await supabase
-                                .from("student_tools")
-                                .update({
-                                  title: newTitle.trim() || t.title,
-                                  description: newDesc.trim() || null,
-                                  external_url: newUrl,
-                                })
-                                .eq("id", t.id);
-                              if (error) toast.error("Erro ao editar");
-                              else {
-                                toast.success("Ferramenta atualizada");
-                                queryClient.invalidateQueries({ queryKey: ["student-tools", libertyId] });
-                              }
-                            }}
-                            className="p-1.5 rounded hover:bg-muted text-muted-foreground hover:text-foreground transition-colors"
-                          >
-                            <Pencil className="h-3.5 w-3.5" />
-                          </button>
+                          <IconButton aria-label={t.file_type === "link" ? "Abrir link" : "Abrir ou baixar"} size="sm" onClick={() => openTool(t)}>
+                            {t.file_type === "link" ? <ExternalLink className="h-4 w-4" /> : <Download className="h-4 w-4" />}
+                          </IconButton>
+                        </TooltipTrigger>
+                        <TooltipContent>{t.file_type === "link" ? "Abrir link" : "Abrir / baixar"}</TooltipContent>
+                      </Tooltip>
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <IconButton aria-label="Editar ferramenta" size="sm" onClick={() => openEdit(t)}>
+                            <Pencil className="h-4 w-4" />
+                          </IconButton>
                         </TooltipTrigger>
                         <TooltipContent>Editar</TooltipContent>
                       </Tooltip>
                       <Tooltip>
                         <TooltipTrigger asChild>
-                          <button
-                            onClick={() => {
-                              if (confirm(`Remover "${t.title}"?`)) deleteMutation.mutate(t);
-                            }}
-                            className="p-1.5 rounded hover:bg-destructive/10 text-muted-foreground hover:text-destructive transition-colors"
-                          >
-                            <Trash2 className="h-3.5 w-3.5" />
-                          </button>
+                          <IconButton aria-label="Remover ferramenta" size="sm" onClick={() => setDeleteTool(t)} className="hover:text-destructive hover:bg-destructive/10">
+                            <Trash2 className="h-4 w-4" />
+                          </IconButton>
                         </TooltipTrigger>
                         <TooltipContent>Remover ferramenta</TooltipContent>
                       </Tooltip>
-                    </>
-                  )}
-                </TooltipProvider>
-              </div>
-            </li>
-          ))}
-        </ul>
+                    </div>
+                  }
+                />
+              );
+            })}
+          </TooltipProvider>
+        </SectionCard>
       )}
-    </div>
+
+      <BottomSheet
+        open={!!editTool}
+        onOpenChange={(o) => !o && !editSaving && setEditTool(null)}
+        title="Editar ferramenta"
+        size="sm"
+        locked={editSaving}
+        footer={
+          <>
+            <Button variant="outline" onClick={() => setEditTool(null)} disabled={editSaving}>Cancelar</Button>
+            <Button onClick={saveEdit} disabled={editSaving || !editTitle.trim()}>
+              {editSaving && <Loader2 className="h-4 w-4 animate-spin" />} Salvar
+            </Button>
+          </>
+        }
+      >
+        <div className="space-y-3">
+          <TextField label="Título" value={editTitle} onChange={(e) => setEditTitle(e.target.value)} />
+          <TextAreaField label="Descrição" hint="Opcional" rows={2} className="resize-none" value={editDescription} onChange={(e) => setEditDescription(e.target.value)} />
+          {editTool?.file_type === "link" && (
+            <TextField label="Link" type="url" inputMode="url" value={editUrl} onChange={(e) => setEditUrl(e.target.value)} />
+          )}
+        </div>
+      </BottomSheet>
+
+      <ConfirmDialog
+        open={!!deleteTool}
+        onOpenChange={(o) => !o && setDeleteTool(null)}
+        title={deleteTool ? `Remover "${deleteTool.title}"?` : "Remover ferramenta?"}
+        description="O arquivo ou link deixará de aparecer para o aluno."
+        confirmLabel="Remover"
+        destructive
+        loading={deleteMutation.isPending}
+        onConfirm={() => deleteTool && deleteMutation.mutate(deleteTool)}
+      />
+    </Wrapper>
   );
 };

@@ -1,43 +1,97 @@
-import { motion } from "framer-motion";
 import { AppLayout } from "@/components/AppLayout";
 import { AdminMonthFilter } from "@/components/AdminMonthFilter";
 import { useAdminFilter } from "@/contexts/AdminFilterContext";
 import { Link, useNavigate } from "react-router-dom";
 import {
   Users, Calendar, AlertTriangle, DollarSign,
-  ArrowRight, GraduationCap, Target, CheckCircle2
+  GraduationCap, Target, CheckCircle2, Clock, CalendarClock
 } from "lucide-react";
-import { staggerContainer, fadeUpItem } from "@/lib/animations";
-import { useAdminStats, useMembers, useMentors } from "@/hooks/useAdminData";
+import type { LucideIcon } from "lucide-react";
+import { useMembers, useMentors } from "@/hooks/useAdminData";
+import { daysSinceBookingEnd, PENDING_CONFIRMATION_ALERT_DAYS, PENDING_CONFIRMATION_HINT } from "@/lib/bookingStatus";
 import { shortName } from "@/lib/formatName";
 import { useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { ResultsRanking } from "@/components/ResultsRanking";
+import { Button } from "@/components/ui/button";
+import {
+  PageContainer,
+  PageHeader,
+  SectionHeader,
+  SectionCard,
+  Callout,
+  ListRow,
+  DateBlock,
+  StatusPill,
+  Stat,
+  ProgressBar,
+  LoadingState,
+  ErrorState,
+  EmptyState,
+} from "@/components/ds";
 import logoBegin from "@/assets/logo-begin.png";
 import iconLiberty from "@/assets/icon-liberty.png";
 
-/** Section divider with brand logo + label, used to separate Begin and Liberty blocks. */
+/** Divisor de seção com a marca (Begin / Liberty). */
 const SectionDivider = ({ logo, label }: { logo: string; label: string }) => (
-  <motion.div variants={fadeUpItem} className="flex items-center gap-3 pt-2 pb-1">
-    <img src={logo} alt={label} className="h-6 w-auto object-contain opacity-90" draggable={false} />
-    <span className="text-[11px] uppercase tracking-[0.18em] font-semibold text-muted-foreground">
-      {label}
-    </span>
-    <div className="flex-1 h-px bg-border/60" />
-  </motion.div>
+  <div className="flex items-center gap-3 pt-2">
+    <img src={logo} alt="" className="h-6 w-auto object-contain" draggable={false} />
+    <SectionHeader title={label} />
+    <div className="flex-1 h-px bg-border" aria-hidden />
+  </div>
+);
+
+type StatTone = "default" | "success" | "warning" | "pending" | "danger" | "info" | "brand";
+
+interface StatCardItem {
+  label: string;
+  value: string | number;
+  icon: LucideIcon;
+  to: string;
+  hint?: string;
+  tone?: StatTone;
+  span?: string;
+}
+
+/** KPI clicável: um cartão, um número. */
+const StatLinkCard = ({ item }: { item: StatCardItem }) => (
+  <Link
+    to={item.to}
+    className={`block h-full focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 ring-offset-background rounded-ds-lg ${item.span ?? ""}`}
+  >
+    <SectionCard interactive padding="compact" className="h-full">
+      <Stat label={item.label} value={item.value} hint={item.hint} icon={item.icon} tone={item.tone} />
+    </SectionCard>
+  </Link>
 );
 
 const AdminDashboardPage = () => {
-  const { data: stats, isLoading: statsLoading } = useAdminStats();
-  const { data: members, isLoading: membersLoading } = useMembers();
+  const { data: members, isLoading: membersLoading, isError: membersError, refetch: refetchMembers } = useMembers();
   const { data: mentors } = useMentors();
   const { mode, monthKey, monthLabel } = useAdminFilter();
   const navigate = useNavigate();
 
-
-  const isLoading = statsLoading || membersLoading;
+  const isLoading = membersLoading;
   const filterKey = mode === "month" ? monthKey : null;
+
+  // Sessões que passaram do horário sem confirmação do mentor (todos os membros ativos, Begin e Liberty).
+  // Respeita o filtro de mês pela data da sessão.
+  const pendingConfirmation = useMemo(() => {
+    let total = 0;
+    let overdue = 0;
+    (members || [])
+      .filter((m) => m.is_active !== false)
+      .forEach((m) => {
+        (m.pending_confirmation_sessions || []).forEach((s) => {
+          if (filterKey && !s.date.startsWith(filterKey)) return;
+          total++;
+          const days = daysSinceBookingEnd({ scheduled_date: s.date, start_time: s.start_time, end_time: s.end_time });
+          if (days >= PENDING_CONFIRMATION_ALERT_DAYS) overdue++;
+        });
+      });
+    return { total, overdue };
+  }, [members, filterKey]);
 
   // Metas e contagens do administrador consideram APENAS membros Begin ATIVOS.
   // Membros Liberty e membros inativos (encerrados) não entram.
@@ -116,293 +170,277 @@ const AdminDashboardPage = () => {
   }, [libertyMembers, filterKey]);
 
 
-  const sessionValue = stats?.sessionValue ?? 300;
-
   const activeMentorsCount = useMemo(
     () => (mentors || []).filter((m) => m.is_active !== false).length,
     [mentors]
   );
 
-  const brl = (v: number) =>
-    `R$ ${Math.round(v).toLocaleString("pt-BR", { maximumFractionDigits: 0 })}`;
-
   const handleMemberClick = (memberId: string) => {
     navigate(`/admin/membros?expand=${memberId}`);
   };
 
-  const statCards = [
-    { label: filterKey ? "Membros Begin ativos nesse mês" : "Membros Begin ativos", value: filterKey ? monthlyGoal.totalMembers : beginMembers.length, icon: Users, accent: "primary", to: "/admin/membros", hint: filterKey ? "Ativos nesse mês" : "Begin com acesso ativo", span: "lg:col-span-2" },
-    { label: filterKey ? "Meta do mês" : "Sessões Begin (total)", value: filterKey ? `${monthlyGoal.monthSessions}/${monthlyGoal.goalSessions}` : completedCount, icon: Target, accent: "yellow", to: "/admin/agenda", hint: filterKey ? "2 sessões por membro ativo" : "Histórico Begin", span: "lg:col-span-2" },
-    { label: filterKey ? "Realizadas no mês (Begin)" : "Realizadas total (Begin)", value: completedCount, icon: CheckCircle2, accent: "green", to: "/admin/agenda", hint: "Somente membros Begin", span: "lg:col-span-2" },
-    { label: filterKey ? "Membros com 2+ sessões" : "Jornada completa (12)", value: `${membersMetaAnalysis.onTrack}/${filterKey ? monthlyGoal.totalMembers : beginMembers.length}`, icon: Users, accent: "primary", to: "/admin/membros?filter=on_track", hint: "No ritmo esperado", span: "lg:col-span-3" },
-    { label: "Mentores ativos", value: activeMentorsCount, icon: GraduationCap, accent: "primary", to: "/admin/mentores", hint: "Disponíveis para agenda", span: "lg:col-span-3" },
+  // Próximas sessões agendadas (membros ativos, Begin e Liberty), apenas leitura.
+  const upcomingSessions = useMemo(() => {
+    const todayKey = new Date().toISOString().slice(0, 10);
+    return (members || [])
+      .filter((m) => m.is_active !== false)
+      .flatMap((m) =>
+        (m.scheduled_sessions || [])
+          .filter((s) => s.date >= todayKey && (!filterKey || s.date.startsWith(filterKey)))
+          .map((s) => ({ ...s, member_name: m.full_name, member_id: m.id })),
+      )
+      .sort((a, b) => `${a.date} ${a.start_time || ""}`.localeCompare(`${b.date} ${b.start_time || ""}`))
+      .slice(0, 6);
+  }, [members, filterKey]);
+
+  // Encerramentos nos próximos 60 dias (membros Begin ativos com data de término).
+  const upcomingEndings = useMemo(() => {
+    const today = new Date();
+    const todayKey = today.toISOString().slice(0, 10);
+    const limit = new Date(today);
+    limit.setDate(limit.getDate() + 60);
+    const limitKey = limit.toISOString().slice(0, 10);
+    return beginMembers
+      .filter((m) => m.program_end_date && m.program_end_date >= todayKey && m.program_end_date <= limitKey)
+      .sort((a, b) => (a.program_end_date || "").localeCompare(b.program_end_date || ""))
+      .slice(0, 6)
+      .map((m) => {
+        const days = Math.max(0, Math.round((new Date(`${m.program_end_date}T12:00:00`).getTime() - today.getTime()) / 86400000));
+        return { ...m, daysLeft: days };
+      });
+  }, [beginMembers]);
+
+  const statCards: StatCardItem[] = [
+    { label: "Membros Begin ativos", value: filterKey ? monthlyGoal.totalMembers : beginMembers.length, icon: Users, to: "/admin/membros", hint: "com acesso ativo", span: "lg:col-span-2" },
+    { label: filterKey ? "Meta do mês" : "Sessões Begin (total)", value: filterKey ? `${monthlyGoal.monthSessions}/${monthlyGoal.goalSessions}` : completedCount, icon: Target, tone: "warning", to: "/admin/agenda", hint: filterKey ? "2 por membro ativo" : "histórico Begin", span: "lg:col-span-2" },
+    { label: filterKey ? "Realizadas no mês (Begin)" : "Realizadas total (Begin)", value: completedCount, icon: CheckCircle2, tone: "success", to: "/admin/agenda", hint: "somente Begin", span: "lg:col-span-2" },
+    { label: filterKey ? "Membros no ritmo" : "Jornada completa (12)", value: membersMetaAnalysis.onTrack, icon: Users, to: "/admin/membros?filter=on_track", hint: `de ${filterKey ? monthlyGoal.totalMembers : beginMembers.length}`, span: "lg:col-span-3" },
+    { label: "Mentores ativos", value: activeMentorsCount, icon: GraduationCap, to: "/admin/mentores", hint: "disponíveis para agenda", span: "lg:col-span-3" },
   ];
 
-  const libertyCards = [
-    { label: "Membros Liberty ativos", value: libertyMembers.length, icon: Users, accent: "silver", to: "/admin/membros", hint: "Com acesso ativo", span: "lg:col-span-3" },
-    { label: filterKey ? "Realizadas no mês (Liberty)" : "Realizadas total (Liberty)", value: libertyCompleted, icon: CheckCircle2, accent: "silver", to: "/admin/agenda", hint: "Sessões concluídas", span: "lg:col-span-3" },
+  const libertyCards: StatCardItem[] = [
+    { label: "Membros Liberty ativos", value: libertyMembers.length, icon: Users, to: "/admin/membros", hint: "com acesso ativo", span: "lg:col-span-3" },
+    { label: filterKey ? "Realizadas no mês (Liberty)" : "Realizadas total (Liberty)", value: libertyCompleted, icon: CheckCircle2, to: "/admin/agenda", hint: "sessões concluídas", span: "lg:col-span-3" },
   ];
 
+  const endingTone = (days: number): "danger" | "warning" | "info" => (days <= 15 ? "danger" : days <= 30 ? "warning" : "info");
 
 
 
 
 
-  const accentBg: Record<string, string> = {
-    primary: "bg-primary/10 text-primary",
-    yellow: "bg-status-yellow/10 text-status-yellow",
-    green: "bg-status-green/10 text-status-green",
-    silver: "bg-silver/10 text-silver-light",
-  };
-
-  // Leve degradê na cor do ícone — sutil no dark, um pouco mais visível no light
-  // para melhorar a separação visual entre os cards.
-  const accentTint: Record<string, string> = {
-    primary: "bg-gradient-to-br from-primary/[0.06] via-transparent to-transparent dark:from-primary/[0.02]",
-    yellow: "bg-gradient-to-br from-status-yellow/[0.07] via-transparent to-transparent dark:from-status-yellow/[0.025]",
-    green: "bg-gradient-to-br from-status-green/[0.07] via-transparent to-transparent dark:from-status-green/[0.025]",
-    silver: "bg-gradient-to-br from-silver/[0.07] via-transparent to-transparent dark:from-silver/[0.025]",
-  };
 
   return (
     <AppLayout role="admin">
-      <motion.div variants={staggerContainer} initial="hidden" animate="show" className="space-y-8">
-        <motion.div variants={fadeUpItem} className="flex flex-col lg:flex-row lg:items-end lg:justify-between gap-4">
-          <div>
-            <p className="text-[10px] uppercase tracking-[0.14em] text-muted-foreground font-semibold mb-1">Administração</p>
-            <h1 className="text-2xl font-semibold text-foreground">Painel geral</h1>
-            <p className="text-muted-foreground text-sm mt-1 capitalize">
-              {mode === "overview" ? "Visão geral · todos os períodos" : monthLabel}
-            </p>
-          </div>
-          <AdminMonthFilter />
-        </motion.div>
+      <PageContainer variant="wide">
+        <PageHeader
+          eyebrow="Administração"
+          title="Painel geral"
+          description={mode === "overview" ? "Visão geral · todos os períodos" : monthLabel}
+          actions={<AdminMonthFilter />}
+        />
 
         {isLoading ? (
-          <div className="grid grid-cols-2 lg:grid-cols-3 gap-4">
-            {Array.from({ length: 6 }).map((_, i) => (
-              <div key={i} className="glass-card p-5 animate-pulse h-24" />
-            ))}
-          </div>
+          <>
+            <LoadingState variant="stats" rows={4} />
+            <LoadingState variant="list" rows={4} />
+          </>
+        ) : membersError ? (
+          <ErrorState title="Não foi possível carregar o painel" onRetry={() => refetchMembers()} />
         ) : (
           <>
+            {pendingConfirmation.total > 0 && (
+              <Callout
+                tone={pendingConfirmation.overdue > 0 ? "danger" : "warning"}
+                icon={Clock}
+                title={
+                  <>
+                    {pendingConfirmation.total} sess{pendingConfirmation.total === 1 ? "ão" : "ões"} a confirmar
+                    {pendingConfirmation.overdue > 0 && (
+                      <span className="text-destructive"> · {pendingConfirmation.overdue} há {PENDING_CONFIRMATION_ALERT_DAYS}+ dias sem resposta do mentor</span>
+                    )}
+                  </>
+                }
+                action={
+                  <Button asChild size="sm" variant="outline">
+                    <Link to="/admin/agenda?status=pending_confirmation">Ver na agenda</Link>
+                  </Button>
+                }
+              >
+                {PENDING_CONFIRMATION_HINT}
+              </Callout>
+            )}
+
             <SectionDivider logo={logoBegin} label="Begin" />
 
             <div className="grid grid-cols-2 lg:grid-cols-6 gap-3">
-
               {statCards.map((s) => (
-                <motion.div key={s.label} variants={fadeUpItem} className={s.span}>
-                  <Link
-                    to={s.to}
-                    className={`glass-card p-5 h-full flex flex-col justify-between gap-4 hover:border-primary/40 transition-colors group ${accentTint[s.accent]}`}
-                  >
-                    <div className="flex items-start justify-between gap-3">
-                      <p className="text-[11px] uppercase tracking-wider text-muted-foreground font-medium leading-tight">
-                        {s.label}
-                      </p>
-                      <span className={`h-8 w-8 rounded-lg flex items-center justify-center shrink-0 ${accentBg[s.accent]}`}>
-                        <s.icon className="h-4 w-4" />
-                      </span>
-                    </div>
-                    <div>
-                      <p className="text-3xl font-semibold text-foreground tabular-nums leading-none group-hover:text-primary transition-colors">
-                        {s.value}
-                      </p>
-                      {s.hint && (
-                        <p className="text-[10px] text-muted-foreground mt-1.5 leading-tight">{s.hint}</p>
-                      )}
-                    </div>
-                  </Link>
-
-                </motion.div>
+                <StatLinkCard key={s.label} item={s} />
               ))}
             </div>
 
 
-            {/* Infographic monthly goal */}
-            {filterKey && (() => {
-              const pct = monthlyGoal.pct;
-              const R = 42;
-              const C = 2 * Math.PI * R;
-              const dash = Math.max(0, Math.min(C, (pct / 100) * C));
-              return (
-                <motion.div variants={fadeUpItem} className={`glass-card p-6 ${monthlyGoal.goalReached ? "border-status-green/30" : ""}`}>
-                  <div className="flex items-center gap-5">
-                    {/* Circular gauge */}
-                    <div className="relative shrink-0">
-                      <svg width="104" height="104" viewBox="0 0 104 104" className="rotate-[-90deg]">
-                        <defs>
-                          <linearGradient id="goalGrad" x1="0%" y1="0%" x2="100%" y2="100%">
-                            <stop offset="0%" stopColor="hsl(var(--status-yellow))" />
-                            <stop offset="100%" stopColor="hsl(var(--status-green))" />
-                          </linearGradient>
-                        </defs>
-                        <circle cx="52" cy="52" r={R} fill="none" stroke="hsl(var(--muted))" strokeWidth="9" />
-                        <circle
-                          cx="52" cy="52" r={R} fill="none" stroke="url(#goalGrad)" strokeWidth="9" strokeLinecap="round"
-                          strokeDasharray={`${dash} ${C}`}
-                          className="transition-all duration-700"
-                        />
-                      </svg>
-                      <div className="absolute inset-0 flex flex-col items-center justify-center">
-                        <span className={`text-2xl font-semibold tabular-nums leading-none ${monthlyGoal.goalReached ? "text-status-green" : "text-foreground"}`}>
-                          {pct}%
-                        </span>
-                        <span className="text-[9px] text-muted-foreground uppercase tracking-wider mt-0.5">da meta</span>
-                      </div>
-                    </div>
-
-                    {/* Stats */}
-                    <div className="flex-1 min-w-0">
-                      <h2 className="text-sm font-semibold text-foreground flex items-center gap-2 mb-3">
-                        <Target className={`h-4 w-4 ${monthlyGoal.goalReached ? "text-status-green" : "text-primary"}`} />
-                        Meta mensal Begin
-                      </h2>
-                      <div className="grid grid-cols-3 gap-2">
-                        <div className="rounded-lg bg-status-green/8 border border-status-green/15 px-2.5 py-2">
-                          <div className="flex items-center gap-1.5 mb-0.5">
-                            <span className="h-2 w-2 rounded-full bg-status-green" />
-                            <span className="text-[9px] uppercase tracking-wider text-muted-foreground">Realizadas</span>
-                          </div>
-                          <p className="text-lg font-semibold tabular-nums text-foreground leading-none">{monthlyGoal.monthSessions}</p>
-                        </div>
-                        <div className="rounded-lg bg-status-yellow/8 border border-status-yellow/15 px-2.5 py-2">
-                          <div className="flex items-center gap-1.5 mb-0.5">
-                            <span className="h-2 w-2 rounded-full bg-status-yellow" />
-                            <span className="text-[9px] uppercase tracking-wider text-muted-foreground">Agendadas</span>
-                          </div>
-                          <p className="text-lg font-semibold tabular-nums text-foreground leading-none">{monthlyGoal.monthScheduled}</p>
-                        </div>
-                        <div className="rounded-lg bg-muted/40 border border-border/60 px-2.5 py-2">
-                          <div className="flex items-center gap-1.5 mb-0.5">
-                            <span className="h-2 w-2 rounded-full bg-muted-foreground/60" />
-                            <span className="text-[9px] uppercase tracking-wider text-muted-foreground">Meta</span>
-                          </div>
-                          <p className="text-lg font-semibold tabular-nums text-foreground leading-none">{monthlyGoal.goalSessions}</p>
-                        </div>
-                      </div>
-                    </div>
+            {/* Meta mensal Begin */}
+            {filterKey && (
+              <SectionCard as="section" tone={monthlyGoal.goalReached ? "success" : "default"} className="space-y-4">
+                <SectionHeader
+                  as="h3"
+                  title="Meta mensal Begin"
+                  description="Previstas = membros ativos × 2 · meta = 90% das previstas · só sessões realizadas contam."
+                  actions={
+                    <Stat
+                      size="sm"
+                      label="da meta"
+                      value={`${monthlyGoal.pct}%`}
+                      tone={monthlyGoal.goalReached ? "success" : "default"}
+                    />
+                  }
+                />
+                <div className="grid grid-cols-3 gap-3">
+                  <Stat label="Realizadas" value={monthlyGoal.monthSessions} tone="success" />
+                  <Stat label="Agendadas" value={monthlyGoal.monthScheduled} tone="info" />
+                  <Stat label="Meta" value={monthlyGoal.goalSessions} hint={`de ${monthlyGoal.targetSessions}`} />
+                </div>
+                <ProgressBar
+                  value={monthlyGoal.monthSessions}
+                  max={monthlyGoal.goalSessions}
+                  tone={monthlyGoal.goalReached ? "success" : "brand"}
+                  label={`Meta mensal: ${monthlyGoal.monthSessions} de ${monthlyGoal.goalSessions} sessões`}
+                />
+                {monthlyGoal.goalReached && (
+                  <div className="flex items-center gap-2 text-sm font-medium text-status-green">
+                    <CheckCircle2 className="h-4 w-4 shrink-0" aria-hidden />
+                    Meta do mês alcançada.
                   </div>
-
-                  {/* Segmented progress bar with milestones */}
-                  <div className="mt-5">
-                    <div className="relative h-2.5 rounded-full bg-muted overflow-hidden">
-                      <div
-                        className="h-full rounded-full transition-all duration-700 bg-gradient-to-r from-status-yellow to-status-green"
-                        style={{ width: `${Math.max(pct, pct > 0 ? 5 : 0)}%` }}
-                      />
-                      {/* milestone ticks */}
-                      {[25, 50, 75].map((m) => (
-                        <div key={m} className="absolute top-0 bottom-0 w-px bg-background/60" style={{ left: `${m}%` }} />
-                      ))}
-                    </div>
-                    <div className="flex items-center justify-between mt-1.5 text-[10px] text-muted-foreground tabular-nums">
-                      <span>0</span>
-                      <span className="text-foreground/70">meta {monthlyGoal.goalSessions}</span>
-                    </div>
-                  </div>
-
-                  {monthlyGoal.goalReached && (
-                    <div className="mt-4 p-3 rounded-lg bg-status-green/5 border border-status-green/20 flex items-center gap-2">
-                      <CheckCircle2 className="h-4 w-4 text-status-green shrink-0" />
-                      <span className="text-sm font-medium text-status-green">Meta do mês alcançada.</span>
-                    </div>
-                  )}
-                </motion.div>
-              );
-            })()}
+                )}
+              </SectionCard>
+            )}
 
             <SectionDivider logo={iconLiberty} label="Liberty" />
 
             <div className="grid grid-cols-2 lg:grid-cols-6 gap-3">
               {libertyCards.map((s) => (
-                <motion.div key={s.label} variants={fadeUpItem} className={s.span}>
-                  <Link
-                    to={s.to}
-                    className={`glass-card p-5 h-full flex flex-col justify-between gap-4 hover:border-silver/40 transition-colors group ${accentTint[s.accent]}`}
-                  >
-                    <div className="flex items-start justify-between gap-3">
-                      <p className="text-[11px] uppercase tracking-wider text-muted-foreground font-medium leading-tight">
-                        {s.label}
-                      </p>
-                      <span className={`h-8 w-8 rounded-lg flex items-center justify-center shrink-0 ${accentBg[s.accent]}`}>
-                        <s.icon className="h-4 w-4" />
-                      </span>
-                    </div>
-                    <div>
-                      <p className="text-3xl font-semibold text-foreground tabular-nums leading-none">{s.value}</p>
-                      {s.hint && <p className="text-[10px] text-muted-foreground mt-1.5 leading-tight">{s.hint}</p>}
-                    </div>
-                  </Link>
-                </motion.div>
+                <StatLinkCard key={s.label} item={s} />
               ))}
             </div>
 
-
-            {/* Members meta tracking — only when not filtering by month (avoids redundancy with gamified goal above) */}
+            {/* Progresso da jornada: só na visão geral (no mês a meta acima já cobre) */}
             {!filterKey && (
-              <motion.div variants={fadeUpItem} className="glass-card p-6">
-                <h2 className="text-sm font-semibold text-foreground flex items-center gap-2 mb-4">
-                  <Target className="h-4 w-4 text-primary" />
-                  Progresso da jornada: 12 sessões
-                </h2>
-                <div className="grid grid-cols-3 gap-3 mb-4">
-                  <div className="p-4 rounded-lg bg-background/40 border border-border">
-                    <p className="text-2xl font-semibold text-status-green tabular-nums leading-none">{membersMetaAnalysis.onTrack}</p>
-                    <p className="text-[10px] text-muted-foreground mt-2 uppercase tracking-wider">Completos</p>
-                  </div>
-                  <div className="p-4 rounded-lg bg-background/40 border border-border">
-                    <p className="text-2xl font-semibold text-status-yellow tabular-nums leading-none">{membersMetaAnalysis.behind}</p>
-                    <p className="text-[10px] text-muted-foreground mt-2 uppercase tracking-wider">Em progresso</p>
-                  </div>
-                  <div className="p-4 rounded-lg bg-background/40 border border-border">
-                    <p className="text-2xl font-semibold text-destructive tabular-nums leading-none">{membersMetaAnalysis.zero}</p>
-                    <p className="text-[10px] text-muted-foreground mt-2 uppercase tracking-wider">Sem iniciar</p>
-                  </div>
+              <SectionCard as="section" className="space-y-4">
+                <SectionHeader as="h3" title="Progresso da jornada: 12 sessões" description="Membros Begin ativos por etapa." />
+                <div className="grid grid-cols-3 gap-3">
+                  <Stat label="Jornada completa" value={membersMetaAnalysis.onTrack} tone="success" />
+                  <Stat label="Em progresso" value={membersMetaAnalysis.behind} tone="warning" />
+                  <Stat label="Sem iniciar" value={membersMetaAnalysis.zero} tone={membersMetaAnalysis.zero > 0 ? "danger" : "default"} />
                 </div>
                 {membersMetaAnalysis.zeroList.length > 0 && (
-                  <div className="rounded-lg border border-border bg-background/30 p-3">
-                    <div className="flex items-center gap-2 text-destructive text-xs font-medium mb-2">
-                      <AlertTriangle className="h-3.5 w-3.5" />
-                      Membros sem nenhuma sessão realizada
-                    </div>
-                    <div className="flex flex-wrap gap-1.5">
+                  <Callout tone="danger" icon={AlertTriangle} title="Membros sem nenhuma sessão realizada">
+                    <div className="flex flex-wrap gap-2 pt-1">
                       {membersMetaAnalysis.zeroList.map((member) => (
-                        <button
-                          key={member.id}
-                          onClick={() => handleMemberClick(member.id)}
-                          className="text-[10px] px-2 py-1 rounded-md bg-background/60 text-foreground border border-border hover:border-destructive/40 hover:text-destructive transition-colors cursor-pointer"
-                        >
+                        <Button key={member.id} size="sm" variant="outline" onClick={() => handleMemberClick(member.id)}>
                           {shortName(member.name)}
-                        </button>
+                        </Button>
                       ))}
                     </div>
-                  </div>
+                  </Callout>
                 )}
-              </motion.div>
+              </SectionCard>
             )}
 
-            {/* Results Ranking */}
+            <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
+              <section className="space-y-3">
+                <SectionHeader
+                  title="Próximas sessões"
+                  description={filterKey ? "Agendadas no mês selecionado." : "Agendadas a partir de hoje."}
+                  actions={
+                    <Button asChild variant="ghost" size="sm">
+                      <Link to="/admin/agenda">Agenda geral</Link>
+                    </Button>
+                  }
+                />
+                {upcomingSessions.length === 0 ? (
+                  <EmptyState compact icon={Calendar} title="Nenhuma sessão agendada" description="Quando os membros agendarem, as próximas sessões aparecem aqui." />
+                ) : (
+                  <SectionCard padding="none">
+                    {upcomingSessions.map((s, index) => (
+                      <ListRow
+                        key={s.booking_id}
+                        last={index === upcomingSessions.length - 1}
+                        onPress={() => navigate(`/admin/agenda?booking=${s.booking_id}`)}
+                        leading={<DateBlock date={s.date} />}
+                        title={`${shortName(s.member_name)} · ${s.session_name}`}
+                        subtitle={`${s.start_time ? `${String(s.start_time).slice(0, 5)} · ` : ""}Mentor: ${shortName(s.mentor_name)}`}
+                        trailing={<StatusPill status={s.status} />}
+                      />
+                    ))}
+                  </SectionCard>
+                )}
+              </section>
+
+              <section className="space-y-3">
+                <SectionHeader
+                  title="Encerramentos próximos"
+                  description="Membros Begin que concluem o programa nos próximos 60 dias."
+                  actions={
+                    <Button asChild variant="ghost" size="sm">
+                      <Link to="/admin/encerramentos">Ver todos</Link>
+                    </Button>
+                  }
+                />
+                {upcomingEndings.length === 0 ? (
+                  <EmptyState compact icon={CalendarClock} title="Nenhum encerramento nos próximos 60 dias" />
+                ) : (
+                  <SectionCard padding="none">
+                    {upcomingEndings.map((m, index) => (
+                      <ListRow
+                        key={m.id}
+                        last={index === upcomingEndings.length - 1}
+                        onPress={() => navigate(`/admin/membros/${m.id}/editar`)}
+                        leading={<DateBlock date={m.program_end_date || ""} tone="muted" />}
+                        title={shortName(m.full_name)}
+                        subtitle={`${m.total_completed}/12 sessões${m.company_name ? ` · ${m.company_name}` : ""}`}
+                        trailing={
+                          <StatusPill tone={endingTone(m.daysLeft)}>
+                            {m.daysLeft === 0 ? "Encerra hoje" : `${m.daysLeft} ${m.daysLeft === 1 ? "dia" : "dias"}`}
+                          </StatusPill>
+                        }
+                      />
+                    ))}
+                  </SectionCard>
+                )}
+              </section>
+            </div>
+
+            {/* Ranking de resultados */}
             <AdminResultsSection />
 
-            {/* Quick links */}
-            <motion.div variants={fadeUpItem} className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-              {[
-                { label: "Ver membros", path: "/admin/membros", icon: Users, color: "text-primary" },
-                { label: "Ver mentores", path: "/admin/mentores", icon: GraduationCap, color: "text-status-blue" },
-                { label: "Financeiro", path: "/admin/financeiro", icon: DollarSign, color: "text-status-green" },
-                { label: "Agenda geral", path: "/admin/agenda", icon: Calendar, color: "text-status-yellow" },
-              ].map((link) => (
-                <Link key={link.path} to={link.path} className="glass-card p-4 flex items-center gap-3 group">
-                  <link.icon className={`h-5 w-5 ${link.color} shrink-0`} />
-                  <span className="text-sm text-foreground group-hover:text-primary transition-colors">{link.label}</span>
-                  <ArrowRight className="h-3.5 w-3.5 text-muted-foreground ml-auto group-hover:translate-x-1 transition-transform shrink-0" />
-                </Link>
-              ))}
-            </motion.div>
+            {/* Atalhos */}
+            <section className="space-y-3">
+              <SectionHeader title="Atalhos" />
+              <SectionCard padding="none">
+                {[
+                  { label: "Ver membros", path: "/admin/membros", icon: Users },
+                  { label: "Ver mentores", path: "/admin/mentores", icon: GraduationCap },
+                  { label: "Financeiro", path: "/admin/financeiro", icon: DollarSign },
+                  { label: "Agenda geral", path: "/admin/agenda", icon: Calendar },
+                ].map((link, index, arr) => (
+                  <ListRow
+                    key={link.path}
+                    last={index === arr.length - 1}
+                    onPress={() => navigate(link.path)}
+                    leading={
+                      <span className="h-10 w-10 rounded-[var(--ds-radius-md)] bg-muted text-foreground flex items-center justify-center">
+                        <link.icon className="h-4 w-4" aria-hidden />
+                      </span>
+                    }
+                    title={link.label}
+                  />
+                ))}
+              </SectionCard>
+            </section>
           </>
         )}
-      </motion.div>
+      </PageContainer>
     </AppLayout>
   );
 };
@@ -413,13 +451,14 @@ const AdminResultsSection = () => {
   const { data: allTasks = [] } = useQuery({
     queryKey: ["admin-result-tasks"],
     queryFn: async () => {
-      const { data } = await supabase
+      const { data, error } = await supabase
         .from("session_tasks")
         .select("*")
         .eq("is_completed", true)
         .not("result_type", "is", null)
         .not("result_value", "is", null);
-      return (data || []).filter((t: any) => String(t.result_value || "").trim().length > 0);
+      if (error) throw error;
+      return (data || []).filter((t) => String(t.result_value || "").trim().length > 0);
     },
   });
 

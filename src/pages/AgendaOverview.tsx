@@ -9,13 +9,27 @@ import {
   ChevronLeft,
   ChevronRight,
   ChevronDown,
-  ArrowRight,
   CalendarCheck,
   CalendarClock,
   Star,
   Info,
-  Filter,
 } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { cn } from "@/lib/utils";
+import {
+  Callout,
+  Chip,
+  DateBlock,
+  EmptyState,
+  IconButton,
+  ListRow,
+  LoadingState,
+  PageContainer,
+  PageHeader,
+  SectionCard,
+  SectionHeader,
+  StatusPill,
+} from "@/components/ds";
 import {
   addDays,
   endOfMonth,
@@ -31,12 +45,32 @@ import {
 import { ptBR } from "date-fns/locale";
 import { staggerContainer, fadeUpItem } from "@/lib/animations";
 import { useDemoData } from "@/contexts/DemoDataContext";
-import { getEffectiveBookingStatus, isVisibleSessionBooking } from "@/lib/bookingStatus";
-import { StatusBadge } from "@/components/StatusBadge";
-import { buildSessionProgress, type SessionProgressStatus } from "@/lib/sessionProgress";
+import {
+  bookingStatusConfig,
+  getEffectiveBookingStatus,
+  isVisibleSessionBooking,
+  parsePlatformDateTime,
+  PENDING_CONFIRMATION_HINT,
+} from "@/lib/bookingStatus";
+import {
+  buildSessionProgress,
+  canScheduleKickoff,
+  KICKOFF_NOT_ALLOWED_MESSAGE,
+  type SessionProgressStatus,
+} from "@/lib/sessionProgress";
 import { shortName } from "@/lib/formatName";
 
 const WEEKDAY_LABELS = ["Dom", "Seg", "Ter", "Qua", "Qui", "Sex", "Sáb"];
+
+const DEFAULT_SESSION_MINUTES = 90;
+
+/** Fim do horário a partir da duração da sessão (Mapeamento = 3h; padrão 1h30). */
+const computeEndTime = (startTime: string, durationMinutes?: number | null) => {
+  const [h, m] = startTime.split(":").map(Number);
+  const duration = durationMinutes && durationMinutes > 0 ? durationMinutes : DEFAULT_SESSION_MINUTES;
+  const total = Math.min(h * 60 + m + duration, 23 * 60 + 59);
+  return `${String(Math.floor(total / 60)).padStart(2, "0")}:${String(total % 60).padStart(2, "0")}`;
+};
 
 const pillarLabels: Record<string, string> = {
   negocios: "Negócios",
@@ -52,6 +86,7 @@ type SessionRow = {
   duration_minutes: number;
   cover_image_url: string | null;
   order: number;
+  is_kickoff?: boolean | null;
 };
 
 type Slot = {
@@ -75,6 +110,8 @@ type BookingRow = {
   status: string;
   zoom_join_url?: string | null;
   approval_required?: boolean;
+  is_retroactive?: boolean | null;
+  report_required?: boolean | null;
 };
 
 type MentorProfileRow = {
@@ -103,35 +140,37 @@ const AgendaOverviewPage = () => {
   const [groupBy, setGroupBy] = useState<"session" | "day" | "time">("session");
   const [expandedGroup, setExpandedGroup] = useState<string | null>(null);
 
-  const { data: sessions = [] } = useQuery<SessionRow[]>({
+  const { data: sessions = [], isLoading: sessionsLoading, isError: sessionsError, refetch: refetchSessions } = useQuery<SessionRow[]>({
     queryKey: ["overview-sessions"],
     queryFn: async () => {
       // NOTE: PostgREST conflicts when filtering AND ordering by a column literally named "order".
       // We fetch all active sessions and filter (order > 0) client-side to avoid that collision.
-      const { data } = await supabase
+      const { data, error } = await supabase
         .from("sessions")
-        .select("id, name, pillar, duration_minutes, cover_image_url, \"order\"")
+        .select("id, name, pillar, duration_minutes, cover_image_url, \"order\", is_kickoff")
         .eq("is_active", true)
         .order("order");
+      if (error) throw error;
       return ((data || []) as SessionRow[]).filter((s) => (s.order ?? 0) > 0);
     },
   });
 
-  const { data: bookings = [] } = useQuery({
+  const { data: bookings = [], isLoading: bookingsLoading } = useQuery<BookingRow[]>({
     queryKey: ["overview-bookings", profile?.id],
     queryFn: async () => {
       if (!profile?.id) return [];
-      const { data } = await supabase
+      const { data, error } = await supabase
         .from("bookings")
-        .select("id, session_id, mentor_id, scheduled_date, start_time, end_time, status, zoom_join_url")
+        .select("id, session_id, mentor_id, scheduled_date, start_time, end_time, status, zoom_join_url, is_retroactive, report_required")
         .eq("liberty_id", profile.id);
-      return data || [];
+      if (error) throw error;
+      return (data || []) as BookingRow[];
     },
     enabled: !!profile?.id,
   });
 
   const mentorIds = useMemo(
-    () => Array.from(new Set((bookings as BookingRow[]).map((b) => b.mentor_id).filter(Boolean) as string[])),
+    () => Array.from(new Set(bookings.map((b) => b.mentor_id).filter((id): id is string => !!id))),
     [bookings]
   );
 
@@ -139,7 +178,8 @@ const AgendaOverviewPage = () => {
     queryKey: ["overview-booking-mentors", mentorIds.join("|")],
     queryFn: async () => {
       if (!mentorIds.length) return [];
-      const { data } = await supabase.from("profiles").select("id, full_name").in("id", mentorIds);
+      const { data, error } = await supabase.from("profiles").select("id, full_name").in("id", mentorIds);
+      if (error) throw error;
       return data || [];
     },
     enabled: mentorIds.length > 0,
@@ -148,10 +188,11 @@ const AgendaOverviewPage = () => {
   const { data: mentorSessions = [] } = useQuery({
     queryKey: ["overview-mentor-sessions"],
     queryFn: async () => {
-      const { data } = await supabase
+      const { data, error } = await supabase
         .from("mentor_sessions")
         .select("mentor_id, session_id")
         .eq("is_active", true);
+      if (error) throw error;
       return data || [];
     },
   });
@@ -217,7 +258,7 @@ const AgendaOverviewPage = () => {
 
   // When demo is ON we REPLACE real data so the admin sees a clean fictitious picture
   // (no clash between real and synthetic bookings).
-  const effectiveBookings = useMemo(
+  const effectiveBookings = useMemo<BookingRow[]>(
     () => (previewMode ? demoBookings : bookings),
     [previewMode, bookings, demoBookings]
   );
@@ -227,6 +268,15 @@ const AgendaOverviewPage = () => {
     [sessions, effectiveBookings]
   );
   const { journeySessions, statusMap: sessionStatusMap, scheduledCount, availableCount } = progress;
+
+  // Sessões que passaram do horário e o mentor ainda não confirmou (ocupam a vaga, não contam como realizadas).
+  const pendingConfirmationCount = useMemo(
+    () => effectiveBookings.filter((b) => getEffectiveBookingStatus(b) === "pending_confirmation").length,
+    [effectiveBookings]
+  );
+
+  // Regra do Mapeamento do Negócio: só pode ser agendado até a 3ª sessão realizada.
+  const kickoffAllowed = useMemo(() => canScheduleKickoff(sessions, effectiveBookings), [sessions, effectiveBookings]);
   const sessionMap = useMemo(() => new Map(sessions.map((s) => [s.id, s])), [sessions]);
   const mentorMap = useMemo(() => {
     const m = new Map(mentorProfiles.map((p) => [p.id, p.full_name]));
@@ -238,15 +288,16 @@ const AgendaOverviewPage = () => {
     const now = new Date();
     return effectiveBookings
       .filter(isVisibleSessionBooking)
-      .filter((b: BookingRow) => {
+      .filter((b) => {
         const status = getEffectiveBookingStatus(b);
         if (status !== "scheduled" && status !== "pending_approval") return false;
-        const endAt = new Date(`${b.scheduled_date}T${(b.end_time || b.start_time || "23:59:59").slice(0, 8)}`);
-        return Number.isNaN(endAt.getTime()) ? true : endAt >= now;
+        // Horário da plataforma (America/Sao_Paulo), independente do fuso do navegador.
+        const endAt = parsePlatformDateTime(b.scheduled_date, b.end_time || b.start_time || "23:59:59");
+        return endAt ? endAt >= now : true;
       })
-      .sort((a: BookingRow, b: BookingRow) => {
-        const aAt = new Date(`${a.scheduled_date}T${(a.start_time || "00:00:00").slice(0, 8)}`).getTime();
-        const bAt = new Date(`${b.scheduled_date}T${(b.start_time || "00:00:00").slice(0, 8)}`).getTime();
+      .sort((a, b) => {
+        const aAt = parsePlatformDateTime(a.scheduled_date, a.start_time || "00:00:00")?.getTime() ?? 0;
+        const bAt = parsePlatformDateTime(b.scheduled_date, b.start_time || "00:00:00")?.getTime() ?? 0;
         return aAt - bAt;
       });
   }, [effectiveBookings]);
@@ -268,10 +319,19 @@ const AgendaOverviewPage = () => {
     [journeySessions, getStatus]
   );
 
+  // Mapeamento do Negócio bloqueado pela regra da 3ª sessão (D2): sai da lista de agendáveis.
+  const kickoffBlocked = useMemo(
+    () => !kickoffAllowed && availableSessions.some((s) => s.is_kickoff),
+    [kickoffAllowed, availableSessions]
+  );
+
   // Sessions surfaced in the slot list = available + completed (completed can be repeated)
   const bookableSessions = useMemo(
-    () => [...availableSessions, ...journeySessions.filter((s) => completedSessionIds.has(s.id))],
-    [availableSessions, journeySessions, completedSessionIds]
+    () =>
+      [...availableSessions, ...journeySessions.filter((s) => completedSessionIds.has(s.id))].filter(
+        (s) => kickoffAllowed || !s.is_kickoff
+      ),
+    [availableSessions, journeySessions, completedSessionIds, kickoffAllowed]
   );
 
   // Mentors that serve at least one currently-available session
@@ -377,7 +437,7 @@ const AgendaOverviewPage = () => {
 
     const grouped = new Map<string, Slot>();
 
-    const pushSlot = (d: Date, st: string, et: string, sess: typeof bookableSessions[0]) => {
+    const pushSlot = (d: Date, st: string, _et: string, sess: typeof bookableSessions[0]) => {
       const ds = format(d, "yyyy-MM-dd");
       const key = `${ds}|${st}|${sess.id}`;
       if (grouped.has(key)) return;
@@ -385,7 +445,8 @@ const AgendaOverviewPage = () => {
         date: d,
         dateStr: ds,
         startTime: st,
-        endTime: et,
+        // O fim é dado pela duração da sessão (Mapeamento = 3h), não pelo bloco de disponibilidade.
+        endTime: computeEndTime(st, sess.duration_minutes),
         sessionId: sess.id,
         sessionName: sess.name,
         pillar: sess.pillar,
@@ -487,9 +548,10 @@ const AgendaOverviewPage = () => {
 
   // User's future scheduled days for calendar markers
   const bookedDateMap = useMemo(() => {
-    const m: Record<string, "scheduled"> = {};
+    const m: Record<string, "scheduled" | "pending_confirmation"> = {};
     effectiveBookings.filter(isVisibleSessionBooking).forEach((b) => {
-      if (getEffectiveBookingStatus(b) === "scheduled") m[b.scheduled_date] = "scheduled";
+      const st = getEffectiveBookingStatus(b);
+      if (st === "scheduled" || st === "pending_confirmation") m[b.scheduled_date] = st;
     });
     return m;
   }, [effectiveBookings]);
@@ -498,303 +560,317 @@ const AgendaOverviewPage = () => {
   const totalUpcoming = allSlots.length;
   const daysWithSlots = Object.keys(slotsByDate).length;
 
+  const isLoading = sessionsLoading || bookingsLoading;
+
   if (profile && profile.is_active === false) {
     return (
       <AppLayout role="liberty">
-        <div className="max-w-xl mx-auto mt-16">
-          <div className="glass-card p-8 text-center space-y-3">
-            <h1 className="text-xl font-semibold text-foreground">Programa encerrado</h1>
-            <p className="text-sm text-muted-foreground">
+        <PageContainer variant="narrow">
+          <PageHeader title="Programa encerrado" back="/jornada" />
+          <Callout tone="info" icon={Info} className="mt-6">
+            <p>
               Seu programa foi finalizado, então novas sessões não podem mais ser agendadas.
               Você continua com acesso aos seus materiais, relatórios e histórico da jornada.
             </p>
-            <p className="text-xs text-muted-foreground">Quer voltar a agendar? Fale com nosso suporte.</p>
-          </div>
-        </div>
+            <p className="mt-2 text-xs text-muted-foreground">Quer voltar a agendar? Fale com nosso suporte.</p>
+          </Callout>
+        </PageContainer>
       </AppLayout>
     );
   }
 
   return (
     <AppLayout role="liberty">
+      <PageContainer variant="wide">
       <motion.div variants={staggerContainer} initial="hidden" animate="show" className="space-y-5">
-        {/* Header */}
-        <motion.div variants={fadeUpItem} className="flex flex-col sm:flex-row sm:items-end justify-between gap-3">
-          <div>
-            <h1 className="text-2xl font-semibold text-foreground">Sua agenda</h1>
-            <p className="text-muted-foreground text-sm mt-1">
-              Escolha um horário disponível e agende em um clique
-            </p>
-          </div>
-          <div className="flex flex-wrap items-center gap-3 text-xs text-muted-foreground">
-            <span className="flex items-center gap-1.5">
-              <CalendarCheck className="h-3.5 w-3.5 text-status-blue" />
-              {scheduledCount} agendada{scheduledCount !== 1 ? "s" : ""}
-            </span>
-            <span className="flex items-center gap-1.5">
-              <Star className="h-3.5 w-3.5 text-primary" />
-              {availableCount} sessão{availableCount !== 1 ? "s" : ""} a agendar
-            </span>
-          </div>
+        {/* Cabeçalho */}
+        <motion.div variants={fadeUpItem}>
+          <PageHeader
+            title="Sua agenda"
+            description="Escolha um horário disponível e agende em um clique."
+            actions={
+              <div className="flex flex-wrap items-center gap-2 justify-end">
+                <StatusPill tone="info">
+                  {scheduledCount} agendada{scheduledCount !== 1 ? "s" : ""}
+                </StatusPill>
+                {pendingConfirmationCount > 0 && (
+                  <span title={PENDING_CONFIRMATION_HINT} className="inline-flex">
+                    <StatusPill tone="pending">{pendingConfirmationCount} a confirmar</StatusPill>
+                  </span>
+                )}
+                <StatusPill tone="brand">
+                  {availableCount} sessão{availableCount !== 1 ? "s" : ""} a agendar
+                </StatusPill>
+              </div>
+            }
+          />
         </motion.div>
 
-        {/* Admin preview hint — driven by the global "Dados fictícios" toggle in the sidebar */}
-        {isAdmin && previewMode && (
-          <motion.div
-            variants={fadeUpItem}
-            className="flex items-center gap-2 rounded-lg border border-dashed border-primary/40 bg-primary/5 px-4 py-2.5 text-xs text-muted-foreground"
-          >
-            <Info className="h-3.5 w-3.5 text-primary" />
-            <span>
-              <strong className="text-foreground">Preview de dados fictícios ativo</strong>. Horários
-              simulados em todas as sessões disponíveis. Desative em "Dados fictícios" na barra lateral.
-            </span>
+        {sessionsError && (
+          <motion.div variants={fadeUpItem}>
+            <Callout
+              tone="danger"
+              icon={Info}
+              title="Não foi possível carregar as sessões"
+              action={<Button variant="outline" size="sm" onClick={() => void refetchSessions()}>Tentar novamente</Button>}
+            >
+              Verifique sua conexão e tente novamente.
+            </Callout>
           </motion.div>
         )}
 
-        {upcomingBookings.length > 0 && (
-          <motion.div variants={fadeUpItem} className="space-y-3">
-            <div className="flex items-center justify-between gap-3">
-              <div>
-                <h2 className="text-sm font-semibold text-foreground">Sessões já agendadas</h2>
-                <p className="text-xs text-muted-foreground">Próximos compromissos confirmados ou aguardando confirmação</p>
-              </div>
-              <span className="text-xs text-muted-foreground">{upcomingBookings.length} futura{upcomingBookings.length !== 1 ? "s" : ""}</span>
-            </div>
-            <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
-              {upcomingBookings.map((booking) => {
+        {kickoffBlocked && (
+          <motion.div variants={fadeUpItem}>
+            <Callout tone="warning" icon={Info}>
+              {KICKOFF_NOT_ALLOWED_MESSAGE} Ele não aparece mais entre os horários disponíveis.
+            </Callout>
+          </motion.div>
+        )}
+
+        {/* Aviso de preview do admin (controlado pelo toggle global "Dados fictícios") */}
+        {isAdmin && previewMode && (
+          <motion.div variants={fadeUpItem}>
+            <Callout tone="brand" icon={Info} title="Preview de dados fictícios ativo">
+              Horários simulados em todas as sessões disponíveis. Desative em "Dados fictícios" na barra lateral.
+            </Callout>
+          </motion.div>
+        )}
+
+        {isLoading && (
+          <motion.div variants={fadeUpItem}>
+            <LoadingState variant="page" />
+          </motion.div>
+        )}
+
+        {!isLoading && upcomingBookings.length > 0 && (
+          <motion.section variants={fadeUpItem} className="space-y-3" aria-labelledby="upcoming-title">
+            <SectionHeader
+              title={<span id="upcoming-title">Sessões já agendadas</span>}
+              description="Próximos compromissos confirmados ou aguardando confirmação."
+              actions={
+                <StatusPill tone="neutral" withDot={false}>
+                  {upcomingBookings.length} futura{upcomingBookings.length !== 1 ? "s" : ""}
+                </StatusPill>
+              }
+            />
+            <SectionCard padding="none">
+              {upcomingBookings.map((booking, i) => {
                 const session = sessionMap.get(booking.session_id);
                 const status = getEffectiveBookingStatus(booking);
-                const isPending = status === "pending_approval";
                 return (
-                  <div
+                  <ListRow
                     key={booking.id}
-                    className={`relative overflow-hidden rounded-lg border bg-card text-foreground shadow-sm ${
-                      isPending ? "border-status-yellow/40" : "border-status-blue/40"
-                    }`}
-                  >
-                    <div className={`absolute left-0 top-0 h-full w-1 z-10 ${isPending ? "bg-status-yellow" : "bg-status-blue"}`} />
-                    {session?.cover_image_url ? (
-                      <div className="relative h-20 w-full overflow-hidden bg-muted/30">
-                        <img
-                          src={session.cover_image_url}
-                          alt=""
-                          className="w-full h-full object-cover"
-                        />
-                        <div className="absolute inset-0 bg-gradient-to-t from-card via-card/60 to-transparent" />
-                        <div className="absolute top-2 right-2">
-                          <StatusBadge status={status} />
-                        </div>
-                      </div>
-                    ) : null}
-                    <div className="p-4">
-                      <div className="flex items-start gap-3">
-                        <div className={`w-12 h-12 rounded-lg flex flex-col items-center justify-center shrink-0 ${isPending ? "bg-status-yellow/12" : "bg-status-blue/12"}`}>
-                          <span className="text-[10px] uppercase leading-none text-muted-foreground">
-                            {format(parseISO(booking.scheduled_date), "MMM", { locale: ptBR })}
-                          </span>
-                          <span className="text-lg font-semibold leading-tight text-foreground">
-                            {format(parseISO(booking.scheduled_date), "dd")}
-                          </span>
-                        </div>
-                        <div className="min-w-0 flex-1">
-                          <p className="text-sm font-semibold truncate text-foreground">{session?.name || "Sessão"}</p>
-                          <p className="text-xs mt-1 truncate text-muted-foreground">
-                            {booking.start_time.slice(0, 5)} – {booking.end_time.slice(0, 5)} · {shortName((mentorMap.get(booking.mentor_id) as string) || "Mentor")}
-                          </p>
-                          {!session?.cover_image_url && (
-                            <div className="mt-2">
-                              <StatusBadge status={status} />
-                            </div>
-                          )}
-                        </div>
-                      </div>
-                    </div>
-                  </div>
+                    href="/agenda"
+                    leading={<DateBlock date={booking.scheduled_date} tone={i === 0 ? "brand" : "default"} />}
+                    title={session?.name || "Sessão"}
+                    subtitle={`${booking.start_time.slice(0, 5)} às ${booking.end_time.slice(0, 5)} · ${shortName(mentorMap.get(booking.mentor_id ?? "") || "Mentor")}`}
+                    trailing={<StatusPill status={status} size="sm" />}
+                    last={i === upcomingBookings.length - 1}
+                  />
                 );
               })}
-            </div>
-          </motion.div>
+            </SectionCard>
+          </motion.section>
         )}
 
-        {/* Hero: Calendar + Available slots list */}
+        {/* Calendário + lista de horários */}
+        {!isLoading && (
         <motion.div
           variants={fadeUpItem}
           className="grid grid-cols-1 lg:grid-cols-[minmax(0,1fr)_minmax(360px,440px)] gap-5 items-start"
         >
-          {/* Calendar */}
-          <div className="glass-card p-5">
-            <div className="flex items-center justify-between mb-4">
-              <button
+          {/* Calendário */}
+          <SectionCard padding="compact">
+            <div className="flex items-center justify-between mb-3">
+              <IconButton
+                aria-label="Mês anterior"
                 onClick={() =>
                   setCalendarMonth(new Date(calendarMonth.getFullYear(), calendarMonth.getMonth() - 1, 1))
                 }
-                className="p-1.5 rounded-lg hover:bg-muted transition-colors"
-                aria-label="Mês anterior"
               >
-                <ChevronLeft className="h-4 w-4 text-muted-foreground" />
-              </button>
-              <div className="text-center">
-                <p className="text-sm font-semibold text-foreground capitalize">
+                <ChevronLeft className="h-4 w-4" />
+              </IconButton>
+              <div className="text-center" aria-live="polite">
+                <p className="text-sm font-semibold text-foreground first-letter:uppercase">
                   {format(calendarMonth, "MMMM yyyy", { locale: ptBR })}
                 </p>
-                <p className="text-[10px] text-muted-foreground mt-0.5">
+                <p className="text-xs text-muted-foreground mt-0.5 tabular-nums">
                   {totalUpcoming} horário{totalUpcoming !== 1 ? "s" : ""} em {daysWithSlots} dia
                   {daysWithSlots !== 1 ? "s" : ""}
                 </p>
               </div>
-              <button
+              <IconButton
+                aria-label="Próximo mês"
                 onClick={() =>
                   setCalendarMonth(new Date(calendarMonth.getFullYear(), calendarMonth.getMonth() + 1, 1))
                 }
-                className="p-1.5 rounded-lg hover:bg-muted transition-colors"
-                aria-label="Próximo mês"
               >
-                <ChevronRight className="h-4 w-4 text-muted-foreground" />
-              </button>
+                <ChevronRight className="h-4 w-4" />
+              </IconButton>
             </div>
 
-            <div className="grid grid-cols-7 gap-1.5 mb-1">
+            <div className="grid grid-cols-7 gap-1 mb-1" aria-hidden>
               {WEEKDAY_LABELS.map((w) => (
-                <div key={w} className="text-[10px] text-muted-foreground text-center font-medium py-1">
+                <div key={w} className="text-xs text-muted-foreground text-center font-medium py-1">
                   {w}
                 </div>
               ))}
             </div>
 
-            <div className="grid grid-cols-7 gap-1.5">
+            <div className="grid grid-cols-7 gap-1" role="grid" aria-label="Dias do mês">
               {calendarDays.map((day, i) => {
                 if (!day) return <div key={`e-${i}`} className="aspect-square" />;
                 const ds = format(day, "yyyy-MM-dd");
                 const count = slotsByDate[ds]?.length || 0;
                 const isPast = isBefore(day, todayDate) && !isToday(day);
                 const hasSlots = count > 0 && !isPast;
-                const isSelected = selectedDate && isSameDay(day, selectedDate);
+                const isSelected = Boolean(selectedDate && isSameDay(day, selectedDate));
                 const userBooking = bookedDateMap[ds];
                 const intensity =
                   count >= 6
-                    ? "bg-primary/30 hover:bg-primary/40 border-primary/40 text-foreground"
+                    ? "bg-primary/25 hover:bg-primary/30 text-foreground"
                     : count >= 3
-                    ? "bg-primary/20 hover:bg-primary/30 border-primary/30 text-foreground"
+                    ? "bg-primary/15 hover:bg-primary/25 text-foreground"
                     : count > 0
-                    ? "bg-primary/10 hover:bg-primary/20 border-primary/25 text-foreground"
+                    ? "bg-primary/10 hover:bg-primary/15 text-foreground"
                     : "";
+                const dayLabel = format(day, "EEEE, dd 'de' MMMM", { locale: ptBR });
+                const ariaLabel = userBooking === "scheduled"
+                  ? `${dayLabel}, sessão agendada`
+                  : userBooking === "pending_confirmation"
+                  ? `${dayLabel}, sessão a confirmar`
+                  : hasSlots
+                  ? `${dayLabel}, ${count} horário${count !== 1 ? "s" : ""}`
+                  : `${dayLabel}, sem horários`;
 
                 return (
                   <button
                     key={day.toISOString()}
+                    type="button"
                     disabled={!hasSlots}
+                    aria-pressed={isSelected}
+                    aria-label={ariaLabel}
                     onClick={() => setSelectedDate(isSelected ? null : day)}
-                    className={`aspect-square rounded-lg text-xs font-medium relative flex flex-col items-center justify-center transition-all border ${
+                    className={cn(
+                      "aspect-square min-h-[44px] rounded-ds text-sm font-medium relative flex flex-col items-center justify-center transition-colors duration-ds-1 ease-ds",
+                      "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 ring-offset-background",
                       isSelected
-                        ? "bg-primary text-primary-foreground border-primary ring-2 ring-primary/40"
+                        ? "bg-primary text-primary-foreground"
                         : userBooking === "scheduled"
-                        ? "bg-status-blue/15 text-status-blue border-status-blue/25 cursor-default"
+                        ? "bg-status-blue/15 text-status-blue cursor-default"
+                        : userBooking === "pending_confirmation"
+                        ? "bg-status-orange/15 text-status-orange cursor-default"
                         : hasSlots
-                        ? `${intensity} cursor-pointer`
-                        : "text-muted-foreground/35 border-transparent cursor-not-allowed"
-                    }`}
+                        ? intensity
+                        : "text-muted-foreground/40 cursor-not-allowed",
+                    )}
                   >
                     <span>{day.getDate()}</span>
                     {hasSlots && !isSelected && (
-                      <span className="text-[9px] mt-0.5 tabular-nums opacity-80">{count}</span>
+                      <span className="text-[11px] leading-none mt-0.5 tabular-nums opacity-80" aria-hidden>{count}</span>
                     )}
                     {userBooking && !isSelected && !hasSlots && (
-                      <CalendarClock className="h-2.5 w-2.5 mt-0.5" />
+                      <CalendarClock className="h-3 w-3 mt-0.5" aria-hidden />
                     )}
                   </button>
                 );
               })}
             </div>
 
-            <div className="flex flex-wrap items-center gap-3 mt-4 text-[10px] text-muted-foreground">
+            <div className="flex flex-wrap items-center gap-3 mt-4 text-xs text-muted-foreground">
               <span className="flex items-center gap-1.5">
-                <span className="w-2.5 h-2.5 rounded bg-primary/30 border border-primary/40" /> Muitos
+                <span aria-hidden className="w-2.5 h-2.5 rounded-sm bg-primary/25" /> Muitos horários
               </span>
               <span className="flex items-center gap-1.5">
-                <span className="w-2.5 h-2.5 rounded bg-primary/10 border border-primary/25" /> Poucos
+                <span aria-hidden className="w-2.5 h-2.5 rounded-sm bg-primary/10" /> Poucos horários
               </span>
               <span className="flex items-center gap-1.5">
-                <CalendarClock className="h-3 w-3 text-status-blue" /> Já agendada
+                <span aria-hidden className="w-2.5 h-2.5 rounded-sm bg-status-blue/15 border border-status-blue/30" /> {bookingStatusConfig.scheduled.label}
               </span>
+              {pendingConfirmationCount > 0 && (
+                <span className="flex items-center gap-1.5" title={PENDING_CONFIRMATION_HINT}>
+                  <span aria-hidden className="w-2.5 h-2.5 rounded-sm bg-status-orange/15 border border-status-orange/30" /> {bookingStatusConfig.pending_confirmation.label}
+                </span>
+              )}
               {selectedDate && (
-                <button
-                  onClick={() => setSelectedDate(null)}
-                  className="ml-auto text-[11px] text-primary hover:underline"
-                >
+                <Button variant="link" size="sm" className="ml-auto h-auto p-0" onClick={() => setSelectedDate(null)}>
                   Ver todos os dias
-                </button>
+                </Button>
               )}
             </div>
-          </div>
+          </SectionCard>
 
-          {/* Available slots list */}
-          <div className="glass-card p-5 flex flex-col lg:max-h-[640px]">
-            <div className="flex items-center justify-between mb-3 pb-3 border-b border-border">
-              <div className="min-w-0">
-                <h2 className="text-sm font-semibold text-foreground flex items-center gap-2">
-                  <CalendarClock className="h-4 w-4 text-primary" />
-                  {selectedDate ? "Horários do dia" : "Próximos horários"}
-                </h2>
-                <p className="text-[11px] text-muted-foreground mt-0.5 capitalize">
-                  {selectedDate
-                    ? format(selectedDate, "EEEE, dd 'de' MMMM", { locale: ptBR })
-                    : `${visibleSlots.length} disponíve${visibleSlots.length !== 1 ? "is" : "l"}`}
-                </p>
-              </div>
+          {/* Horários disponíveis */}
+          <SectionCard padding="compact" className="flex flex-col lg:max-h-[640px]">
+            <div className="flex items-center justify-between gap-3 mb-3 pb-3 border-b border-border">
+              <SectionHeader
+                as="h2"
+                title={
+                  <span className="inline-flex items-center gap-2">
+                    <CalendarClock className="h-4 w-4 text-primary" aria-hidden />
+                    {selectedDate ? "Horários do dia" : "Próximos horários"}
+                  </span>
+                }
+                description={
+                  <span className="first-letter:uppercase inline-block">
+                    {selectedDate
+                      ? format(selectedDate, "EEEE, dd 'de' MMMM", { locale: ptBR })
+                      : `${visibleSlots.length} disponíve${visibleSlots.length !== 1 ? "is" : "l"}`}
+                  </span>
+                }
+                className="min-w-0"
+              />
               {selectedDate && (
-                <button
-                  onClick={() => setSelectedDate(null)}
-                  className="text-[11px] text-primary flex items-center gap-1 hover:underline"
-                >
-                  <Filter className="h-3 w-3" /> Limpar
-                </button>
+                <Button variant="ghost" size="sm" onClick={() => setSelectedDate(null)}>
+                  Limpar
+                </Button>
               )}
             </div>
 
             {availableSessions.length === 0 ? (
-              <div className="flex-1 flex flex-col items-center justify-center text-center py-10">
-                <CalendarCheck className="h-8 w-8 text-status-green/60 mx-auto mb-3" />
-                <p className="text-sm font-medium text-foreground">Tudo agendado!</p>
-                <p className="text-xs text-muted-foreground mt-1">
-                  Você não tem sessões pendentes da jornada.
-                </p>
-              </div>
+              <EmptyState
+                compact
+                icon={CalendarCheck}
+                title="Tudo agendado"
+                description="Você não tem sessões pendentes da jornada."
+              />
             ) : visibleSlots.length === 0 ? (
-              <div className="flex-1 flex flex-col items-center justify-center text-center py-10">
-                <CalendarClock className="h-8 w-8 text-muted-foreground/40 mx-auto mb-3" />
-                <p className="text-sm font-medium text-foreground">
-                  {selectedDate ? "Sem horários neste dia" : "Sem horários disponíveis"}
-                </p>
-                <p className="text-xs text-muted-foreground mt-1 max-w-[260px]">
-                  {selectedDate
+              <EmptyState
+                compact
+                icon={CalendarClock}
+                title={selectedDate ? "Sem horários neste dia" : "Sem horários disponíveis"}
+                description={
+                  selectedDate
                     ? "Escolha outro dia destacado no calendário."
-                    : "Os mentores ainda não publicaram horários. Tente novamente em breve."}
-                </p>
-              </div>
+                    : "Os mentores ainda não publicaram horários. Tente novamente em breve."
+                }
+                action={
+                  selectedDate ? (
+                    <Button variant="outline" size="sm" onClick={() => setSelectedDate(null)}>Ver todos os dias</Button>
+                  ) : undefined
+                }
+              />
             ) : (
               <div className="flex-1 flex flex-col min-h-0">
-                {/* Toggle: agrupar por sessão / dia / horário */}
-                <div className="flex flex-wrap gap-1.5 mb-3">
-                  {[
+                {/* Agrupar por sessão / dia / horário */}
+                <div className="flex flex-wrap gap-2 mb-3" role="group" aria-label="Agrupar horários">
+                  {([
                     { key: "session", label: "Por sessão" },
                     // Oculta "Por dia" quando o usuário já filtrou por um dia específico no calendário
                     ...(selectedDate ? [] : [{ key: "day", label: "Por dia" }]),
                     { key: "time", label: "Por horário" },
-                  ].map((g) => (
-                    <button
+                  ] as Array<{ key: "session" | "day" | "time"; label: string }>).map((g) => (
+                    <Chip
                       key={g.key}
-                      onClick={() => { setGroupBy(g.key as any); setExpandedGroup(null); }}
-                      className={`text-[11px] px-2.5 py-1 rounded-full border transition-colors ${
-                        groupBy === g.key ? "bg-primary/10 text-primary border-primary/30" : "bg-card text-muted-foreground border-border hover:border-primary/25"
-                      }`}
+                      active={groupBy === g.key}
+                      onClick={() => { setGroupBy(g.key); setExpandedGroup(null); }}
                     >
                       {g.label}
-                    </button>
+                    </Chip>
                   ))}
                 </div>
 
-                <div className="flex-1 overflow-y-auto -mr-2 pr-2 space-y-1.5">
+                <div className="flex-1 overflow-y-auto -mr-2 pr-2 space-y-2">
                   {(() => {
                     // Agrupa conforme seleção
                     const grouped = new Map<string, { label: string; sublabel: string; cover: string | null; pillar: string | null; slots: Slot[]; sortKey: string }>();
@@ -833,40 +909,47 @@ const AgendaOverviewPage = () => {
 
                     return entries.map(([key, group]) => {
                       const isOpen = expandedGroup === key;
-                      const hasToday = group.slots.some((s) => isToday(s.date));
+                      const groupId = `slot-group-${groupBy}-${key.replace(/[^a-zA-Z0-9_-]/g, "")}`;
                       return (
-                        <div key={key} className="rounded-md border border-border bg-card overflow-hidden">
+                        <div key={key} className="rounded-ds-lg border border-border bg-card overflow-hidden">
                           <button
+                            type="button"
                             onClick={() => setExpandedGroup(isOpen ? null : key)}
-                            className="w-full flex items-center gap-2.5 px-2 py-1.5 hover:bg-muted/40 transition-colors text-left"
+                            aria-expanded={isOpen}
+                            aria-controls={groupId}
+                            className={cn(
+                              "w-full flex items-center gap-3 px-3 min-h-[56px] py-2 text-left transition-colors duration-ds-1 ease-ds hover:bg-accent",
+                              "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset",
+                            )}
                           >
                             {groupBy === "session" ? (
                               group.cover ? (
-                                <img src={group.cover} alt="" className="w-8 h-8 object-contain rounded bg-muted/30 flex-shrink-0" />
+                                <img src={group.cover} alt="" className="w-10 h-10 object-cover rounded-ds bg-muted flex-shrink-0" />
                               ) : (
-                                <div className="w-8 h-8 rounded bg-primary/10 flex-shrink-0 flex items-center justify-center">
-                                  <CalendarCheck className="h-3.5 w-3.5 text-primary/60" />
+                                <div className="w-10 h-10 rounded-ds bg-primary/10 flex-shrink-0 flex items-center justify-center">
+                                  <CalendarCheck className="h-4 w-4 text-primary" aria-hidden />
                                 </div>
                               )
                             ) : (
-                              <div className="w-8 h-8 rounded flex-shrink-0 flex items-center justify-center bg-primary/10">
-                                <CalendarClock className="h-3.5 w-3.5 text-primary/70" />
+                              <div className="w-10 h-10 rounded-ds flex-shrink-0 flex items-center justify-center bg-primary/10">
+                                <CalendarClock className="h-4 w-4 text-primary" aria-hidden />
                               </div>
                             )}
                             <div className="flex-1 min-w-0">
-                              <p className="text-sm font-medium text-foreground truncate leading-tight capitalize">{group.label}</p>
-                              <p className="text-[10px] text-muted-foreground mt-0.5">
+                              <p className="text-[15px] font-medium text-foreground truncate leading-tight first-letter:uppercase">{group.label}</p>
+                              <p className="text-xs text-muted-foreground mt-0.5 tabular-nums">
                                 {group.slots.length} {group.slots.length === 1 ? "horário" : "horários"}
                                 {group.sublabel && <span> · {group.sublabel}</span>}
                               </p>
                             </div>
                             <ChevronDown
-                              className={`h-4 w-4 text-muted-foreground transition-transform flex-shrink-0 ${isOpen ? "rotate-180" : ""}`}
+                              aria-hidden
+                              className={cn("h-4 w-4 text-muted-foreground transition-transform duration-ds-1 ease-ds flex-shrink-0", isOpen && "rotate-180")}
                             />
                           </button>
 
                           {isOpen && (
-                            <div className="border-t border-border p-1.5 space-y-1 bg-background/40">
+                            <div id={groupId} className="border-t border-border bg-muted/30">
                               {group.slots
                                 .slice()
                                 .sort((a, b) =>
@@ -876,50 +959,40 @@ const AgendaOverviewPage = () => {
                                     ? a.startTime.localeCompare(b.startTime)
                                     : a.dateStr.localeCompare(b.dateStr)
                                 )
-                                .map((s, idx) => {
+                                .map((s, idx, arr) => {
                                   const today = isToday(s.date);
                                   const dayLabel = today
                                     ? "Hoje"
                                     : isSameDay(s.date, addDays(todayDate, 1))
                                     ? "Amanhã"
                                     : format(s.date, "EEE, dd MMM", { locale: ptBR });
+                                  const title = groupBy === "session"
+                                    ? <span className="first-letter:uppercase inline-block">{dayLabel}</span>
+                                    : s.sessionName;
+                                  const subtitle = groupBy === "session"
+                                    ? undefined
+                                    : groupBy === "day"
+                                    ? undefined
+                                    : <span className="first-letter:uppercase inline-block">{dayLabel}</span>;
                                   return (
-                                    <Link
+                                    <ListRow
                                       key={`${s.dateStr}-${s.startTime}-${s.sessionId}-${idx}`}
-                                      to={`/agenda/agendar?sessionId=${s.sessionId}&date=${s.dateStr}&time=${s.startTime}`}
-                                      className="group flex items-center gap-2 rounded border bg-card transition-all pl-2 pr-2 py-1.5 border-border hover:border-primary/50 hover:bg-primary/5"
-                                    >
-                                      <div className="flex-1 min-w-0">
-                                        {groupBy !== "session" && (
-                                          <p className="text-xs font-medium text-foreground truncate leading-tight">
-                                            {s.sessionName}
-                                          </p>
-                                        )}
-                                        <div className="flex items-center gap-1.5 text-[10px] text-muted-foreground mt-0.5">
-                                          {groupBy !== "day" && (
-                                            <span className={`font-semibold uppercase tracking-wider ${today ? "text-muted-foreground" : "text-primary"}`}>
-                                              {dayLabel}
-                                            </span>
-                                          )}
-                                          {groupBy === "day" && (
-                                            <span className={`font-semibold uppercase tracking-wider text-primary`}>
-                                              {s.startTime}
-                                            </span>
-                                          )}
+                                      href={`/agenda/agendar?sessionId=${s.sessionId}&date=${s.dateStr}&time=${s.startTime}`}
+                                      title={title}
+                                      subtitle={subtitle}
+                                      last={idx === arr.length - 1}
+                                      trailing={
+                                        <span className="flex items-center gap-2">
                                           {today && (
-                                            <span className="text-[9px] px-1.5 py-0.5 rounded bg-muted/40 text-muted-foreground border border-border">
-                                              requer aprovação
-                                            </span>
+                                            <StatusPill tone="warning" size="sm" withDot={false}>Requer aprovação</StatusPill>
                                           )}
-                                        </div>
-                                      </div>
-                                      <div className="flex flex-col items-end flex-shrink-0">
-                                        <span className="text-xs font-bold text-foreground tabular-nums leading-tight">
-                                          {s.startTime}
+                                          <span className="flex flex-col items-end">
+                                            <span className="text-sm font-semibold text-foreground tabular-nums leading-tight">{s.startTime}</span>
+                                            <span className="text-xs text-muted-foreground tabular-nums">até {s.endTime}</span>
+                                          </span>
                                         </span>
-                                        <span className="text-[9px] text-muted-foreground tabular-nums">até {s.endTime}</span>
-                                      </div>
-                                    </Link>
+                                      }
+                                    />
                                   );
                                 })}
                             </div>
@@ -932,9 +1005,11 @@ const AgendaOverviewPage = () => {
               </div>
             )}
 
-          </div>
+          </SectionCard>
         </motion.div>
+        )}
       </motion.div>
+      </PageContainer>
     </AppLayout>
   );
 };

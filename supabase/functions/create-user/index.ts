@@ -1,206 +1,131 @@
-import { createClient } from "https://esm.sh/@supabase/supabase-js@2.99.2";
-
-const corsHeaders = {
-  "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
-  "Access-Control-Allow-Methods": "POST, OPTIONS",
-};
+// Cria um membro/mentor (com conta de acesso quando há e-mail, ou só o cadastro).
+// Somente admin/super_admin. Apenas super_admin pode criar admin/super_admin.
+// A senha temporária é aleatória e devolvida na resposta (`password`) para o
+// admin repassar por WhatsApp; nunca é registrada em logs.
+import { handleOptions, json, errorJson } from "../_shared/cors.ts";
+import { requireRole, assertCanAssignRole, toResponse, ALL_ROLES, ADMIN_ROLES, type AppRole } from "../_shared/auth.ts";
+import { normalizeEmail, findProfilesByEmail, ensureAuthUserForEmail } from "../_shared/accounts.ts";
 
 Deno.serve(async (req) => {
-  if (req.method === "OPTIONS") {
-    return new Response("ok", { headers: corsHeaders });
-  }
+  const preflight = handleOptions(req);
+  if (preflight) return preflight;
 
   try {
-    // Verify the caller is an admin
-    const authHeader = req.headers.get("Authorization");
-    if (!authHeader) {
-      return new Response(JSON.stringify({ error: "Missing authorization" }), {
-        status: 401,
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
-    }
+    const ctx = await requireRole(req, ADMIN_ROLES);
+    const admin = ctx.supabaseAdmin;
 
-    const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
-    const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
-
-    // Verify caller is admin using their token
-    const anonClient = createClient(supabaseUrl, Deno.env.get("SUPABASE_ANON_KEY")!);
-    const token = authHeader.replace("Bearer ", "");
-    const { data: { user: caller }, error: authError } = await anonClient.auth.getUser(token);
-    if (authError || !caller) {
-      return new Response(JSON.stringify({ error: "Invalid token" }), {
-        status: 401,
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
-    }
-
-    // Check admin role
-    const adminClient = createClient(supabaseUrl, serviceRoleKey);
-    const { data: roleData } = await adminClient
-      .from("user_roles")
-      .select("role")
-      .eq("user_id", caller.id)
-      .in("role", ["admin", "super_admin"])
-      .maybeSingle();
-
-    if (!roleData) {
-      return new Response(JSON.stringify({ error: "Not authorized" }), {
-        status: 403,
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
-    }
-
-    // Parse request body
-    const body = await req.json();
-    const { email, password: providedPassword, full_name, role, phone, company_name, program_start_date, program_end_date, session_rate, member_tier } = body;
+    const body = await req.json().catch(() => ({}));
+    const {
+      email: rawEmail,
+      password: providedPassword,
+      full_name,
+      role,
+      phone,
+      company_name,
+      program_start_date,
+      program_end_date,
+      session_rate,
+      member_tier,
+    } = body || {};
 
     if (!full_name || !role) {
-      return new Response(JSON.stringify({ error: "Missing required fields: full_name, role" }), {
-        status: 400,
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
+      return errorJson("Campos obrigatórios: full_name e role.", 400);
     }
-
-    // Generate a strong random default password when the admin didn't supply one.
-    const generateRandomPassword = () => {
-      const bytes = new Uint8Array(18);
-      crypto.getRandomValues(bytes);
-      const alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz23456789";
-      let out = "";
-      for (const b of bytes) out += alphabet[b % alphabet.length];
-      return out + "!" + Math.floor(Math.random() * 90 + 10);
-    };
-    const password =
-      providedPassword && String(providedPassword).length >= 6
-        ? providedPassword
-        : generateRandomPassword();
-
-    if (!["liberty", "mentor", "admin", "super_admin"].includes(role)) {
-      return new Response(JSON.stringify({ error: "Role inválido" }), {
-        status: 400,
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
+    if (!ALL_ROLES.includes(role as AppRole)) {
+      return errorJson("Papel inválido.", 400);
     }
+    assertCanAssignRole(ctx, role);
 
-    // Two modes:
-    //  - email provided  -> create auth user + profile + role (full access)
-    //  - email missing   -> create profile-only record (no auth user yet).
-    //                        Admin can later add email and "Gerar acesso" to invite.
+    const normalizedEmail = normalizeEmail(rawEmail);
+    const fullName = String(full_name).trim();
+
+    // Dois modos:
+    //  - com e-mail: cria conta de acesso + perfil + papel
+    //  - sem e-mail: cria só o cadastro; o admin gera o acesso depois (reset-and-invite)
     let userId: string | null = null;
-    if (email && String(email).trim()) {
-      const normalizedEmail = String(email).trim().toLowerCase();
+    let password: string | null = null;
 
-      // Check if an auth user already exists for this email (idempotent behaviour)
-      const { data: existingProfile } = await adminClient
-        .from("profiles")
-        .select("id, user_id, full_name")
-        .eq("email", normalizedEmail)
-        .maybeSingle();
-      if (existingProfile?.user_id) {
-        return new Response(
-          JSON.stringify({
-            error: `Já existe um membro cadastrado com este e-mail (${existingProfile.full_name}). Edite o cadastro existente ou use outro e-mail.`,
-          }),
-          { status: 409, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+    if (normalizedEmail) {
+      const existing = await findProfilesByEmail(admin, normalizedEmail);
+      const withAccount = existing.find((p) => p.user_id);
+      if (withAccount) {
+        return errorJson(
+          "Já existe um membro cadastrado com este e-mail e com conta de acesso. Edite o cadastro existente ou use outro e-mail.",
+          409,
+        );
+      }
+      if (existing.length > 0) {
+        return errorJson(
+          "Já existe um cadastro com este e-mail, ainda sem conta de acesso. Abra esse cadastro e use Gerar acesso.",
+          409,
         );
       }
 
-      const { data: newUser, error: createError } = await adminClient.auth.admin.createUser({
+      // Cria a conta; se já existir conta órfã (sem perfil) com o mesmo e-mail, reaproveita.
+      const account = await ensureAuthUserForEmail(admin, {
         email: normalizedEmail,
-        password,
-        email_confirm: true,
-        user_metadata: { full_name },
+        fullName,
+        password: providedPassword ? String(providedPassword) : undefined,
       });
-
-      if (createError) {
-        const msg = createError.message || "";
-        const friendly = /already been registered|already exists|duplicate/i.test(msg)
-          ? "Já existe uma conta de acesso com este e-mail. Use outro e-mail ou edite o cadastro existente."
-          : msg;
-        return new Response(JSON.stringify({ error: friendly }), {
-          status: 400,
-          headers: { ...corsHeaders, "Content-Type": "application/json" },
-        });
-      }
-      userId = newUser.user.id;
+      userId = account.userId;
+      password = account.password;
     }
 
-    // Create/update the profile directly so member creation does not depend on database triggers
-    const profileUpdate: Record<string, unknown> = {
-      full_name: String(full_name).trim(),
-    };
+    const profileUpdate: Record<string, unknown> = { full_name: fullName };
     if (userId) profileUpdate.user_id = userId;
-    if (email && String(email).trim()) profileUpdate.email = String(email).trim().toLowerCase();
-    if (phone) profileUpdate.phone = phone;
-    if (company_name) profileUpdate.company_name = company_name;
+    if (normalizedEmail) profileUpdate.email = normalizedEmail;
+    if (phone) profileUpdate.phone = String(phone).trim();
+    if (company_name) profileUpdate.company_name = String(company_name).trim();
     if (program_start_date) profileUpdate.program_start_date = program_start_date;
     if (program_end_date) profileUpdate.program_end_date = program_end_date;
-    if (session_rate !== undefined) profileUpdate.session_rate = session_rate;
+    if (session_rate !== undefined && session_rate !== null && session_rate !== "") {
+      const rate = Number(session_rate);
+      if (Number.isNaN(rate)) return errorJson("session_rate inválido.", 400);
+      profileUpdate.session_rate = rate;
+    }
     if (member_tier && ["begin", "liberty"].includes(member_tier)) profileUpdate.member_tier = member_tier;
 
     let profileId: string | null = null;
     if (userId) {
-      // Upsert by user_id when we have an auth account
-      const { error: profileError } = await adminClient
+      // O trigger handle_new_user pode já ter criado/vinculado o perfil: upsert por user_id.
+      const { error: profileError } = await admin
         .from("profiles")
         .upsert(profileUpdate, { onConflict: "user_id" });
       if (profileError) {
-        await adminClient.auth.admin.deleteUser(userId);
-        return new Response(JSON.stringify({ error: profileError.message }), {
-          status: 400,
-          headers: { ...corsHeaders, "Content-Type": "application/json" },
-        });
+        await admin.auth.admin.deleteUser(userId);
+        return errorJson(profileError.message, 400);
       }
-      // Assign role only when there's an auth user
-      const { error: roleError } = await adminClient
+      const { error: roleError } = await admin
         .from("user_roles")
         .upsert({ user_id: userId, role }, { onConflict: "user_id,role" });
       if (roleError) {
-        await adminClient.auth.admin.deleteUser(userId);
-        return new Response(JSON.stringify({ error: roleError.message }), {
-          status: 400,
-          headers: { ...corsHeaders, "Content-Type": "application/json" },
-        });
+        await admin.auth.admin.deleteUser(userId);
+        return errorJson(roleError.message, 400);
       }
-      const { data: profileData } = await adminClient
-        .from("profiles")
-        .select("id")
-        .eq("user_id", userId)
-        .single();
+      const { data: profileData } = await admin
+        .from("profiles").select("id").eq("user_id", userId).maybeSingle();
       profileId = profileData?.id ?? null;
     } else {
-      // Profile-only (no email yet) — create an orphan profile to be linked later
-      const { data: inserted, error: profileError } = await adminClient
+      const { data: inserted, error: profileError } = await admin
         .from("profiles")
         .insert(profileUpdate)
         .select("id")
         .single();
-      if (profileError) {
-        return new Response(JSON.stringify({ error: profileError.message }), {
-          status: 400,
-          headers: { ...corsHeaders, "Content-Type": "application/json" },
-        });
-      }
+      if (profileError) return errorJson(profileError.message, 400);
       profileId = inserted?.id ?? null;
     }
 
-    return new Response(
-      JSON.stringify({
-        success: true,
-        user_id: userId,
-        profile_id: profileId,
-        password: userId ? password : null,
-        message: userId
-          ? `User created with role ${role}`
-          : `Profile-only created (no auth user yet)`,
-      }),
-      { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-    );
-  } catch (err) {
-    return new Response(JSON.stringify({ error: err.message }), {
-      status: 500,
-      headers: { ...corsHeaders, "Content-Type": "application/json" },
+    return json({
+      success: true,
+      user_id: userId,
+      profile_id: profileId,
+      email: normalizedEmail || null,
+      password,
+      message: userId
+        ? `Usuário criado com papel ${role}`
+        : "Cadastro criado sem conta de acesso (gere o acesso depois)",
     });
+  } catch (err) {
+    return toResponse(err);
   }
 });

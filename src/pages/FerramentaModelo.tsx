@@ -6,11 +6,23 @@ import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/hooks/useAuth";
 import { toast } from "sonner";
 import { ToolWizard } from "@/components/tools/ToolWizard";
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { DIAGNOSTICO_BEGIN_SLUG, type Answers } from "@/lib/diagnosticoBegin";
-import { shortName, initials } from "@/lib/formatName";
+import { shortName } from "@/lib/formatName";
+import { UserAvatar } from "@/components/UserAvatar";
+import { Button } from "@/components/ui/button";
 import {
-  ArrowLeft, ArrowRight, Check, Loader2, Radar as RadarIcon, Search,
+  BottomSheet,
+  Chip,
+  EmptyState,
+  IconButton,
+  ListRow,
+  LoadingState,
+  PageContainer,
+  PageHeader,
+  TextField,
+} from "@/components/ds";
+import {
+  ArrowLeft, ArrowRight, Loader2, Radar as RadarIcon, Search, Play,
 } from "lucide-react";
 
 
@@ -108,156 +120,103 @@ const FerramentaModeloPage = ({ role = "mentor" }: { role?: "mentor" | "admin" }
 
   return (
     <div className="fixed inset-0 z-50 bg-background overflow-y-auto">
-      <div className="sticky top-0 z-20 backdrop-blur-xl bg-background/85 border-b border-border">
+      <div className="sticky top-0 z-20 bg-background/95 backdrop-blur border-b border-border">
         <div
-          className="max-w-5xl mx-auto px-4 flex items-center gap-3"
-          style={{ paddingTop: "calc(env(safe-area-inset-top) + 0.75rem)", paddingBottom: "0.75rem" }}
+          className="max-w-2xl mx-auto px-4 sm:px-6 flex items-center gap-3"
+          style={{ paddingTop: "calc(env(safe-area-inset-top) + 0.5rem)", paddingBottom: "0.5rem" }}
         >
-          <button
-            onClick={() => navigate(base)}
-            className="h-9 px-3 rounded-xl border border-border flex items-center gap-1.5 text-xs font-medium text-muted-foreground hover:text-foreground shrink-0"
-          >
-            <ArrowLeft className="h-4 w-4" /> Voltar
-          </button>
+          <IconButton aria-label="Voltar" onClick={() => navigate(base)}>
+            <ArrowLeft className="h-5 w-5" />
+          </IconButton>
           <div className="min-w-0 flex-1">
             <p className="text-sm font-semibold text-foreground truncate">Mapeamento do Negócio</p>
           </div>
-          <div className="h-9 w-9 rounded-xl flex items-center justify-center shrink-0 bg-primary/10">
-            <RadarIcon className="h-4 w-4 text-primary" />
+          <div className="h-9 w-9 rounded-full flex items-center justify-center shrink-0 bg-primary/10">
+            <RadarIcon className="h-4 w-4 text-primary" aria-hidden />
           </div>
         </div>
       </div>
 
-      {/* Hero estilo landing page */}
-      <div className="relative overflow-hidden">
-        <div className="absolute -top-40 -right-24 h-[26rem] w-[26rem] rounded-full blur-3xl bg-primary/20" />
-        <div className="absolute -bottom-40 -left-24 h-80 w-80 rounded-full blur-3xl bg-primary/10" />
-        <div className="relative max-w-5xl mx-auto px-4 pt-14 pb-10 sm:pt-24 sm:pb-16 text-center">
-          <motion.span
-            initial={{ opacity: 0, y: 8 }}
-            animate={{ opacity: 1, y: 0 }}
-            className="inline-flex items-center gap-1.5 text-[10px] uppercase tracking-[0.28em] font-semibold px-3 py-1.5 rounded-full bg-primary/10 text-primary"
-          >
-            Ferramenta Begin
-          </motion.span>
-          <motion.h1
-            initial={{ opacity: 0, y: 12 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ delay: 0.05 }}
-            className="text-4xl sm:text-6xl font-semibold text-foreground mt-5 leading-[1.02] tracking-tight"
-          >
-            Mapeamento do Negócio
-          </motion.h1>
-          <motion.p
-            initial={{ opacity: 0, y: 12 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ delay: 0.1 }}
-            className="text-base sm:text-lg text-muted-foreground mt-5 leading-relaxed max-w-2xl mx-auto"
-          >
-            {template?.description ||
-              "Uma conversa guiada, uma pergunta por vez, no ritmo da sessão. No final, um retrato claro do momento do negócio."}
-          </motion.p>
-          <motion.button
-            initial={{ opacity: 0, y: 12 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ delay: 0.15 }}
-            onClick={() => setPicker(true)}
-            className="mt-9 inline-flex items-center gap-2 px-10 py-4 rounded-full bg-primary text-primary-foreground text-base font-semibold shadow-xl hover:opacity-90 transition-opacity"
-          >
-            Iniciar <ArrowRight className="h-5 w-5" />
-          </motion.button>
-        </div>
-      </div>
+      {/* Abertura */}
+      <PageContainer variant="narrow" className="pt-10 sm:pt-16 pb-24">
+        <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} className="space-y-8">
+          <PageHeader
+            size="large"
+            eyebrow="Ferramenta Begin"
+            title="Mapeamento do Negócio"
+            description={
+              template?.description ||
+              "Uma conversa guiada, uma pergunta por vez, no ritmo da sessão. No final, um retrato claro do momento do negócio."
+            }
+          />
 
-      <div className="max-w-5xl mx-auto px-4 pb-24">
-        <button
-          onClick={() => setDemo(true)}
-          className="w-full text-sm py-3 rounded-xl border border-border text-muted-foreground hover:text-foreground flex items-center justify-center gap-2"
-        >
-          <Check className="h-4 w-4" /> Conhecer a ferramenta (demonstração)
-        </button>
-      </div>
-
+          <div className="flex flex-col sm:flex-row gap-3">
+            <Button size="lg" className="w-full sm:w-auto" onClick={() => setPicker(true)}>
+              Iniciar com um membro <ArrowRight className="h-4 w-4" aria-hidden />
+            </Button>
+            <Button size="lg" variant="outline" className="w-full sm:w-auto" onClick={() => setDemo(true)}>
+              <Play className="h-4 w-4" aria-hidden /> Conhecer a ferramenta (demonstração)
+            </Button>
+          </div>
+        </motion.div>
+      </PageContainer>
 
       {/* Seleção do aluno */}
-      <Dialog open={picker} onOpenChange={setPicker}>
-        <DialogContent className="sm:max-w-lg">
-          <DialogHeader>
-            <DialogTitle className="text-base">Vincular ao membro</DialogTitle>
-          </DialogHeader>
-
-          <div className="flex gap-2">
+      <BottomSheet
+        open={picker}
+        onOpenChange={setPicker}
+        title="Vincular ao membro"
+        description="Escolha a fase do diagnóstico e busque o membro."
+        size="md"
+      >
+        <div className="space-y-4">
+          <div className="flex gap-2" role="group" aria-label="Fase do diagnóstico">
             {(["inicial", "final"] as const).map((p) => (
-              <button
-                key={p}
-                onClick={() => setPhase(p)}
-                className={`text-xs px-3 py-1.5 rounded-full border transition-colors ${
-                  phase === p
-                    ? "border-primary text-primary bg-primary/10"
-                    : "border-border text-muted-foreground"
-                }`}
-              >
+              <Chip key={p} active={phase === p} onClick={() => setPhase(p)}>
                 {p === "inicial" ? "Inicial" : "Final"}
-              </button>
+              </Chip>
             ))}
           </div>
 
           <div className="relative">
-            <Search className="h-4 w-4 absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
-            <input
+            <Search className="h-4 w-4 absolute left-3 top-[38px] sm:top-[34px] text-muted-foreground pointer-events-none" aria-hidden />
+            <TextField
+              label="Membro"
+              type="search"
               value={search}
               onChange={(e) => setSearch(e.target.value)}
               placeholder="Buscar por nome ou empresa..."
-              className="w-full h-10 pl-9 pr-3 rounded-xl bg-muted/50 border border-border text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:border-primary/50"
+              className="pl-9"
+              autoComplete="off"
             />
           </div>
 
           {isLoading ? (
-            <div className="flex justify-center py-8">
-              <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
-            </div>
+            <LoadingState variant="list" rows={3} />
           ) : !search.trim() ? (
-            <p className="text-sm text-muted-foreground py-6 text-center">
-              Digite para localizar.
-            </p>
+            <EmptyState compact icon={Search} title="Digite para localizar" description="Busque pelo nome do membro ou da empresa." />
+          ) : filtered.length === 0 ? (
+            <EmptyState compact icon={Search} title="Nenhum resultado" description="Tente outro nome ou empresa." />
           ) : (
-            <div className="grid gap-2 max-h-72 overflow-y-auto">
-              {filtered.map((m: any) => (
-                <button
+            <div className="max-h-72 overflow-y-auto rounded-ds-lg border border-border" role="list">
+              {filtered.map((m: any, i: number) => (
+                <ListRow
                   key={m.id}
-                  disabled={assign.isPending}
-                  onClick={() => assign.mutate(m.id)}
-                  className="glass-card p-3 flex items-center gap-3 text-left disabled:opacity-60"
-                >
-                  <span className="h-9 w-9 rounded-full bg-primary/10 text-primary text-xs font-semibold flex items-center justify-center shrink-0 overflow-hidden">
-                    {m.avatar_url ? (
-                      <img src={m.avatar_url} alt={m.full_name} className="h-full w-full object-cover" />
-                    ) : (
-                      initials(m.full_name)
-                    )}
-                  </span>
-                  <span className="min-w-0 flex-1">
-                    <span className="block text-sm font-medium text-foreground truncate">
-                      {shortName(m.full_name)}
-                    </span>
-                    <span className="block text-[11px] text-muted-foreground truncate">
-                      {m.company_name || "Sem empresa"}
-                    </span>
-                  </span>
-                  {assign.isPending ? (
-                    <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
-                  ) : (
-                    <ArrowRight className="h-4 w-4 text-muted-foreground shrink-0" />
-                  )}
-                </button>
+                  role="listitem"
+                  onPress={() => { if (!assign.isPending) assign.mutate(m.id); }}
+                  leading={<UserAvatar name={m.full_name} avatarUrl={m.avatar_url} size={36} />}
+                  title={shortName(m.full_name)}
+                  subtitle={m.company_name || "Sem empresa"}
+                  trailing={assign.isPending ? <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" aria-hidden /> : undefined}
+                  chevron={!assign.isPending}
+                  last={i === filtered.length - 1}
+                  aria-disabled={assign.isPending}
+                />
               ))}
-              {filtered.length === 0 && (
-                <p className="text-sm text-muted-foreground py-6 text-center">Nenhum resultado.</p>
-              )}
             </div>
           )}
-        </DialogContent>
-      </Dialog>
+        </div>
+      </BottomSheet>
     </div>
   );
 };

@@ -1,15 +1,17 @@
 // Selects a "Case of the day" using Lovable AI Gateway based on recent
 // booking_reports quantitative/qualitative results. Runs daily via cron.
-import { corsHeaders } from "npm:@supabase/supabase-js@2/cors";
-import { createClient } from "npm:@supabase/supabase-js@2";
+// Auth: aceita `Authorization: Bearer <SUPABASE_SERVICE_ROLE_KEY>` (cron) ou um
+// admin/super_admin autenticado.
+import { corsHeaders, handleOptions } from "../_shared/cors.ts";
+import { requireRole, toResponse, ADMIN_ROLES } from "../_shared/auth.ts";
 
 Deno.serve(async (req) => {
-  if (req.method === "OPTIONS") {
-    return new Response("ok", { headers: corsHeaders });
-  }
+  const preflight = handleOptions(req);
+  if (preflight) return preflight;
   try {
-    const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
-    const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
+    const ctx = await requireRole(req, ADMIN_ROLES, { allowServiceRole: true });
+    const admin = ctx.supabaseAdmin;
+
     const LOVABLE_API_KEY = Deno.env.get("LOVABLE_API_KEY");
     if (!LOVABLE_API_KEY) {
       return new Response(JSON.stringify({ error: "LOVABLE_API_KEY missing" }), {
@@ -17,7 +19,6 @@ Deno.serve(async (req) => {
       });
     }
 
-    const admin = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
     const today = new Date().toISOString().slice(0, 10);
 
     // Skip if already picked today
@@ -109,7 +110,13 @@ Responda JSON puro: {"member_id":"uuid","headline":"máx 60 chars, impactante","
     const content = j?.choices?.[0]?.message?.content || "{}";
     const parsed = JSON.parse(content);
     if (!parsed?.member_id || !parsed?.headline || !parsed?.summary) {
-      return new Response(JSON.stringify({ error: "invalid_ai_output", content }), {
+      return new Response(JSON.stringify({ error: "invalid_ai_output" }), {
+        status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+    // O member_id precisa ser um dos membros enviados à IA (evita gravar id inventado)
+    if (!enriched.some((r: { member_id: string }) => r.member_id === parsed.member_id)) {
+      return new Response(JSON.stringify({ error: "invalid_ai_output", detail: "member_id desconhecido" }), {
         status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }
@@ -127,9 +134,7 @@ Responda JSON puro: {"member_id":"uuid","headline":"máx 60 chars, impactante","
     return new Response(JSON.stringify({ ok: true, picked: parsed }), {
       headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
-  } catch (e: any) {
-    return new Response(JSON.stringify({ error: e?.message || String(e) }), {
-      status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" },
-    });
+  } catch (e) {
+    return toResponse(e);
   }
 });

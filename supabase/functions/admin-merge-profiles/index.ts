@@ -1,16 +1,7 @@
-import { createClient } from "https://esm.sh/@supabase/supabase-js@2.99.2";
-
-const corsHeaders = {
-  "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
-  "Access-Control-Allow-Methods": "POST, OPTIONS",
-};
-
-const json = (body: unknown, status = 200) =>
-  new Response(JSON.stringify(body), {
-    status,
-    headers: { ...corsHeaders, "Content-Type": "application/json" },
-  });
+// Mescla dois perfis duplicados (ou desfaz uma mesclagem). Só admin/super_admin;
+// só super_admin mescla perfis com conta de admin/super_admin.
+import { handleOptions, json } from "../_shared/cors.ts";
+import { requireRole, assertCanManageUserId, toResponse, ADMIN_ROLES } from "../_shared/auth.ts";
 
 const norm = (s: string | null | undefined) =>
   (s || "")
@@ -33,27 +24,15 @@ const MERGEABLE = [
 ];
 
 Deno.serve(async (req) => {
-  if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
+  const preflight = handleOptions(req);
+  if (preflight) return preflight;
 
   try {
-    const authHeader = req.headers.get("Authorization");
-    if (!authHeader) return json({ error: "Missing authorization" }, 401);
+    const ctx = await requireRole(req, ADMIN_ROLES);
+    const adminClient = ctx.supabaseAdmin;
+    const caller = ctx.user!;
 
-    const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
-    const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
-    const anonClient = createClient(supabaseUrl, Deno.env.get("SUPABASE_ANON_KEY")!);
-    const adminClient = createClient(supabaseUrl, serviceRoleKey);
-
-    const token = authHeader.replace("Bearer ", "");
-    const { data: { user: caller }, error: authError } = await anonClient.auth.getUser(token);
-    if (authError || !caller) return json({ error: "Invalid token" }, 401);
-
-    const { data: roleData } = await adminClient
-      .from("user_roles").select("role").eq("user_id", caller.id)
-      .in("role", ["admin", "super_admin"]).maybeSingle();
-    if (!roleData) return json({ error: "Not authorized" }, 403);
-
-    const body = await req.json();
+    const body = await req.json().catch(() => ({}));
     const action: string = body.action || "merge";
 
     // ---------------------------------------------------------------- UNDO ---
@@ -113,6 +92,10 @@ Deno.serve(async (req) => {
     const { data: winner } = await adminClient.from("profiles").select("*").eq("id", winner_id).maybeSingle();
     const { data: loser } = await adminClient.from("profiles").select("*").eq("id", loser_id).maybeSingle();
     if (!winner || !loser) return json({ error: "Perfil não encontrado" }, 404);
+
+    // Hierarquia: perfis com conta de admin/super_admin só podem ser mesclados por super_admin
+    await assertCanManageUserId(ctx, winner.user_id);
+    await assertCanManageUserId(ctx, loser.user_id, { destructive: true });
 
     // ---- Safety guards: never merge two different people -------------------
     const wp = nameParts(winner.full_name);
@@ -237,6 +220,6 @@ Deno.serve(async (req) => {
 
     return json({ success: true, log_id: logRow?.id ?? null, auth_kept: deleteLoserAuth });
   } catch (err) {
-    return json({ error: (err as Error).message }, 500);
+    return toResponse(err);
   }
 });

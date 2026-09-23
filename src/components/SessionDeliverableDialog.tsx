@@ -1,8 +1,9 @@
-import { useState } from "react";
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import { Loader2, Wand2, Download, Copy, ClipboardPaste, AlertCircle, Plus, X, FileText } from "lucide-react";
+import { useState, type ReactNode } from "react";
+import { Loader2, Wand2, Download, Copy, ClipboardPaste, AlertCircle, Plus, X, CheckCircle2, Info } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
+import { Button } from "@/components/ui/button";
+import { BottomSheet, Callout, IconButton, SectionCard, TextAreaField, TextField } from "@/components/ds";
 import {
   downloadSessionDeliverablePdf,
   type SessionDeliverableData,
@@ -172,101 +173,105 @@ export const SessionDeliverableDialog = ({
     setData({ ...data, [k]: v });
   };
 
-  return (
-    <Dialog open={open} onOpenChange={(v) => { if (!v) reset(); onOpenChange(v); }}>
-      <DialogContent className="max-w-4xl max-h-[92vh] overflow-y-auto">
-        <DialogHeader>
-          <DialogTitle className="flex items-center gap-2">
-            <FileText className="h-4 w-4 text-primary" /> {sessionName ? `Material da sessão · ${sessionName}` : "Material da sessão do aluno"}
-          </DialogTitle>
-        </DialogHeader>
+  const footer = !data ? (
+    <Button onClick={generate} disabled={generating || zoom.trim().length < 80} className="w-full sm:w-auto">
+      {generating ? <Loader2 className="h-4 w-4 animate-spin" /> : <Wand2 className="h-4 w-4" />}
+      {generating ? "Gerando material..." : "Gerar rascunho"}
+    </Button>
+  ) : (
+    <>
+      <div className="flex flex-wrap gap-2 sm:mr-auto">
+        <Button variant="outline" size="sm" onClick={copyRefinePrompt}>
+          <Copy className="h-3.5 w-3.5" /> Copiar prompt de refinamento
+        </Button>
+        <Button variant="outline" size="sm" onClick={pasteRefined}>
+          <ClipboardPaste className="h-3.5 w-3.5" /> Colar JSON refinado
+        </Button>
+        <Button variant="ghost" size="sm" onClick={reset} className="text-muted-foreground">
+          Recomeçar
+        </Button>
+      </div>
+      <Button onClick={download} disabled={downloading}>
+        {downloading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
+        Baixar PDF
+      </Button>
+    </>
+  );
 
+  return (
+    <BottomSheet
+      open={open}
+      onOpenChange={(v) => { if (!v) reset(); onOpenChange(v); }}
+      title={sessionName ? `Material da sessão · ${sessionName}` : "Material da sessão do aluno"}
+      size="lg"
+      className="sm:max-w-4xl"
+      locked={generating || downloading}
+      footer={footer}
+    >
         {!data ? (
           <div className="space-y-4">
-            <div className="rounded-xl border border-primary/20 bg-primary/5 p-4">
-              <p className="text-sm text-foreground font-medium mb-1">Cole o resumo/transcrição bruta do Zoom</p>
-              <p className="text-xs text-muted-foreground">
-                Use o material completo (o resumo do Zoom é mais detalhado que o do relatório).
-                A IA vai transformar isso num infográfico horizontal de 3 páginas no estilo Begin
-                para você enviar no WhatsApp do aluno.
-              </p>
-            </div>
+            <Callout tone="brand" icon={Info} title="Cole o resumo ou a transcrição bruta do Zoom">
+              Use o material completo (o resumo do Zoom é mais detalhado que o do relatório).
+              A IA vai transformar isso num infográfico horizontal de 3 páginas no estilo Begin
+              para você enviar no WhatsApp do aluno.
+            </Callout>
 
-            <textarea
+            <TextAreaField
+              label="Resumo do Zoom"
+              hint="Mínimo de 80 caracteres."
               value={zoom}
               onChange={(e) => setZoom(e.target.value)}
               placeholder="Cole aqui todo o resumo/transcrição gerado pela IA do Zoom..."
-              className="w-full bg-card border border-border rounded-lg p-3 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:border-primary/30 resize-none h-64"
+              className="resize-none h-64"
             />
-            <div className="flex justify-end">
-              <button
-                onClick={generate}
-                disabled={generating || zoom.trim().length < 80}
-                className="btn-silver text-sm px-5 py-2.5 flex items-center gap-2 disabled:opacity-40"
-              >
-                {generating ? <Loader2 className="h-4 w-4 animate-spin" /> : <Wand2 className="h-4 w-4" />}
-                {generating ? "Gerando material..." : "Gerar rascunho"}
-              </button>
-            </div>
           </div>
         ) : (
           <div className="space-y-5">
-            <div className="rounded-xl border border-status-green/20 bg-status-green/5 p-3 text-xs text-foreground">
+            <Callout tone="success" icon={CheckCircle2}>
               Rascunho pronto. Edite cada bloco abaixo, baixe o PDF, e se quiser refinar no ChatGPT use o botão <b>Copiar prompt de refinamento</b>.
-            </div>
+            </Callout>
 
             <Group label="Capa">
-              <Row label="Título da capa (padrão: nome da sessão)">
-                <input className={inputClass} value={data.strategic_title} onChange={(e) => patch("strategic_title", e.target.value)} />
-              </Row>
-              <Row label="Subtítulo (contexto de negócio do aluno)">
-                <textarea className={taClass} rows={2} value={data.subtitle} onChange={(e) => patch("subtitle", e.target.value)} />
-              </Row>
-              <div className="grid grid-cols-2 gap-3">
-                <Row label="Rótulo da meta">
-                  <input className={inputClass} value={data.goal_label} onChange={(e) => patch("goal_label", e.target.value)} />
-                </Row>
-                <Row label="Título da meta">
-                  <input className={inputClass} value={data.goal_title} onChange={(e) => patch("goal_title", e.target.value)} />
-                </Row>
+              <TextField label="Título da capa" hint="Padrão: nome da sessão" value={data.strategic_title} onChange={(e) => patch("strategic_title", e.target.value)} />
+              <TextAreaField label="Subtítulo" hint="Contexto de negócio do aluno" rows={2} value={data.subtitle} onChange={(e) => patch("subtitle", e.target.value)} />
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <TextField label="Rótulo da meta" value={data.goal_label} onChange={(e) => patch("goal_label", e.target.value)} />
+                <TextField label="Título da meta" value={data.goal_title} onChange={(e) => patch("goal_title", e.target.value)} />
               </div>
-              <Row label="Descrição da meta">
-                <textarea className={taClass} rows={2} value={data.goal_description} onChange={(e) => patch("goal_description", e.target.value)} />
-              </Row>
-              <Row label="Tags (separadas por vírgula)">
-                <input className={inputClass}
-                  value={data.tags.join(", ")}
-                  onChange={(e) => patch("tags", e.target.value.split(",").map((s) => s.trim()).filter(Boolean))} />
-              </Row>
+              <TextAreaField label="Descrição da meta" rows={2} value={data.goal_description} onChange={(e) => patch("goal_description", e.target.value)} />
+              <TextField
+                label="Tags"
+                hint="Separadas por vírgula"
+                value={data.tags.join(", ")}
+                onChange={(e) => patch("tags", e.target.value.split(",").map((s) => s.trim()).filter(Boolean))}
+              />
             </Group>
 
-
             <Group label="Diagnóstico">
-              <textarea className={taClass} rows={4} value={data.diagnosis} onChange={(e) => patch("diagnosis", e.target.value)} />
+              <TextAreaField aria-label="Diagnóstico" rows={4} value={data.diagnosis} onChange={(e) => patch("diagnosis", e.target.value)} />
             </Group>
 
             <Group label="Pilares" onAdd={data.pillars.length < 4 ? () => patch("pillars", [...data.pillars, { number: String(data.pillars.length + 1).padStart(2, "0"), title: "", description: "" }]) : undefined}>
               <div className="space-y-2">
                 {data.pillars.map((p, i) => (
-                  <ListRow key={i} onRemove={() => patch("pillars", data.pillars.filter((_, j) => j !== i))}>
-                    <input className="w-14 " placeholder="01" value={p.number} onChange={(e) => updateArr<DeliverablePillar>(data.pillars, i, { number: e.target.value }, (v) => patch("pillars", v))}
-                      style={{ background: "transparent", border: "1px solid hsl(var(--border))", borderRadius: 6, padding: "6px 8px", fontSize: 12 }} />
-                    <input className={inputClass + " flex-1"} placeholder="Título" value={p.title} onChange={(e) => updateArr(data.pillars, i, { title: e.target.value }, (v) => patch("pillars", v))} />
-                    <input className={inputClass + " flex-[2]"} placeholder="Descrição" value={p.description} onChange={(e) => updateArr(data.pillars, i, { description: e.target.value }, (v) => patch("pillars", v))} />
-                  </ListRow>
+                  <EditableRow key={i} label={`Remover pilar ${i + 1}`} onRemove={() => patch("pillars", data.pillars.filter((_, j) => j !== i))}>
+                    <TextField aria-label="Número do pilar" containerClassName="w-16 shrink-0" placeholder="01" value={p.number} onChange={(e) => updateArr<DeliverablePillar>(data.pillars, i, { number: e.target.value }, (v) => patch("pillars", v))} />
+                    <TextField aria-label="Título do pilar" containerClassName="flex-1 min-w-[140px]" placeholder="Título" value={p.title} onChange={(e) => updateArr(data.pillars, i, { title: e.target.value }, (v) => patch("pillars", v))} />
+                    <TextField aria-label="Descrição do pilar" containerClassName="flex-[2] min-w-[180px]" placeholder="Descrição" value={p.description} onChange={(e) => updateArr(data.pillars, i, { description: e.target.value }, (v) => patch("pillars", v))} />
+                  </EditableRow>
                 ))}
-                {!data.pillars.length && <EmptyHint text="Nenhum pilar. Clique em + para adicionar." />}
+                {!data.pillars.length && <EmptyHint text="Nenhum pilar. Use Adicionar para incluir." />}
               </div>
             </Group>
 
             <Group label="Plano de ação" onAdd={data.action_plan.length < 8 ? () => patch("action_plan", [...data.action_plan, { sector: "", deliverable: "", deadline: "" }]) : undefined}>
               <div className="space-y-2">
                 {data.action_plan.map((r, i) => (
-                  <ListRow key={i} onRemove={() => patch("action_plan", data.action_plan.filter((_, j) => j !== i))}>
-                    <input className={inputClass + " flex-1"} placeholder="Setor" value={r.sector} onChange={(e) => updateArr<DeliverableActionRow>(data.action_plan, i, { sector: e.target.value }, (v) => patch("action_plan", v))} />
-                    <input className={inputClass + " flex-[2]"} placeholder="Entrega" value={r.deliverable} onChange={(e) => updateArr(data.action_plan, i, { deliverable: e.target.value }, (v) => patch("action_plan", v))} />
-                    <input className={inputClass + " w-28"} placeholder="Prazo" value={r.deadline} onChange={(e) => updateArr(data.action_plan, i, { deadline: e.target.value }, (v) => patch("action_plan", v))} />
-                  </ListRow>
+                  <EditableRow key={i} label={`Remover linha ${i + 1} do plano`} onRemove={() => patch("action_plan", data.action_plan.filter((_, j) => j !== i))}>
+                    <TextField aria-label="Setor" containerClassName="flex-1 min-w-[120px]" placeholder="Setor" value={r.sector} onChange={(e) => updateArr<DeliverableActionRow>(data.action_plan, i, { sector: e.target.value }, (v) => patch("action_plan", v))} />
+                    <TextField aria-label="Entrega" containerClassName="flex-[2] min-w-[180px]" placeholder="Entrega" value={r.deliverable} onChange={(e) => updateArr(data.action_plan, i, { deliverable: e.target.value }, (v) => patch("action_plan", v))} />
+                    <TextField aria-label="Prazo" containerClassName="w-32 shrink-0" placeholder="Prazo" value={r.deadline} onChange={(e) => updateArr(data.action_plan, i, { deadline: e.target.value }, (v) => patch("action_plan", v))} />
+                  </EditableRow>
                 ))}
                 {!data.action_plan.length && <EmptyHint text="Sem itens de plano de ação." />}
               </div>
@@ -275,10 +280,10 @@ export const SessionDeliverableDialog = ({
             <Group label="Riscos críticos" onAdd={data.risks.length < 5 ? () => patch("risks", [...data.risks, { title: "", control: "" }]) : undefined}>
               <div className="space-y-2">
                 {data.risks.map((r, i) => (
-                  <ListRow key={i} onRemove={() => patch("risks", data.risks.filter((_, j) => j !== i))}>
-                    <input className={inputClass + " flex-1"} placeholder="Risco" value={r.title} onChange={(e) => updateArr<DeliverableRisk>(data.risks, i, { title: e.target.value }, (v) => patch("risks", v))} />
-                    <input className={inputClass + " flex-[2]"} placeholder="Controle / mitigação" value={r.control} onChange={(e) => updateArr(data.risks, i, { control: e.target.value }, (v) => patch("risks", v))} />
-                  </ListRow>
+                  <EditableRow key={i} label={`Remover risco ${i + 1}`} onRemove={() => patch("risks", data.risks.filter((_, j) => j !== i))}>
+                    <TextField aria-label="Risco" containerClassName="flex-1 min-w-[140px]" placeholder="Risco" value={r.title} onChange={(e) => updateArr<DeliverableRisk>(data.risks, i, { title: e.target.value }, (v) => patch("risks", v))} />
+                    <TextField aria-label="Controle ou mitigação" containerClassName="flex-[2] min-w-[180px]" placeholder="Controle / mitigação" value={r.control} onChange={(e) => updateArr(data.risks, i, { control: e.target.value }, (v) => patch("risks", v))} />
+                  </EditableRow>
                 ))}
                 {!data.risks.length && <EmptyHint text="Nenhum risco cadastrado." />}
               </div>
@@ -288,37 +293,12 @@ export const SessionDeliverableDialog = ({
               <StringList arr={data.next_steps} setArr={(v) => patch("next_steps", v)} placeholder="Próxima ação..." />
             </Group>
 
-
-
-
-            <div className="sticky bottom-0 -mx-6 px-6 py-3 bg-background/95 backdrop-blur border-t border-border flex flex-wrap items-center justify-between gap-2">
-              <div className="flex gap-2 flex-wrap">
-                <button onClick={copyRefinePrompt} className="text-xs px-3 py-2 rounded-lg border border-border hover:bg-muted flex items-center gap-2">
-                  <Copy className="h-3.5 w-3.5" /> Copiar prompt de refinamento
-                </button>
-                <button onClick={pasteRefined} className="text-xs px-3 py-2 rounded-lg border border-border hover:bg-muted flex items-center gap-2">
-                  <ClipboardPaste className="h-3.5 w-3.5" /> Colar JSON refinado
-                </button>
-                <button onClick={reset} className="text-xs px-3 py-2 rounded-lg border border-border hover:bg-muted text-muted-foreground">
-                  Recomeçar
-                </button>
-              </div>
-              <button
-                onClick={download}
-                disabled={downloading}
-                className="btn-silver text-sm px-5 py-2.5 flex items-center gap-2 disabled:opacity-40"
-              >
-                {downloading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
-                Baixar PDF
-              </button>
-            </div>
-
-            <details className="rounded-lg border border-border bg-muted/30 p-3">
-              <summary className="text-xs font-medium text-foreground cursor-pointer flex items-center gap-1">
-                <AlertCircle className="h-3 w-3" /> Como refinar no ChatGPT sem quebrar o visual
+            <details className="rounded-ds border border-border bg-muted/30 p-3">
+              <summary className="text-sm font-medium text-foreground cursor-pointer flex items-center gap-1.5 min-h-[28px]">
+                <AlertCircle className="h-3.5 w-3.5 text-muted-foreground" aria-hidden /> Como refinar no ChatGPT sem quebrar o visual
               </summary>
-              <ol className="text-xs text-muted-foreground mt-2 space-y-1 list-decimal ml-4">
-                <li>Baixe o PDF acima uma primeira vez.</li>
+              <ol className="text-xs text-muted-foreground mt-2 space-y-1 list-decimal ml-4 leading-relaxed">
+                <li>Baixe o PDF uma primeira vez.</li>
                 <li>Clique em <b>Copiar prompt de refinamento</b>.</li>
                 <li>No ChatGPT/Claude, anexe o PDF baixado e cole o prompt. Descreva o ajuste desejado.</li>
                 <li>Copie o JSON que a IA devolver.</li>
@@ -327,56 +307,45 @@ export const SessionDeliverableDialog = ({
             </details>
           </div>
         )}
-      </DialogContent>
-    </Dialog>
+    </BottomSheet>
   );
 };
 
-const inputClass = "bg-card border border-border rounded-lg px-2.5 py-1.5 text-sm text-foreground focus:outline-none focus:border-primary/40";
-const taClass = "w-full bg-card border border-border rounded-lg px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:border-primary/40 resize-y";
-
-const Group = ({ label, children, onAdd }: { label: string; children: React.ReactNode; onAdd?: () => void }) => (
-  <div className="rounded-xl border border-border bg-card/50 p-4 space-y-2">
-    <div className="flex items-center justify-between">
-      <p className="text-[10px] uppercase tracking-wider text-primary font-semibold">{label}</p>
+const Group = ({ label, children, onAdd }: { label: string; children: ReactNode; onAdd?: () => void }) => (
+  <SectionCard padding="compact" className="space-y-3">
+    <div className="flex items-center justify-between gap-2">
+      <p className="text-sm font-semibold text-foreground">{label}</p>
       {onAdd && (
-        <button onClick={onAdd} className="text-[11px] text-primary hover:underline flex items-center gap-1">
-          <Plus className="h-3 w-3" /> Adicionar
-        </button>
+        <Button variant="ghost" size="sm" onClick={onAdd}>
+          <Plus className="h-3.5 w-3.5" /> Adicionar
+        </Button>
       )}
     </div>
     {children}
-  </div>
+  </SectionCard>
 );
 
-const Row = ({ label, children }: { label: string; children: React.ReactNode }) => (
-  <div className="space-y-1">
-    <label className="text-[10px] uppercase tracking-wider text-muted-foreground">{label}</label>
-    <div className="w-full [&_input]:w-full">{children}</div>
-  </div>
-);
-
-const ListRow = ({ children, onRemove }: { children: React.ReactNode; onRemove: () => void }) => (
-  <div className="flex items-center gap-2 group">
+const EditableRow = ({ children, onRemove, label }: { children: ReactNode; onRemove: () => void; label: string }) => (
+  <div className="flex flex-wrap items-center gap-2">
     {children}
-    <button onClick={onRemove} className="text-muted-foreground hover:text-destructive p-1 opacity-0 group-hover:opacity-100 transition">
-      <X className="h-3.5 w-3.5" />
-    </button>
+    <IconButton aria-label={label} size="sm" onClick={onRemove} className="hover:text-destructive">
+      <X className="h-4 w-4" />
+    </IconButton>
   </div>
 );
 
 const EmptyHint = ({ text }: { text: string }) => (
-  <p className="text-[11px] text-muted-foreground italic">{text}</p>
+  <p className="text-xs text-muted-foreground">{text}</p>
 );
 
 const StringList = ({ arr, setArr, placeholder }: { arr: string[]; setArr: (v: string[]) => void; placeholder: string }) => (
   <div className="space-y-2">
     {arr.map((s, i) => (
-      <ListRow key={i} onRemove={() => setArr(arr.filter((_, j) => j !== i))}>
-        <input className={inputClass + " flex-1"} placeholder={placeholder} value={s} onChange={(e) => {
+      <EditableRow key={i} label={`Remover passo ${i + 1}`} onRemove={() => setArr(arr.filter((_, j) => j !== i))}>
+        <TextField aria-label={`Passo ${i + 1}`} containerClassName="flex-1" placeholder={placeholder} value={s} onChange={(e) => {
           const c = arr.slice(); c[i] = e.target.value; setArr(c);
         }} />
-      </ListRow>
+      </EditableRow>
     ))}
     {!arr.length && <EmptyHint text="Vazio." />}
   </div>

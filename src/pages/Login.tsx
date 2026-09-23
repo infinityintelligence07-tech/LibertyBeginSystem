@@ -1,163 +1,234 @@
 import { useState, useEffect } from "react";
-import { motion } from "framer-motion";
-import { Eye, EyeOff } from "lucide-react";
+import { motion, useReducedMotion } from "framer-motion";
+import { AlertCircle, Eye, EyeOff } from "lucide-react";
 import { Logo } from "@/components/Logo";
 import { InstallAndNotify } from "@/components/InstallAndNotify";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "@/hooks/useAuth";
+import { supabase } from "@/integrations/supabase/client";
+import { FORGOT_PASSWORD_NEUTRAL_MESSAGE, SUPPORT_WHATSAPP_URL, translateAuthError } from "@/lib/authErrors";
 import { toast } from "sonner";
-import iconBegin from "@/assets/icon-begin.png";
+import { Button } from "@/components/ui/button";
+import { Callout, IconButton, PageContainer, SectionCard, TextField } from "@/components/ds";
+
+const RESET_PASSWORD_PATH = "/reset-password";
+
+const normalizeEmail = (value: string) => value.trim().toLowerCase();
 
 const LoginPage = () => {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
-  const [fullName, setFullName] = useState("");
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
-  const [mode, setMode] = useState<"login" | "signup" | "forgot">("login");
+  const [mode, setMode] = useState<"login" | "forgot">("login");
+  const [formError, setFormError] = useState<string | null>(null);
+  const reduceMotion = useReducedMotion();
   const navigate = useNavigate();
-  const { signIn, signUp, user, roles, loading: authLoading } = useAuth();
+  const { signIn, signOut, user, roles, rolesLoaded, rolesError, loading: authLoading } = useAuth();
 
   // Redirect if already logged in
   useEffect(() => {
-    if (!authLoading && user && roles.length > 0) {
+    if (!authLoading && user && rolesLoaded && roles.length > 0) {
       if (roles.includes("admin") || roles.includes("super_admin")) navigate("/admin/dashboard", { replace: true });
       else if (roles.includes("mentor")) navigate("/mentor/dashboard", { replace: true });
       else navigate("/dashboard", { replace: true });
     }
-  }, [user, roles, authLoading, navigate]);
+  }, [user, roles, rolesLoaded, authLoading, navigate]);
+
+  // Autenticado mas sem papel: não deixar o usuário preso no Login sem feedback.
+  const authenticatedWithoutRole = !authLoading && !!user && rolesLoaded && roles.length === 0;
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    const normalizedEmail = normalizeEmail(email);
+    setFormError(null);
+    if (!normalizedEmail) {
+      setFormError("Informe seu e-mail.");
+      return;
+    }
     setLoading(true);
 
     if (mode === "forgot") {
-      const { supabase } = await import("@/integrations/supabase/client");
-      const { error } = await supabase.auth.resetPasswordForEmail(email, {
-        redirectTo: `${window.location.origin}/reset-password`,
+      const { error } = await supabase.auth.resetPasswordForEmail(normalizedEmail, {
+        redirectTo: `${window.location.origin}${RESET_PASSWORD_PATH}`,
       });
       setLoading(false);
       if (error) {
-        toast.error(error.message);
-      } else {
-        toast.success("Email de recuperação enviado! Verifique sua caixa de entrada.");
-        setMode("login");
+        console.error("[Login] resetPasswordForEmail", error.message);
+        const msg = error.message.toLowerCase();
+        // Só expõe erros que não revelam se a conta existe (rede, limite de envios).
+        if (msg.includes("rate limit") || msg.includes("too many") || msg.includes("fetch") || msg.includes("network")) {
+          setFormError(translateAuthError(error));
+          return;
+        }
       }
+      // Mensagem sempre neutra (anti-enumeração): o GoTrue devolve 200 mesmo sem conta.
+      toast.success(FORGOT_PASSWORD_NEUTRAL_MESSAGE, { duration: 10000 });
+      setMode("login");
       return;
     }
 
-    if (mode === "signup") {
-      const { error } = await signUp(email, password, fullName);
-      setLoading(false);
-      if (error) {
-        toast.error(error.message);
-      } else {
-        toast.success("Conta criada! Verifique seu email para confirmar.");
-        setMode("login");
-      }
-      return;
+    if (password !== password.trim()) {
+      toast.warning("Sua senha tem espaço no início ou no fim. Confira antes de continuar.");
     }
 
-    const { error } = await signIn(email, password);
+    const { error } = await signIn(normalizedEmail, password);
     setLoading(false);
     if (error) {
-      const isTimeout = error.message.includes("Tempo esgotado");
-      toast.error(isTimeout ? error.message : "Email ou senha incorretos. Use ‘Esqueci minha senha’ se necessário.");
+      setFormError(translateAuthError(error));
     } else {
       toast.success("Acesso confirmado. Entrando...");
     }
     // Redirect is handled by the useEffect above once roles load
   };
 
+  const switchMode = (next: "login" | "forgot") => {
+    setFormError(null);
+    setMode(next);
+  };
+
+  const handleSignOut = async () => {
+    setLoading(true);
+    try {
+      await signOut();
+      setPassword("");
+    } finally {
+      setLoading(false);
+    }
+  };
+
   return (
-    <div className="min-h-screen bg-background flex items-center justify-center relative overflow-hidden px-6 sm:px-10">
-      <img
-        src={iconBegin}
-        alt=""
-        className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[800px] opacity-[0.04] pointer-events-none hidden lg:block"
-      />
-
-      <div className="w-full max-w-5xl flex flex-col lg:flex-row items-center justify-center gap-10 lg:gap-16 relative z-10">
-        <div className="hidden lg:flex flex-col justify-center items-start flex-1 max-w-md">
-          <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.6 }}>
-            <Logo size="lg" className="mb-12" />
-            <h1 className="text-5xl font-bold text-foreground leading-tight mb-4">
-              Sua jornada<br />começa aqui.
-            </h1>
-            <p className="text-muted-foreground font-light text-lg">
-              Desenvolvimento empresarial com propósito.
-            </p>
-          </motion.div>
-        </div>
-
-        <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.6, delay: 0.2 }} className="w-full max-w-md">
-          <div className="lg:hidden flex justify-center mb-10">
+    <div className="min-h-[100dvh] bg-background flex items-center justify-center py-10 pt-[calc(env(safe-area-inset-top,0px)_+_2.5rem)] pb-[calc(env(safe-area-inset-bottom,0px)_+_2.5rem)]">
+      <PageContainer variant="narrow">
+        <motion.div
+          initial={reduceMotion ? false : { opacity: 0, y: 8 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.32, ease: "easeOut" }}
+          className="w-full max-w-md mx-auto space-y-8"
+        >
+          <div className="flex justify-center">
             <Logo size="md" />
           </div>
 
-          <div className="glass-card p-8 sm:p-10">
-            <h2 className="text-xl font-medium text-foreground mb-2">
-              {mode === "login" ? "Acessar plataforma" : mode === "signup" ? "Criar conta" : "Recuperar senha"}
-            </h2>
-            <div className="w-8 h-px bg-primary mb-8" />
-
-            <form onSubmit={handleSubmit} className="space-y-5">
-              {mode === "signup" && (
-                <div>
-                  <label className="block text-sm text-muted-foreground mb-2">Nome completo</label>
-                  <input type="text" value={fullName} onChange={(e) => setFullName(e.target.value)} placeholder="Seu nome" className="input-begin w-full" required />
+          <SectionCard className="space-y-6 p-6 sm:p-8">
+            {authenticatedWithoutRole ? (
+              <>
+                <div className="space-y-2">
+                  <h1 className="text-[24px] md:text-[28px] font-semibold leading-[1.2] tracking-[var(--ds-tracking-display)] silver-gradient-text">
+                    {rolesError ? "Não foi possível carregar seu acesso" : "Conta sem perfil de acesso"}
+                  </h1>
+                  <p className="text-sm text-muted-foreground leading-relaxed">
+                    {rolesError ?? "Sua conta ainda não tem um perfil de acesso. Fale com a equipe Liberty."}
+                  </p>
+                  {user?.email && (
+                    <p className="text-xs text-muted-foreground">
+                      Conectado como <span className="text-foreground font-medium">{user.email}</span>
+                    </p>
+                  )}
                 </div>
-              )}
-
-              <div>
-                <label className="block text-sm text-muted-foreground mb-2">Email</label>
-                <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="seu@email.com" className="input-begin w-full" required />
-              </div>
-
-              {mode !== "forgot" && (
-                <div>
-                  <label className="block text-sm text-muted-foreground mb-2">Senha</label>
-                  <div className="relative">
-                    <input type={showPassword ? "text" : "password"} value={password} onChange={(e) => setPassword(e.target.value)} placeholder="••••••••" className="input-begin w-full pr-10" required />
-                    <button type="button" onClick={() => setShowPassword(!showPassword)} className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground transition-colors">
-                      {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
-                    </button>
-                  </div>
+                <Button type="button" size="lg" onClick={handleSignOut} disabled={loading} className="w-full">
+                  {loading ? "Saindo..." : "Sair"}
+                </Button>
+              </>
+            ) : (
+              <>
+                <div className="space-y-1">
+                  <h1 className="text-[24px] md:text-[28px] font-semibold leading-[1.2] tracking-[var(--ds-tracking-display)] silver-gradient-text">
+                    {mode === "login" ? "Acessar plataforma" : "Recuperar senha"}
+                  </h1>
+                  <p className="text-sm text-muted-foreground">
+                    {mode === "login"
+                      ? "Entre com o e-mail e a senha recebidos da equipe Liberty."
+                      : "Enviaremos um link para você criar uma nova senha."}
+                  </p>
                 </div>
-              )}
 
-              <button type="submit" disabled={loading} className="btn-silver w-full text-sm tracking-wider uppercase disabled:opacity-50">
-                {loading ? "Aguarde..." : mode === "login" ? "Entrar" : mode === "signup" ? "Criar conta" : "Enviar email de recuperação"}
-              </button>
-            </form>
+                {formError && (
+                  <Callout tone="danger" icon={AlertCircle}>
+                    {formError}
+                  </Callout>
+                )}
 
-            <div className="mt-6 text-center space-y-2">
-              {mode === "login" && (
-                <>
-                  <button onClick={() => setMode("forgot")} className="text-sm text-muted-foreground hover:text-primary transition-colors block w-full">Esqueci minha senha</button>
-                  <button onClick={() => setMode("signup")} className="text-sm text-muted-foreground hover:text-primary transition-colors block w-full">
-                    Não tem conta? <span className="text-primary">Criar conta</span>
-                  </button>
-                </>
-              )}
-              {mode !== "login" && (
-                <button onClick={() => setMode("login")} className="text-sm text-muted-foreground hover:text-primary transition-colors">← Voltar ao login</button>
-              )}
-            </div>
+                <form onSubmit={handleSubmit} className="space-y-4">
+                  <TextField
+                    id="login-email"
+                    name="email"
+                    type="email"
+                    label="E-mail"
+                    autoComplete="email"
+                    autoCapitalize="none"
+                    autoCorrect="off"
+                    spellCheck={false}
+                    inputMode="email"
+                    value={email}
+                    onChange={(e) => setEmail(e.target.value)}
+                    onBlur={() => setEmail((v) => normalizeEmail(v))}
+                    placeholder="seu@email.com"
+                    required
+                  />
 
-            <div className="mt-8 pt-6 border-t border-border text-center">
-              <p className="text-xs text-muted-foreground">
-                Dúvidas?{" "}
-                <a href="https://wa.me/5511999999999" target="_blank" rel="noopener noreferrer" className="text-primary hover:text-silver-light transition-colors">Fale com o nosso suporte</a>
+                  {mode === "login" && (
+                    <div className="relative">
+                      <TextField
+                        id="login-password"
+                        name="password"
+                        type={showPassword ? "text" : "password"}
+                        label="Senha"
+                        autoComplete="current-password"
+                        value={password}
+                        onChange={(e) => setPassword(e.target.value)}
+                        placeholder="Sua senha"
+                        className="pr-12"
+                        required
+                      />
+                      <IconButton
+                        aria-label={showPassword ? "Ocultar senha" : "Mostrar senha"}
+                        aria-pressed={showPassword}
+                        size="sm"
+                        onClick={() => setShowPassword(!showPassword)}
+                        className="absolute right-1 bottom-0.5 h-10 w-10"
+                      >
+                        {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                      </IconButton>
+                    </div>
+                  )}
+
+                  <Button type="submit" size="lg" disabled={loading} className="w-full">
+                    {loading ? "Aguarde..." : mode === "login" ? "Entrar" : "Enviar link de recuperação"}
+                  </Button>
+                </form>
+
+                <div className="flex justify-center">
+                  {mode === "login" ? (
+                    <Button type="button" variant="link" onClick={() => switchMode("forgot")} disabled={loading}>
+                      Esqueci minha senha
+                    </Button>
+                  ) : (
+                    <Button type="button" variant="link" onClick={() => switchMode("login")} disabled={loading}>
+                      Voltar ao login
+                    </Button>
+                  )}
+                </div>
+              </>
+            )}
+
+            <div className="pt-5 border-t border-border space-y-4">
+              <p className="text-xs text-muted-foreground text-center leading-relaxed">
+                Dúvidas ou sem acesso?{" "}
+                <a
+                  href={SUPPORT_WHATSAPP_URL}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-primary font-medium underline-offset-4 hover:underline rounded-ds focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                >
+                  Fale com a equipe Liberty no WhatsApp
+                </a>
               </p>
-            </div>
-            <div className="mt-4">
               <InstallAndNotify />
             </div>
-          </div>
+          </SectionCard>
         </motion.div>
-      </div>
-
+      </PageContainer>
     </div>
   );
 };

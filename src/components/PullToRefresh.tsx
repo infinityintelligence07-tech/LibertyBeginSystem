@@ -74,23 +74,19 @@ export const PullToRefresh = ({ children }: { children: ReactNode }) => {
     <>
       {show && (
         <div
-          className="lg:hidden fixed left-1/2 -translate-x-1/2 z-[70] pointer-events-none flex items-center justify-center rounded-full bg-card border border-border shadow-lg"
+          role="status"
+          aria-label={refreshing ? "Atualizando" : "Puxe para atualizar"}
+          className="lg:hidden fixed left-1/2 -translate-x-1/2 z-40 pointer-events-none flex items-center justify-center h-10 w-10 rounded-full bg-card border border-border shadow-ds-2"
           style={{
             top: `calc(env(safe-area-inset-top, 0px) + ${Math.max(8, pull - 32)}px)`,
-            width: 40,
-            height: 40,
             opacity: refreshing ? 1 : 0.4 + progress * 0.6,
-            transition: refreshing ? "top 0.2s ease" : undefined,
+            transition: refreshing ? "top var(--ds-dur-2) var(--ds-ease)" : undefined,
           }}
         >
           <RefreshCw
-            className="h-4 w-4 text-primary"
-            style={{
-              transform: refreshing
-                ? undefined
-                : `rotate(${progress * 270}deg)`,
-              animation: refreshing ? "spin 1s linear infinite" : undefined,
-            }}
+            className={refreshing ? "h-4 w-4 text-primary animate-spin" : "h-4 w-4 text-primary"}
+            aria-hidden
+            style={refreshing ? undefined : { transform: `rotate(${progress * 270}deg)` }}
           />
         </div>
       )}
@@ -98,7 +94,3 @@ export const PullToRefresh = ({ children }: { children: ReactNode }) => {
     </>
   );
 };
-
-export async function forceAppReload() {
-  await reloadAppSafely();
-}

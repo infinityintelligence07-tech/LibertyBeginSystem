@@ -3,20 +3,21 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/hooks/useAuth";
 import { toast } from "sonner";
-import { Shield, Loader2, Trash2 } from "lucide-react";
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-  AlertDialogTrigger,
-} from "@/components/ui/alert-dialog";
+import { Shield, Loader2, Trash2, Users } from "lucide-react";
 import { shortName, matchesSearch } from "@/lib/formatName";
 import { UserAvatar } from "@/components/UserAvatar";
+import {
+  Chip,
+  ConfirmDialog,
+  EmptyState,
+  ErrorState,
+  IconButton,
+  LoadingState,
+  SectionCard,
+  SectionHeader,
+  StatusPill,
+  TextField,
+} from "@/components/ds";
 
 type Role = "super_admin" | "admin" | "mentor" | "liberty";
 type Tab = "all" | "admin" | "mentor" | "begin" | "liberty" | "inactive";
@@ -48,8 +49,9 @@ export const AccessManagement = () => {
   const [savingId, setSavingId] = useState<string | null>(null);
   const [search, setSearch] = useState("");
   const [tab, setTab] = useState<Tab>("all");
+  const [deleteTarget, setDeleteTarget] = useState<{ id: string; user_id: string | null; full_name: string; email: string | null } | null>(null);
 
-  const { data, isLoading } = useQuery({
+  const { data, isLoading, isError, refetch } = useQuery({
     queryKey: ["access-management-users"],
     queryFn: async () => {
       const { data: profiles, error } = await supabase
@@ -172,161 +174,145 @@ export const AccessManagement = () => {
   };
 
   return (
-    <div className="glass-card p-6">
-      <h2 className="text-sm font-semibold text-foreground flex items-center gap-2 mb-1">
-        <Shield className="h-4 w-4 text-primary" /> Gestão de Acessos
-      </h2>
-      <p className="text-xs text-muted-foreground mb-4">
-        Filtre por perfil, defina papéis e ative/desative contas. Apenas Super Admins veem essa área.
-      </p>
-
-      {/* Segmented filter tabs */}
-      <div className="flex flex-wrap gap-1.5 mb-3">
-        {TAB_ORDER.map((t) => (
-          <button
-            key={t}
-            onClick={() => setTab(t)}
-            className={`text-[11px] px-3 py-1.5 rounded-full border transition-colors inline-flex items-center gap-1.5 ${
-              tab === t
-                ? "bg-primary text-primary-foreground border-primary"
-                : "bg-transparent text-muted-foreground border-border hover:border-primary/40"
-            }`}
-          >
-            {TAB_LABELS[t]}
-            <span className={`tabular-nums text-[10px] px-1.5 py-0.5 rounded-full ${tab === t ? "bg-primary-foreground/20" : "bg-muted/40"}`}>
-              {counts[t] || 0}
-            </span>
-          </button>
-        ))}
-      </div>
-
-      <input
-        value={search}
-        onChange={(e) => setSearch(e.target.value)}
-        placeholder="Buscar por nome ou e-mail…"
-        className="input-begin text-sm h-10 w-full mb-4"
+    <SectionCard as="section">
+      <SectionHeader
+        title={
+          <span className="inline-flex items-center gap-2">
+            <Shield className="h-4 w-4 text-primary" aria-hidden /> Gestão de acessos
+          </span>
+        }
+        description="Filtre por perfil, defina papéis e ative ou desative contas. Apenas Super Admins veem esta área."
       />
 
-      {isLoading ? (
-        <div className="flex justify-center py-8"><Loader2 className="h-5 w-5 animate-spin text-muted-foreground" /></div>
-      ) : (
-        <div className="space-y-2 max-h-[520px] overflow-y-auto pr-1">
-          {filtered.map((u: any) => {
-            const userRoles: Role[] = u.roles || [];
-            const isLiberty = userRoles.includes("liberty");
-            return (
-              <div key={u.id} className="flex flex-col lg:flex-row lg:items-center gap-3 p-3 rounded-lg bg-background/40 border border-border">
-                <div className="flex items-center gap-3 min-w-0 lg:w-56">
-                  <UserAvatar avatarUrl={u.avatar_url} name={u.full_name} size={36} />
-                  <div className="min-w-0">
-                    <div className="text-sm font-medium text-foreground truncate">{shortName(u.full_name)}</div>
-                    <div className="text-xs text-muted-foreground truncate">{u.email}</div>
-                  </div>
-                </div>
-
-                {/* Role toggles */}
-                <div className="flex flex-wrap gap-1.5 flex-1">
-                  {ROLE_OPTIONS.map((r) => {
-                    const has = userRoles.includes(r);
-                    const isSaving = savingId === u.user_id + r;
-                    return (
-                      <button
-                        key={r}
-                        disabled={!u.user_id || isSaving}
-                        onClick={() => u.user_id && toggleRole(u.user_id, r, has)}
-                        className={`text-[11px] px-2.5 py-1 rounded-full border transition-colors ${
-                          has
-                            ? "bg-primary/15 text-primary border-primary/40"
-                            : "bg-transparent text-muted-foreground border-border hover:border-primary/30"
-                        } disabled:opacity-50`}
-                        title={has ? `Remover ${ROLE_LABELS[r]}` : `Definir como ${ROLE_LABELS[r]}`}
-                      >
-                        {isSaving ? "…" : ROLE_LABELS[r]}
-                      </button>
-                    );
-                  })}
-                </div>
-
-                {/* Tier toggle (only for members) */}
-                {isLiberty && (
-                  <div className="flex gap-1 shrink-0">
-                    <button
-                      onClick={() => u.member_tier !== "begin" && setTier(u.id, "begin")}
-                      disabled={savingId === u.id + "tier"}
-                      className={`text-[10px] px-2 py-1 rounded-md border transition-colors ${
-                        u.member_tier !== "liberty"
-                          ? "bg-primary/15 text-primary border-primary/40"
-                          : "bg-transparent text-muted-foreground border-border hover:border-primary/30"
-                      }`}
-                    >
-                      Begin
-                    </button>
-                    <button
-                      onClick={() => u.member_tier !== "liberty" && setTier(u.id, "liberty")}
-                      disabled={savingId === u.id + "tier"}
-                      className={`text-[10px] px-2 py-1 rounded-md border transition-colors ${
-                        u.member_tier === "liberty"
-                          ? "bg-amber-500/15 text-amber-500 border-amber-500/40"
-                          : "bg-transparent text-muted-foreground border-border hover:border-amber-500/30"
-                      }`}
-                    >
-                      Liberty
-                    </button>
-                  </div>
-                )}
-
-                <button
-                  onClick={() => toggleActive(u.id, u.is_active !== false)}
-                  disabled={savingId === u.id + "active"}
-                  className={`text-[11px] px-3 py-1.5 rounded-md border transition-colors shrink-0 ${
-                    u.is_active === false
-                      ? "bg-destructive/10 text-destructive border-border"
-                      : "bg-status-green/10 text-status-green border-border"
-                  }`}
-                >
-                  {u.is_active === false ? "Inativo" : "Ativo"}
-                </button>
-
-                <AlertDialog>
-                  <AlertDialogTrigger asChild>
-                    <button
-                      disabled={savingId === u.id + "delete"}
-                      className="p-1.5 rounded-md text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-colors shrink-0 disabled:opacity-50"
-                      title="Excluir conta permanentemente"
-                      aria-label="Excluir conta"
-                    >
-                      <Trash2 className="h-3.5 w-3.5" />
-                    </button>
-
-                  </AlertDialogTrigger>
-                  <AlertDialogContent>
-                    <AlertDialogHeader>
-                      <AlertDialogTitle>Excluir conta permanentemente?</AlertDialogTitle>
-                      <AlertDialogDescription>
-                        Esta ação apaga <strong>{shortName(u.full_name) || u.email}</strong> de forma
-                        definitiva. Perfil, login e vínculos serão removidos e não podem ser recuperados.
-                        Use apenas para contas de teste ou registros que precisam realmente sumir.
-                      </AlertDialogDescription>
-                    </AlertDialogHeader>
-                    <AlertDialogFooter>
-                      <AlertDialogCancel>Cancelar</AlertDialogCancel>
-                      <AlertDialogAction
-                        onClick={() => deleteUser(u.id, u.user_id, u.full_name)}
-                        className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
-                      >
-                        Excluir definitivamente
-                      </AlertDialogAction>
-                    </AlertDialogFooter>
-                  </AlertDialogContent>
-                </AlertDialog>
-              </div>
-            );
-          })}
-          {filtered.length === 0 && (
-            <div className="text-center text-xs text-muted-foreground py-8">Nenhum usuário encontrado.</div>
-          )}
+      <div className="mt-4 space-y-3">
+        <div className="flex flex-wrap gap-2" role="group" aria-label="Filtrar por perfil">
+          {TAB_ORDER.map((t) => (
+            <Chip key={t} active={tab === t} onClick={() => setTab(t)} count={counts[t] || 0}>
+              {TAB_LABELS[t]}
+            </Chip>
+          ))}
         </div>
-      )}
-    </div>
+
+        <TextField
+          type="search"
+          aria-label="Buscar por nome ou e-mail"
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          placeholder="Buscar por nome ou e-mail"
+        />
+      </div>
+
+      <div className="mt-4">
+        {isLoading ? (
+          <LoadingState variant="list" rows={5} />
+        ) : isError ? (
+          <ErrorState compact title="Não foi possível carregar os acessos" onRetry={() => refetch()} />
+        ) : filtered.length === 0 ? (
+          <EmptyState compact icon={Users} title="Nenhum usuário encontrado" description="Ajuste o filtro ou a busca." />
+        ) : (
+          <ul className="space-y-2 max-h-[560px] overflow-y-auto pr-1" aria-label="Usuários">
+            {filtered.map((u: any) => {
+              const userRoles: Role[] = u.roles || [];
+              const isLiberty = userRoles.includes("liberty");
+              const inactive = u.is_active === false;
+              const hasAccess = Boolean(u.user_id);
+              return (
+                <li key={u.id} className="flex flex-col lg:flex-row lg:items-center gap-3 p-3 rounded-ds border border-border bg-card">
+                  <div className="flex items-center gap-3 min-w-0 lg:w-60">
+                    <UserAvatar avatarUrl={u.avatar_url} name={u.full_name} size={36} />
+                    <div className="min-w-0">
+                      <div className="text-sm font-medium text-foreground truncate flex items-center gap-2">
+                        <span className="truncate">{shortName(u.full_name)}</span>
+                        {!hasAccess && <StatusPill tone="warning" size="sm">Sem acesso</StatusPill>}
+                      </div>
+                      <div className="text-xs text-muted-foreground truncate">{u.email || "Sem e-mail"}</div>
+                    </div>
+                  </div>
+
+                  {/* Papéis */}
+                  <div className="flex flex-wrap gap-1.5 flex-1" role="group" aria-label={`Papéis de ${shortName(u.full_name)}`}>
+                    {ROLE_OPTIONS.map((r) => {
+                      const has = userRoles.includes(r);
+                      const isSaving = savingId === u.user_id + r;
+                      return (
+                        <span
+                          key={r}
+                          title={!hasAccess ? "Perfil sem login vinculado" : has ? `Remover ${ROLE_LABELS[r]}` : `Definir como ${ROLE_LABELS[r]}`}
+                        >
+                          <Chip
+                            active={has}
+                            disabled={!hasAccess || isSaving}
+                            onClick={() => u.user_id && toggleRole(u.user_id, r, has)}
+                          >
+                            {isSaving ? <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden /> : null}
+                            {ROLE_LABELS[r]}
+                          </Chip>
+                        </span>
+                      );
+                    })}
+                  </div>
+
+                  {/* Programa (apenas membros) */}
+                  {isLiberty && (
+                    <div className="flex gap-1 shrink-0" role="group" aria-label="Programa">
+                      <Chip active={u.member_tier !== "liberty"} disabled={savingId === u.id + "tier"} onClick={() => u.member_tier !== "begin" && setTier(u.id, "begin")}>
+                        Begin
+                      </Chip>
+                      <Chip active={u.member_tier === "liberty"} disabled={savingId === u.id + "tier"} onClick={() => u.member_tier !== "liberty" && setTier(u.id, "liberty")}>
+                        Liberty
+                      </Chip>
+                    </div>
+                  )}
+
+                  <div className="flex items-center gap-1 shrink-0">
+                    <button
+                      type="button"
+                      onClick={() => toggleActive(u.id, !inactive)}
+                      disabled={savingId === u.id + "active"}
+                      aria-label={inactive ? `Reativar ${shortName(u.full_name)}` : `Desativar ${shortName(u.full_name)}`}
+                      aria-pressed={!inactive}
+                      className="rounded-full focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50 hit-44"
+                    >
+                      <StatusPill tone={inactive ? "danger" : "success"} size="sm">{inactive ? "Inativo" : "Ativo"}</StatusPill>
+                    </button>
+                    <IconButton
+                      aria-label={`Excluir conta de ${shortName(u.full_name)}`}
+                      title="Excluir conta permanentemente"
+                      size="sm"
+                      className="hover:text-destructive"
+                      disabled={savingId === u.id + "delete"}
+                      onClick={() => setDeleteTarget({ id: u.id, user_id: u.user_id, full_name: u.full_name, email: u.email })}
+                    >
+                      <Trash2 className="h-4 w-4" />
+                    </IconButton>
+                  </div>
+                </li>
+              );
+            })}
+          </ul>
+        )}
+      </div>
+
+      <ConfirmDialog
+        open={!!deleteTarget}
+        onOpenChange={(o) => { if (!o) setDeleteTarget(null); }}
+        title="Excluir conta permanentemente?"
+        description={
+          deleteTarget ? (
+            <>
+              Esta ação apaga <strong>{shortName(deleteTarget.full_name) || deleteTarget.email}</strong> de forma definitiva.
+              Perfil, login e vínculos serão removidos e não podem ser recuperados. Use apenas para contas de teste ou registros que precisam realmente sumir.
+            </>
+          ) : undefined
+        }
+        confirmLabel="Excluir definitivamente"
+        destructive
+        onConfirm={() => {
+          const target = deleteTarget;
+          setDeleteTarget(null);
+          if (target) void deleteUser(target.id, target.user_id, target.full_name);
+        }}
+      />
+    </SectionCard>
   );
 };

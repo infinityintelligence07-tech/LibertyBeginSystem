@@ -1,13 +1,16 @@
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
 import {
   CheckCircle2, Circle, Plus, Pencil, Trash2, TrendingUp, MessageSquare, X, Save, RotateCcw, ShieldCheck, Clock, PlayCircle, Calendar as CalendarIcon, User,
 } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
+import { Button } from "@/components/ui/button";
 import {
-  Dialog, DialogContent, DialogHeader, DialogTitle,
-} from "@/components/ui/dialog";
+  BottomSheet, Chip, ConfirmDialog, EmptyState, IconButton, StatusPill, TextAreaField, TextField,
+  type PillTone,
+} from "@/components/ds";
+import { cn } from "@/lib/utils";
 import { useAuth } from "@/hooks/useAuth";
 import { getTaskStatus, taskStatusConfig, type TaskStatus } from "@/lib/taskStatus";
 import { TaskPlanDialog } from "@/components/TaskPlanDialog";
@@ -71,6 +74,8 @@ export const TaskChecklist = ({
   const [resultMetric, setResultMetric] = useState("");
   const [resultNotes, setResultNotes] = useState("");
 
+  // Confirmação de remoção (substitui window.confirm)
+  const [deleteTaskId, setDeleteTaskId] = useState<string | null>(null);
 
   // Plan dialog (student only)
   const [planTaskId, setPlanTaskId] = useState<string | null>(null);
@@ -196,6 +201,7 @@ export const TaskChecklist = ({
     },
     onSuccess: () => {
       invalidateAll();
+      setDeleteTaskId(null);
       toast.success("Tarefa removida!");
     },
     onError: () => toast.error("Erro ao remover tarefa"),
@@ -270,454 +276,405 @@ export const TaskChecklist = ({
     const overdue = task.due_date && task.due_date < today && !task.is_completed;
     return (
       <div className="flex items-center gap-1.5 flex-wrap mt-1">
-
         {task.due_date && (
-          <span className="inline-flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded-full border bg-muted/50 text-muted-foreground border-border">
-            <Clock className="h-2.5 w-2.5" />
+          <StatusPill tone={overdue ? "danger" : "neutral"} withDot={false}>
+            <Clock className="h-3 w-3" aria-hidden />
             Prazo {format(parseISO(task.due_date), "dd 'de' MMM", { locale: ptBR })}
             {overdue && " · vencido"}
-          </span>
+          </StatusPill>
         )}
         {task.assignee_name && (
-          <span className="inline-flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded-full bg-muted text-muted-foreground border border-border">
-            <User className="h-2.5 w-2.5" /> {task.assignee_name}
-          </span>
+          <StatusPill tone="neutral" withDot={false}>
+            <User className="h-3 w-3" aria-hidden /> {task.assignee_name}
+          </StatusPill>
         )}
       </div>
     );
   };
 
-  const renderPending = (task: Task) => (
-    <div key={task.id} className="flex items-center gap-3 px-3 py-2.5 rounded-lg border border-border bg-card group">
-      <button
-        onClick={(e) => {
-          e.stopPropagation();
-          if (role === "liberty") studentMarkMutation.mutate({ taskId: task.id, done: true });
-          else openResultDialog(task.id);
+  const isManager = role === "mentor" || role === "admin";
+
+  /** Ação principal da linha: aluno marca como concluída; mentor/admin conclui registrando resultado. */
+  const completeTask = (task: Task) => {
+    if (role === "liberty") studentMarkMutation.mutate({ taskId: task.id, done: true });
+    else openResultDialog(task.id);
+  };
+
+  /** Círculo de checkbox com alvo de toque de 44px. */
+  const renderCheckbox = (task: Task, inProgress?: boolean) => (
+    <button
+      type="button"
+      onClick={(e) => {
+        e.stopPropagation();
+        completeTask(task);
+      }}
+      disabled={studentMarkMutation.isPending}
+      aria-label={role === "liberty" ? "Marcar como concluída" : "Concluir e registrar resultado"}
+      title={role === "liberty" ? "Marcar como concluída" : "Concluir e registrar resultado"}
+      className="group/check h-11 w-11 -my-2.5 -ml-2 flex items-center justify-center shrink-0 rounded-full focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 ring-offset-background disabled:opacity-50"
+    >
+      <span
+        className={cn(
+          "h-5 w-5 rounded-full border flex items-center justify-center transition-colors duration-ds-1 ease-ds",
+          inProgress
+            ? "border-status-blue/40 bg-status-blue/10 group-hover/check:border-status-green group-hover/check:bg-status-green/10"
+            : "border-muted-foreground/40 group-hover/check:border-status-green group-hover/check:bg-status-green/10",
+        )}
+        aria-hidden
+      >
+        {inProgress && <PlayCircle className="h-3 w-3 text-status-blue" />}
+      </span>
+    </button>
+  );
+
+  /** Ações do mentor/admin em uma tarefa aberta (planejar, editar, remover). */
+  const renderManagerActions = (task: Task) => (
+    <div className="flex items-center shrink-0">
+      <IconButton aria-label="Definir prazo e responsável" size="sm" onClick={() => setPlanTaskId(task.id)}>
+        <CalendarIcon className="h-4 w-4" />
+      </IconButton>
+      <IconButton aria-label="Editar tarefa" size="sm" onClick={() => { setEditingId(task.id); setEditText(task.description); }}>
+        <Pencil className="h-4 w-4" />
+      </IconButton>
+      <IconButton aria-label="Remover tarefa" size="sm" onClick={() => setDeleteTaskId(task.id)} className="hover:text-destructive hover:bg-destructive/10">
+        <Trash2 className="h-4 w-4" />
+      </IconButton>
+    </div>
+  );
+
+  /** Rótulo clicável: aluno abre o planejamento; mentor/admin conclui (mesma ação do checkbox). */
+  const renderLabel = (task: Task, children?: ReactNode) => (
+    <button
+      type="button"
+      onClick={() => (role === "liberty" ? setPlanTaskId(task.id) : completeTask(task))}
+      className="flex-1 min-w-0 text-left py-1 rounded-[var(--ds-radius-sm)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 ring-offset-background"
+      title={role === "liberty" ? "Planejar tarefa" : "Concluir e registrar resultado"}
+    >
+      <p className="text-sm text-foreground break-words leading-snug">{task.description}</p>
+      {children}
+      <PlanChips task={task} />
+    </button>
+  );
+
+  const renderInlineEdit = (task: Task) => (
+    <div className="flex-1 flex items-center gap-2">
+      <TextField
+        aria-label="Descrição da tarefa"
+        containerClassName="flex-1"
+        value={editText}
+        onChange={(e) => setEditText(e.target.value)}
+        onKeyDown={(e) => {
+          if (e.key === "Enter" && editText.trim()) updateMutation.mutate({ id: task.id, description: editText.trim() });
+          if (e.key === "Escape") setEditingId(null);
         }}
-        disabled={studentMarkMutation.isPending}
-        title={role === "liberty" ? "Marcar como concluída" : "Concluir e registrar resultado"}
-        className="w-5 h-5 rounded-full border-2 border-muted-foreground/20 hover:border-status-green hover:bg-status-green/10 transition-colors shrink-0"
+        autoFocus
       />
+      <IconButton
+        aria-label="Salvar edição"
+        size="sm"
+        variant="primary"
+        disabled={!editText.trim() || updateMutation.isPending}
+        onClick={() => editText.trim() && updateMutation.mutate({ id: task.id, description: editText.trim() })}
+      >
+        <Save className="h-4 w-4" />
+      </IconButton>
+      <IconButton aria-label="Cancelar edição" size="sm" onClick={() => setEditingId(null)}>
+        <X className="h-4 w-4" />
+      </IconButton>
+    </div>
+  );
+
+  const renderPending = (task: Task) => (
+    <div key={task.id} className="flex items-center gap-3 px-3 py-2.5 min-h-[56px] rounded-ds border border-border bg-card">
+      {renderCheckbox(task)}
 
       {editingId === task.id ? (
-        <div className="flex-1 flex items-center gap-2">
-          <input
-            value={editText}
-            onChange={(e) => setEditText(e.target.value)}
-            className="flex-1 bg-transparent text-sm text-foreground border-b border-primary/20 focus:outline-none"
-            autoFocus
-          />
-          <button
-            onClick={() => editText.trim() && updateMutation.mutate({ id: task.id, description: editText.trim() })}
-            className="p-1 rounded hover:bg-muted"
-          >
-            <Save className="h-3.5 w-3.5 text-primary" />
-          </button>
-          <button onClick={() => setEditingId(null)} className="p-1 rounded hover:bg-muted">
-            <X className="h-3.5 w-3.5 text-muted-foreground" />
-          </button>
-        </div>
+        renderInlineEdit(task)
       ) : (
         <>
-          {role === "liberty" ? (
-            <button
-              onClick={() => setPlanTaskId(task.id)}
-              className="flex-1 min-w-0 text-left hover:opacity-80 transition-opacity"
-              title="Planejar tarefa"
-            >
-              <p className="text-sm text-foreground break-words">{task.description}</p>
-              <PlanChips task={task} />
-            </button>
-          ) : (
-            <div className="flex-1 min-w-0">
-              <p className="text-sm text-foreground break-words">{task.description}</p>
-              <PlanChips task={task} />
-            </div>
-          )}
+          {renderLabel(task)}
           {role === "liberty" && (
-            <button
-              onClick={() => setPlanTaskId(task.id)}
-              className="text-[10px] px-2 py-1 rounded bg-primary/10 text-primary border border-primary/20 hover:bg-primary/20 transition-colors flex items-center gap-1 shrink-0"
-              title="Definir data e responsável"
-            >
-              <CalendarIcon className="h-3 w-3" /> Planejar
-            </button>
+            <Button variant="secondary" size="sm" onClick={() => setPlanTaskId(task.id)} title="Definir data e responsável" className="shrink-0">
+              <CalendarIcon className="h-3.5 w-3.5" /> Planejar
+            </Button>
           )}
-          {(role === "mentor" || role === "admin") && (
-            <div className="flex items-center gap-1 shrink-0">
-              <button
-                onClick={() => setPlanTaskId(task.id)}
-                className="p-1.5 rounded hover:bg-muted text-muted-foreground hover:text-foreground transition-colors"
-                title="Definir prazo e responsável"
-              >
-                <CalendarIcon className="h-3.5 w-3.5" />
-              </button>
-              <button
-                onClick={() => { setEditingId(task.id); setEditText(task.description); }}
-                className="p-1.5 rounded hover:bg-muted text-muted-foreground hover:text-foreground transition-colors"
-                title="Editar"
-              >
-                <Pencil className="h-3.5 w-3.5" />
-              </button>
-              <button
-                onClick={() => { if (window.confirm("Remover esta tarefa? Essa ação não pode ser desfeita.")) deleteMutation.mutate(task.id); }}
-                className="p-1.5 rounded hover:bg-destructive/10 text-muted-foreground hover:text-destructive transition-colors"
-                title="Remover"
-              >
-                <Trash2 className="h-3.5 w-3.5" />
-              </button>
-            </div>
-          )}
+          {isManager && renderManagerActions(task)}
         </>
       )}
     </div>
   );
 
   const renderInProgress = (task: Task) => (
-    <div key={task.id} className="flex items-center gap-3 px-3 py-2.5 rounded-lg border border-status-blue/30 bg-status-blue/5 group">
-      <button
-        onClick={() => {
-          if (role === "liberty") studentMarkMutation.mutate({ taskId: task.id, done: true });
-          else openResultDialog(task.id);
-        }}
-        title={role === "liberty" ? "Marcar como concluída" : "Concluir e registrar resultado"}
-        className="w-5 h-5 rounded-full border-2 border-status-blue/40 bg-status-blue/10 hover:border-status-green hover:bg-status-green/10 transition-colors shrink-0 flex items-center justify-center"
-      >
-        <PlayCircle className="h-3 w-3 text-status-blue" />
-      </button>
-      {role === "liberty" ? (
-        <button
-          onClick={() => setPlanTaskId(task.id)}
-          className="flex-1 min-w-0 text-left hover:opacity-80 transition-opacity"
-          title="Planejar tarefa"
-        >
-          <p className="text-sm text-foreground break-words">{task.description}</p>
-          <p className="text-[10px] text-status-blue mt-0.5">Em andamento</p>
-          <PlanChips task={task} />
-        </button>
+    <div key={task.id} className="flex items-center gap-3 px-3 py-2.5 min-h-[56px] rounded-ds border border-status-blue/25 bg-status-blue/5">
+      {renderCheckbox(task, true)}
+      {editingId === task.id ? (
+        renderInlineEdit(task)
       ) : (
-        <div className="flex-1 min-w-0">
-          <p className="text-sm text-foreground break-words">{task.description}</p>
-          <p className="text-[10px] text-status-blue mt-0.5">Em andamento</p>
-          <PlanChips task={task} />
-        </div>
-      )}
-      {role === "liberty" && (
-        <button
-          onClick={() => setPlanTaskId(task.id)}
-          className="text-[10px] px-2 py-1 rounded bg-primary/10 text-primary border border-primary/20 hover:bg-primary/20 transition-colors flex items-center gap-1 shrink-0"
-          title="Definir data e responsável"
-        >
-          <CalendarIcon className="h-3 w-3" /> Planejar
-        </button>
-      )}
-      {(role === "mentor" || role === "admin") && (
-        <div className="flex items-center gap-1 shrink-0">
-          <button
-            onClick={() => setPlanTaskId(task.id)}
-            className="p-1.5 rounded hover:bg-muted text-muted-foreground hover:text-foreground transition-colors"
-            title="Definir prazo e responsável"
-          >
-            <CalendarIcon className="h-3.5 w-3.5" />
-          </button>
-          <button
-            onClick={() => { setEditingId(task.id); setEditText(task.description); }}
-            className="p-1.5 rounded hover:bg-muted text-muted-foreground hover:text-foreground transition-colors"
-            title="Editar"
-          >
-            <Pencil className="h-3.5 w-3.5" />
-          </button>
-          <button
-            onClick={() => { if (window.confirm("Remover esta tarefa? Essa ação não pode ser desfeita.")) deleteMutation.mutate(task.id); }}
-            className="p-1.5 rounded hover:bg-destructive/10 text-muted-foreground hover:text-destructive transition-colors"
-            title="Remover"
-          >
-            <Trash2 className="h-3.5 w-3.5" />
-          </button>
-        </div>
+        <>
+          {renderLabel(task, <p className="text-xs text-status-blue mt-0.5">Em andamento</p>)}
+          {role === "liberty" && (
+            <Button variant="secondary" size="sm" onClick={() => setPlanTaskId(task.id)} title="Definir data e responsável" className="shrink-0">
+              <CalendarIcon className="h-3.5 w-3.5" /> Planejar
+            </Button>
+          )}
+          {isManager && renderManagerActions(task)}
+        </>
       )}
     </div>
   );
 
 
   const renderAwaiting = (task: Task) => (
-    <div key={task.id} className="flex items-center gap-3 px-3 py-2.5 rounded-lg border border-status-yellow/30 bg-status-yellow/5 group">
-      <Clock className="h-4 w-4 text-status-yellow shrink-0" />
-      <div className="flex-1 min-w-0">
-        <p className="text-sm text-foreground break-words">{task.description}</p>
-        <p className="text-[10px] text-status-yellow mt-0.5">
-          O aluno marcou como concluída. Aguardando validação do mentor
-        </p>
+    <div key={task.id} className="flex flex-col sm:flex-row sm:items-center gap-3 px-3 py-2.5 min-h-[56px] rounded-ds border border-status-yellow/25 bg-status-yellow/5">
+      <div className="flex items-center gap-3 flex-1 min-w-0">
+        <Clock className="h-5 w-5 text-status-yellow shrink-0" aria-hidden />
+        <div className="flex-1 min-w-0">
+          <p className="text-sm text-foreground break-words leading-snug">{task.description}</p>
+          <p className="text-xs text-status-yellow mt-0.5">
+            O aluno marcou como concluída. Aguardando validação do mentor
+          </p>
+        </div>
       </div>
-      {(role === "mentor" || role === "admin") && (
-        <div className="flex items-center gap-1.5 shrink-0">
-          <button
-            onClick={() => openResultDialog(task.id)}
-            className="text-[10px] px-2 py-1 rounded bg-status-green/15 text-status-green hover:bg-status-green/25 transition-colors flex items-center gap-1"
-            title="Validar e registrar resultado"
-          >
-            <ShieldCheck className="h-3 w-3" /> Validar c/ resultado
-          </button>
-          <button
+      {isManager && (
+        <div className="flex items-center gap-2 flex-wrap shrink-0 sm:justify-end">
+          <Button size="sm" onClick={() => openResultDialog(task.id)} title="Validar e registrar resultado">
+            <ShieldCheck className="h-3.5 w-3.5" /> Validar com resultado
+          </Button>
+          <Button
+            size="sm"
+            variant="outline"
             onClick={() => validateMutation.mutate(task.id)}
             disabled={validateMutation.isPending}
-            className="text-[10px] px-2 py-1 rounded bg-muted text-foreground hover:bg-muted/70 transition-colors flex items-center gap-1"
             title="Apenas validar (sem resultado)"
           >
             Validar
-          </button>
-
-          <button
+          </Button>
+          <Button
+            size="sm"
+            variant="ghost"
             onClick={() => reopenMutation.mutate(task.id)}
             disabled={reopenMutation.isPending}
-            className="text-[10px] px-2 py-1 rounded bg-muted text-muted-foreground hover:bg-muted/70 transition-colors flex items-center gap-1"
-            title="Reabrir"
+            className="text-muted-foreground"
           >
-            <RotateCcw className="h-3 w-3" /> Reabrir
-          </button>
+            <RotateCcw className="h-3.5 w-3.5" /> Reabrir
+          </Button>
         </div>
       )}
       {role === "liberty" && (
-        <button
+        <Button
+          size="sm"
+          variant="ghost"
           onClick={() => studentMarkMutation.mutate({ taskId: task.id, done: false })}
           disabled={studentMarkMutation.isPending}
-          className="text-[10px] px-2 py-1 rounded bg-muted text-muted-foreground hover:bg-muted/70 transition-colors flex items-center gap-1 shrink-0"
-          title="Desmarcar"
+          className="text-muted-foreground shrink-0 self-start sm:self-auto"
         >
-          <RotateCcw className="h-3 w-3" /> Desmarcar
-        </button>
+          <RotateCcw className="h-3.5 w-3.5" /> Desmarcar
+        </Button>
       )}
     </div>
   );
 
   const renderValidated = (task: Task) => (
-    <div key={task.id} className="px-3 py-2.5 rounded-lg border border-border bg-card/50 group">
+    <div key={task.id} className="px-3 py-2.5 min-h-[56px] rounded-ds border border-border bg-card">
       <div className="flex items-center gap-3">
-        <CheckCircle2 className="h-5 w-5 text-status-green shrink-0" />
-        <span className="text-sm text-foreground/70 line-through flex-1 min-w-0 break-words">{task.description}</span>
-        {(role === "mentor" || role === "admin") && !task.result_value && (
-          <button
-            onClick={() => openResultDialog(task.id)}
-            className="text-[10px] px-2 py-1 rounded bg-primary/10 text-primary hover:bg-primary/20 transition-colors shrink-0"
-          >
-            + Resultado
-          </button>
+        <CheckCircle2 className="h-5 w-5 text-status-green shrink-0" aria-hidden />
+        <span className="text-sm text-muted-foreground line-through flex-1 min-w-0 break-words leading-snug">{task.description}</span>
+        {isManager && !task.result_value && (
+          <Button size="sm" variant="ghost" onClick={() => openResultDialog(task.id)} className="shrink-0">
+            <Plus className="h-3.5 w-3.5" /> Resultado
+          </Button>
         )}
 
-        {(role === "mentor" || role === "admin") && (
-          <>
-            <button
-              onClick={() => reopenMutation.mutate(task.id)}
-              disabled={reopenMutation.isPending}
-              className="p-1 rounded hover:bg-muted opacity-0 group-hover:opacity-100 transition-opacity shrink-0"
-              title="Reabrir"
-            >
-              <RotateCcw className="h-3 w-3 text-muted-foreground" />
-            </button>
-            <button
-              onClick={() => { if (window.confirm("Remover esta tarefa? Essa ação não pode ser desfeita.")) deleteMutation.mutate(task.id); }}
-              className="p-1 rounded hover:bg-destructive/10 opacity-0 group-hover:opacity-100 transition-opacity shrink-0"
-              title="Remover"
-            >
-              <Trash2 className="h-3 w-3 text-destructive" />
-            </button>
-          </>
+        {isManager && (
+          <div className="flex items-center shrink-0">
+            <IconButton aria-label="Reabrir tarefa" size="sm" onClick={() => reopenMutation.mutate(task.id)} disabled={reopenMutation.isPending}>
+              <RotateCcw className="h-4 w-4" />
+            </IconButton>
+            <IconButton aria-label="Remover tarefa" size="sm" onClick={() => setDeleteTaskId(task.id)} className="hover:text-destructive hover:bg-destructive/10">
+              <Trash2 className="h-4 w-4" />
+            </IconButton>
+          </div>
         )}
       </div>
       {task.result_value && (
-        <div className="mt-2 ml-8 p-2 rounded-lg bg-muted/50 border border-border">
-          <div className="flex items-center gap-1.5 mb-0.5">
+        <div className="mt-2 ml-8 p-3 rounded-ds bg-muted/50 border border-border space-y-1">
+          <StatusPill tone={task.result_type === "quantitative" ? "success" : "info"} withDot={false}>
             {task.result_type === "quantitative" ? (
-              <TrendingUp className="h-3 w-3 text-status-green" />
+              <TrendingUp className="h-3 w-3" aria-hidden />
             ) : (
-              <MessageSquare className="h-3 w-3 text-status-blue" />
+              <MessageSquare className="h-3 w-3" aria-hidden />
             )}
-            <span className="text-[10px] text-muted-foreground uppercase tracking-wider font-medium">
-              {task.result_type === "quantitative" ? "Quantitativo" : "Qualitativo"}
-            </span>
-          </div>
-          <p className="text-xs text-foreground">
+            {task.result_type === "quantitative" ? "Quantitativo" : "Qualitativo"}
+          </StatusPill>
+          <p className="text-sm text-foreground">
             {task.result_metric ? `${task.result_metric}: ` : ""}{task.result_value}
           </p>
           {(task as any).result_notes && (
-            <p className="text-[11px] text-muted-foreground italic mt-1 whitespace-pre-wrap">
+            <p className="text-xs text-muted-foreground whitespace-pre-wrap leading-relaxed">
               {(task as any).result_notes}
             </p>
           )}
         </div>
       )}
-
     </div>
   );
 
-  const SectionHeader = ({ status, count }: { status: keyof typeof taskStatusConfig; count: number }) => {
-    const cfg = taskStatusConfig[status];
-    return (
-      <div className="flex items-center gap-2 mb-1.5 mt-2 first:mt-0">
-        <span className={`text-[10px] uppercase tracking-wider font-semibold px-2 py-0.5 rounded-full border ${cfg.classes}`}>
-          {cfg.label}
-        </span>
-        <span className="text-[10px] text-muted-foreground">({count})</span>
-      </div>
-    );
+  const statusTone: Record<keyof typeof taskStatusConfig, PillTone> = {
+    pending: "neutral",
+    in_progress: "info",
+    done_by_student: "warning",
+    validated: "success",
   };
+
+  const GroupHeader = ({ status, count }: { status: keyof typeof taskStatusConfig; count: number }) => (
+    <div className="flex items-center gap-2 mb-2 mt-2 first:mt-0">
+      <StatusPill tone={statusTone[status]}>{taskStatusConfig[status].label}</StatusPill>
+      <span className="text-xs text-muted-foreground tabular-nums">({count})</span>
+    </div>
+  );
 
   return (
     <div className="space-y-4">
       {sessionName && <p className="text-xs text-muted-foreground">{sessionName}</p>}
 
       {grouped.pending.length > 0 && (
-        <div className="space-y-1">
-          <SectionHeader status="pending" count={grouped.pending.length} />
+        <div className="space-y-2">
+          <GroupHeader status="pending" count={grouped.pending.length} />
           {grouped.pending.map(renderPending)}
         </div>
       )}
 
       {grouped.in_progress.length > 0 && (
-        <div className="space-y-1">
-          <SectionHeader status="in_progress" count={grouped.in_progress.length} />
+        <div className="space-y-2">
+          <GroupHeader status="in_progress" count={grouped.in_progress.length} />
           {grouped.in_progress.map(renderInProgress)}
         </div>
       )}
 
       {grouped.awaiting.length > 0 && (
-        <div className="space-y-1">
-          <SectionHeader status="done_by_student" count={grouped.awaiting.length} />
+        <div className="space-y-2">
+          <GroupHeader status="done_by_student" count={grouped.awaiting.length} />
           {grouped.awaiting.map(renderAwaiting)}
         </div>
       )}
 
       {grouped.validated.length > 0 && (
-        <div className="space-y-1">
-          <SectionHeader status="validated" count={grouped.validated.length} />
+        <div className="space-y-2">
+          <GroupHeader status="validated" count={grouped.validated.length} />
           {grouped.validated.map(renderValidated)}
         </div>
       )}
 
-      {!hideAdd && (role === "mentor" || role === "admin") && (
+      {!hideAdd && isManager && (
         <>
           {addingTask ? (
-            <div className="flex items-center gap-2 px-3 py-2 rounded-lg border border-primary/30 bg-card">
-              <Circle className="h-4 w-4 text-muted-foreground/30 shrink-0" />
-              <input
+            <div className="flex items-center gap-2 px-3 py-2 rounded-ds border border-primary/25 bg-card">
+              <Circle className="h-4 w-4 text-muted-foreground/40 shrink-0" aria-hidden />
+              <TextField
+                aria-label="Nova tarefa"
+                containerClassName="flex-1"
                 value={newTaskText}
                 onChange={(e) => setNewTaskText(e.target.value)}
                 onKeyDown={(e) => {
                   if (e.key === "Enter" && newTaskText.trim()) addMutation.mutate(newTaskText.trim());
                   if (e.key === "Escape") { setAddingTask(false); setNewTaskText(""); }
                 }}
-                className="flex-1 bg-transparent text-sm text-foreground placeholder:text-muted-foreground focus:outline-none"
                 placeholder="Descreva a nova tarefa..."
                 autoFocus
               />
-              <button
+              <Button
+                size="sm"
                 onClick={() => newTaskText.trim() && addMutation.mutate(newTaskText.trim())}
                 disabled={!newTaskText.trim() || addMutation.isPending}
-                className="text-xs px-2.5 py-1 rounded bg-primary text-primary-foreground disabled:opacity-40"
               >
                 Adicionar
-              </button>
-              <button onClick={() => { setAddingTask(false); setNewTaskText(""); }} className="p-1 rounded hover:bg-muted">
-                <X className="h-3.5 w-3.5 text-muted-foreground" />
-              </button>
+              </Button>
+              <IconButton aria-label="Cancelar" size="sm" onClick={() => { setAddingTask(false); setNewTaskText(""); }}>
+                <X className="h-4 w-4" />
+              </IconButton>
             </div>
           ) : (
-            <button
-              onClick={() => setAddingTask(true)}
-              className="flex items-center gap-2 text-xs text-primary hover:text-primary/80 transition-colors py-1"
-            >
+            <Button variant="ghost" size="sm" onClick={() => setAddingTask(true)} className="text-primary">
               <Plus className="h-3.5 w-3.5" /> Adicionar tarefa
-            </button>
+            </Button>
           )}
         </>
       )}
 
       {tasks.length === 0 && role === "liberty" && (
-        <p className="text-xs text-muted-foreground italic py-2">Nenhuma tarefa atribuída ainda.</p>
+        <EmptyState compact icon={CheckCircle2} title="Nenhuma tarefa atribuída ainda" />
       )}
 
+      <ConfirmDialog
+        open={!!deleteTaskId}
+        onOpenChange={(o) => !o && setDeleteTaskId(null)}
+        title="Remover esta tarefa?"
+        description="Essa ação não pode ser desfeita."
+        confirmLabel="Remover"
+        destructive
+        loading={deleteMutation.isPending}
+        onConfirm={() => deleteTaskId && deleteMutation.mutate(deleteTaskId)}
+      />
+
       {/* Result dialog (mentor) */}
-      <Dialog open={!!resultTaskId} onOpenChange={(open) => { if (!open) setResultTaskId(null); }}>
-        <DialogContent className="sm:max-w-md">
-          <DialogHeader>
-            <DialogTitle>Registrar Resultado</DialogTitle>
-          </DialogHeader>
-
-          <p className="text-sm text-muted-foreground">
-            {tasks.find((t) => t.id === resultTaskId)?.description}
-          </p>
-
-          <div>
-            <label className="text-xs text-muted-foreground mb-2 block">Tipo de resultado</label>
-            <div className="flex gap-2">
-              <button
-                onClick={() => setResultType("quantitative")}
-                className={`flex-1 text-xs px-3 py-2.5 rounded-lg border transition-colors flex items-center justify-center gap-1.5 ${
-                  resultType === "quantitative"
-                    ? "bg-status-green/10 text-status-green border-border"
-                    : "bg-card text-muted-foreground border-border"
-                }`}
-              >
-                <TrendingUp className="h-3.5 w-3.5" /> Quantitativo
-              </button>
-              <button
-                onClick={() => setResultType("qualitative")}
-                className={`flex-1 text-xs px-3 py-2.5 rounded-lg border transition-colors flex items-center justify-center gap-1.5 ${
-                  resultType === "qualitative"
-                    ? "bg-status-blue/10 text-status-blue border-border"
-                    : "bg-card text-muted-foreground border-border"
-                }`}
-              >
-                <MessageSquare className="h-3.5 w-3.5" /> Qualitativo
-              </button>
+      <BottomSheet
+        open={!!resultTaskId}
+        onOpenChange={(open) => { if (!open) setResultTaskId(null); }}
+        title="Registrar resultado"
+        description={tasks.find((t) => t.id === resultTaskId)?.description}
+        size="sm"
+        locked={saveResultMutation.isPending}
+        footer={
+          <Button
+            onClick={() => saveResultMutation.mutate()}
+            disabled={saveResultMutation.isPending || !resultValue.trim()}
+            className="w-full sm:w-auto"
+          >
+            {saveResultMutation.isPending ? "Salvando..." : "Salvar resultado"}
+          </Button>
+        }
+      >
+        <div className="space-y-4">
+          <div className="space-y-1.5">
+            <p className="text-sm font-medium text-foreground">Tipo de resultado</p>
+            <div className="flex gap-2" role="group" aria-label="Tipo de resultado">
+              <Chip active={resultType === "quantitative"} onClick={() => setResultType("quantitative")}>
+                <TrendingUp className="h-3.5 w-3.5" aria-hidden /> Quantitativo
+              </Chip>
+              <Chip active={resultType === "qualitative"} onClick={() => setResultType("qualitative")}>
+                <MessageSquare className="h-3.5 w-3.5" aria-hidden /> Qualitativo
+              </Chip>
             </div>
           </div>
 
           {resultType === "quantitative" && (
-            <div>
-              <label className="text-xs text-muted-foreground mb-1 block">Métrica (ex: Faturamento, Clientes)</label>
-              <input
-                value={resultMetric}
-                onChange={(e) => setResultMetric(e.target.value)}
-                className="w-full bg-card border border-border rounded-lg px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:border-primary/20 focus:outline-none"
-                placeholder="Ex: Faturamento"
-              />
-            </div>
+            <TextField
+              label="Métrica"
+              hint="Ex: Faturamento, Clientes"
+              value={resultMetric}
+              onChange={(e) => setResultMetric(e.target.value)}
+              placeholder="Ex: Faturamento"
+            />
           )}
 
-          <div>
-            <label className="text-xs text-muted-foreground mb-1 block">
-              {resultType === "quantitative" ? "Valor alcançado" : "Descreva o resultado"}
-            </label>
-            <textarea
-              value={resultValue}
-              onChange={(e) => setResultValue(e.target.value)}
-              className="w-full bg-card border border-border rounded-lg p-3 text-sm text-foreground placeholder:text-muted-foreground focus:border-primary/20 focus:outline-none resize-none h-20"
-              placeholder={resultType === "quantitative" ? "Ex: R$ 50.000" : "Ex: Melhorou processos internos de vendas"}
-            />
-          </div>
+          <TextAreaField
+            label={resultType === "quantitative" ? "Valor alcançado" : "Descreva o resultado"}
+            value={resultValue}
+            onChange={(e) => setResultValue(e.target.value)}
+            className="resize-none h-20"
+            placeholder={resultType === "quantitative" ? "Ex: R$ 50.000" : "Ex: Melhorou processos internos de vendas"}
+          />
 
-          <div>
-            <label className="text-xs text-muted-foreground mb-1 block">Observações (opcional)</label>
-            <textarea
-              value={resultNotes}
-              onChange={(e) => setResultNotes(e.target.value)}
-              className="w-full bg-card border border-border rounded-lg p-3 text-sm text-foreground placeholder:text-muted-foreground focus:border-primary/20 focus:outline-none resize-none h-16"
-              placeholder="Contexto, aprendizados, próximos passos…"
-            />
-          </div>
-
-          <button
-            onClick={() => saveResultMutation.mutate()}
-            disabled={saveResultMutation.isPending || !resultValue.trim()}
-            className="btn-silver w-full text-sm disabled:opacity-40"
-          >
-            {saveResultMutation.isPending ? "Salvando..." : "Salvar Resultado"}
-          </button>
-
-        </DialogContent>
-      </Dialog>
+          <TextAreaField
+            label="Observações"
+            hint="Opcional"
+            value={resultNotes}
+            onChange={(e) => setResultNotes(e.target.value)}
+            className="resize-none h-16"
+            placeholder="Contexto, aprendizados, próximos passos..."
+          />
+        </div>
+      </BottomSheet>
 
       {/* Plan dialog */}
       <TaskPlanDialog

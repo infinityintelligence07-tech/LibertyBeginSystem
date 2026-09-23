@@ -18,14 +18,15 @@ export const RankingHighlightsBlock = () => {
   return (
     <Link
       to="/ranking"
-      className="block rounded-2xl border border-primary/30 bg-gradient-to-br from-primary/10 via-card/60 to-transparent p-4 hover:border-primary/60 transition-colors"
+      aria-label="Ver ranking completo"
+      className="glass-card is-interactive block p-4 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 ring-offset-background"
     >
       <div className="flex items-center justify-between mb-3">
         <div className="flex items-center gap-2">
-          <Trophy className="h-4 w-4 text-primary" />
+          <Trophy className="h-4 w-4 text-primary" aria-hidden />
           <span className="text-sm font-semibold text-foreground">Libertys Begin em destaque</span>
         </div>
-        <ChevronRight className="h-4 w-4 text-muted-foreground" />
+        <ChevronRight className="h-4 w-4 text-muted-foreground" aria-hidden />
       </div>
       <div className="flex items-center gap-3">
         {top3.map((m, i) => (
@@ -34,17 +35,17 @@ export const RankingHighlightsBlock = () => {
               {m.photo_url ? (
                 <img src={m.photo_url} alt={m.full_name} className="h-10 w-10 rounded-full object-cover" />
               ) : (
-                <div className="h-10 w-10 rounded-full bg-primary/20 flex items-center justify-center text-xs font-bold text-primary">
+                <div className="h-10 w-10 rounded-full bg-primary/10 flex items-center justify-center text-xs font-bold text-primary">
                   {initials(m.full_name)}
                 </div>
               )}
-              <span className="absolute -bottom-0.5 -right-0.5 h-4 w-4 rounded-full bg-primary text-primary-foreground text-[9px] font-bold flex items-center justify-center border border-card">
+              <span className="absolute -bottom-0.5 -right-0.5 h-[18px] w-[18px] rounded-full bg-primary text-primary-foreground text-[11px] font-bold flex items-center justify-center border border-card tabular-nums">
                 {i + 1}
               </span>
             </div>
             <div className="min-w-0 hidden sm:block">
               <p className="text-xs font-medium text-foreground truncate">{shortName(m.full_name).split(" ")[0]}</p>
-              <p className="text-[10px] text-primary font-semibold tabular-nums">{m.points} pts</p>
+              <p className="text-[11px] text-primary font-semibold tabular-nums">{m.points} pts</p>
             </div>
           </div>
         ))}

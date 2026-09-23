@@ -1,8 +1,10 @@
 import { motion } from "framer-motion";
-import { Users, ChevronRight } from "lucide-react";
+import { Users } from "lucide-react";
 import { useNavigate } from "react-router-dom";
-import { shortName, initials } from "@/lib/formatName";
+import { shortName } from "@/lib/formatName";
 import { fadeUpItem } from "@/lib/animations";
+import { UserAvatar } from "@/components/UserAvatar";
+import { EmptyState, ListRow, ProgressBar, SectionCard, SectionHeader, StatusPill } from "@/components/ds";
 
 export interface ActiveStudent {
   id: string;
@@ -17,85 +19,54 @@ interface Props {
   students: ActiveStudent[];
 }
 
+const tierLabel = (tier?: string | null) => (tier === "liberty" ? "Liberty" : tier === "begin" ? "Begin" : null);
+
 export const MentorActiveStudents = ({ students }: Props) => {
   const navigate = useNavigate();
+  const total = 12;
 
   return (
-    <motion.div variants={fadeUpItem}>
-      <div className="flex items-end justify-between mb-3">
-        <div>
-          <div className="flex items-center gap-2 text-primary text-[10px] font-semibold uppercase tracking-wider">
-            <Users className="h-3.5 w-3.5" /> Meus alunos ativos
-          </div>
-          <h2 className="text-lg font-semibold text-foreground">Acompanhamento da jornada</h2>
-        </div>
-        <span className="text-[10px] uppercase tracking-wider text-muted-foreground">
-          {students.length} {students.length === 1 ? "aluno" : "alunos"}
-        </span>
-      </div>
+    <motion.section variants={fadeUpItem} className="space-y-3">
+      <SectionHeader
+        title="Alunos ativos"
+        description="Acompanhamento da jornada"
+        actions={<span className="text-xs text-muted-foreground tabular-nums">{students.length} {students.length === 1 ? "aluno" : "alunos"}</span>}
+      />
 
       {students.length === 0 ? (
-        <div className="glass-card p-6 text-center">
-          <p className="text-sm text-muted-foreground">
-            Você ainda não conduziu sessões. Quando o admin agendar, seus alunos aparecerão aqui.
-          </p>
-        </div>
+        <EmptyState
+          icon={Users}
+          compact
+          title="Nenhum aluno ainda"
+          description="Quando o administrador agendar sessões com você, seus alunos aparecem aqui."
+        />
       ) : (
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-          {students.map((s) => {
-            const total = 12;
-            const pct = Math.min(100, Math.round((s.completedCount / total) * 100));
+        <SectionCard padding="none">
+          {students.map((s, idx) => {
             const isDone = s.completedCount >= total;
+            const tier = tierLabel(s.tier);
             return (
-              <button
+              <ListRow
                 key={s.id}
-                onClick={() => navigate(`/mentor/alunos/${s.id}`)}
-                className="glass-card p-4 text-left hover:border-primary/40 hover:shadow-lg transition-all group"
-              >
-                <div className="flex items-center gap-3 mb-3">
-                  {s.avatar_url ? (
-                    <img src={s.avatar_url} alt={s.full_name} className="h-10 w-10 rounded-full object-cover border border-border shrink-0" />
-                  ) : (
-                    <div className="h-10 w-10 rounded-full bg-primary/15 text-primary flex items-center justify-center text-xs font-semibold border border-border shrink-0">
-                      {initials(s.full_name)}
-                    </div>
-                  )}
-                  <div className="min-w-0 flex-1">
-                    <p className="text-sm font-medium text-foreground truncate group-hover:text-primary transition-colors">
-                      {shortName(s.full_name)}
-                    </p>
-                    <div className="flex items-center gap-1.5 mt-0.5">
-                      {s.tier && (
-                        <span className="text-[9px] uppercase tracking-wider px-1.5 py-0.5 rounded border border-border text-muted-foreground">
-                          {s.tier}
-                        </span>
-                      )}
-                      {s.nextDate && (
-                        <span className="text-[10px] text-muted-foreground">
-                          próx. {s.nextDate}
-                        </span>
-                      )}
-                    </div>
-                  </div>
-                  <ChevronRight className="h-4 w-4 text-muted-foreground group-hover:text-primary transition-colors shrink-0" />
-                </div>
-                <div className="flex items-center justify-between text-[10px] mb-1.5">
-                  <span className="text-muted-foreground uppercase tracking-wider">Jornada</span>
-                  <span className={`font-semibold tabular-nums ${isDone ? "text-status-green" : "text-foreground"}`}>
-                    {s.completedCount}/{total}
+                last={idx === students.length - 1}
+                leading={<UserAvatar name={s.full_name} avatarUrl={s.avatar_url} size={40} />}
+                title={shortName(s.full_name)}
+                subtitle={
+                  <span className="flex items-center gap-3">
+                    <span className="flex-1 min-w-[80px] max-w-[160px]">
+                      <ProgressBar value={s.completedCount} max={total} tone={isDone ? "success" : "brand"} label="Sessões realizadas" className="h-1.5" />
+                    </span>
+                    <span className="tabular-nums shrink-0">{s.completedCount}/{total} sessões</span>
+                    {s.nextDate && <span className="hidden sm:inline shrink-0">Próxima {s.nextDate}</span>}
                   </span>
-                </div>
-                <div className="h-1.5 rounded-full bg-muted/50 overflow-hidden">
-                  <div
-                    className={`h-full transition-all ${isDone ? "bg-status-green" : "bg-primary"}`}
-                    style={{ width: `${pct}%` }}
-                  />
-                </div>
-              </button>
+                }
+                trailing={tier ? <StatusPill tone={s.tier === "liberty" ? "brand" : "neutral"} withDot={false}>{tier}</StatusPill> : undefined}
+                onPress={() => navigate(`/mentor/alunos/${s.id}`)}
+              />
             );
           })}
-        </div>
+        </SectionCard>
       )}
-    </motion.div>
+    </motion.section>
   );
 };

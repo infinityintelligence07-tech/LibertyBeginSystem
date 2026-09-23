@@ -1,6 +1,6 @@
-import { useState, useMemo, useEffect } from "react";
+import { useState, useMemo, useEffect, type ReactNode } from "react";
 import { useSearchParams } from "react-router-dom";
-import { motion, AnimatePresence } from "framer-motion";
+import { motion } from "framer-motion";
 import { AppLayout } from "@/components/AppLayout";
 import {
   ChevronLeft,
@@ -18,25 +18,112 @@ import {
   Clock,
   Pencil,
   Trash2,
-
+  CalendarDays,
+  type LucideIcon,
 } from "lucide-react";
 import { staggerContainer, fadeUpItem } from "@/lib/animations";
 import { shortName, initials as getInitials, matchesSearch } from "@/lib/formatName";
-import { format, addDays, startOfWeek, endOfWeek, startOfMonth, endOfMonth, eachDayOfInterval, isSameDay, isSameMonth, isToday, parseISO, getDay } from "date-fns";
+import { format, addDays, startOfWeek, endOfWeek, startOfMonth, endOfMonth, eachDayOfInterval, isSameMonth, isToday, parseISO, getDay } from "date-fns";
 import { ptBR } from "date-fns/locale";
 import { supabase } from "@/integrations/supabase/client";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useBookingsRealtime } from "@/hooks/useBookingsRealtime";
-import { useSessionCatalog } from "@/hooks/useAdminData";
+import { useSessionCatalog, ADMIN_BOOKING_QUERY_KEYS } from "@/hooks/useAdminData";
 import { toast } from "sonner";
 import { useDemoData } from "@/contexts/DemoDataContext";
 import { demoBookingsForAdmin, demoLibertyProfiles, demoMentorProfiles, demoSessionsCatalog } from "@/lib/demoForUser";
-import { getEffectiveBookingStatus, isVisibleSessionBooking } from "@/lib/bookingStatus";
+import {
+  getEffectiveBookingStatus,
+  isVisibleSessionBooking,
+  isPendingConfirmationOverdue,
+  daysSinceBookingEnd,
+  bookingStatusConfig,
+  todayPlatformDate,
+  PENDING_CONFIRMATION_HINT,
+} from "@/lib/bookingStatus";
 import { bookingRuleErrorMessage } from "@/lib/bookingRules";
+import { UserAvatar } from "@/components/UserAvatar";
+import { Button } from "@/components/ui/button";
+import {
+  BottomSheet,
+  Callout,
+  Chip,
+  ConfirmDialog,
+  DateBlock,
+  EmptyState,
+  ErrorState,
+  IconButton,
+  ListRow,
+  LoadingState,
+  PageContainer,
+  PageHeader,
+  SectionCard,
+  SectionHeader,
+  SelectField,
+  StatusPill,
+  TextAreaField,
+  TextField,
+} from "@/components/ds";
 
 /* ───── Types ───── */
-type SessionStatus = "scheduled" | "completed" | "rescheduled" | "cancelled" | "pending_approval" | "not_realized";
+/** Status bruto gravado no banco (enum `booking_status`). */
+type RawBookingStatus = "scheduled" | "completed" | "rescheduled" | "cancelled" | "pending_approval" | "not_realized";
+/** Status efetivo exibido na agenda (regra única de `bookingStatus.ts`). */
+type SessionStatus = RawBookingStatus | "awaiting_report" | "pending_confirmation";
 type ViewMode = "day" | "week" | "month";
+
+const STATUS_FILTER_OPTIONS: SessionStatus[] = [
+  "scheduled",
+  "pending_confirmation",
+  "pending_approval",
+  "completed",
+  "not_realized",
+  "cancelled",
+];
+
+const isSessionStatus = (value: string | null): value is SessionStatus =>
+  !!value && (STATUS_FILTER_OPTIONS as string[]).includes(value);
+
+/** Converte o status efetivo no status bruto persistível (o banco não conhece awaiting_report/pending_confirmation). */
+const toRawStatus = (status: SessionStatus): RawBookingStatus => {
+  switch (status) {
+    case "awaiting_report":
+      return "completed";
+    case "pending_confirmation":
+    case "rescheduled":
+      return "scheduled";
+    case "scheduled":
+    case "completed":
+    case "cancelled":
+    case "pending_approval":
+    case "not_realized":
+      return status;
+    default: {
+      const exhaustive: never = status;
+      return exhaustive;
+    }
+  }
+};
+
+type BackendError = { message?: string | null; details?: string | null; code?: string | null } | null | undefined;
+
+/** Traduz as exceções do banco (triggers) para mensagens amigáveis. */
+const translateBookingError = (error: BackendError, fallback: string) => bookingRuleErrorMessage(error) ?? fallback;
+
+/** Calcula o horário de término a partir da duração da sessão (Mapeamento = 3h; padrão 1h30). */
+const computeEndTime = (startTime: string, durationMinutes?: number | null) => {
+  const [h, m] = startTime.split(":").map(Number);
+  const total = Math.min(h * 60 + m + (durationMinutes && durationMinutes > 0 ? durationMinutes : 90), 23 * 60 + 59);
+  return `${String(Math.floor(total / 60)).padStart(2, "0")}:${String(total % 60).padStart(2, "0")}`;
+};
+
+const formatDuration = (durationMinutes?: number | null) => {
+  const total = durationMinutes && durationMinutes > 0 ? durationMinutes : 90;
+  const h = Math.floor(total / 60);
+  const m = total % 60;
+  if (h === 0) return `${m}min`;
+  return m === 0 ? `${h}h` : `${h}h${String(m).padStart(2, "0")}`;
+};
 
 interface MentorInfo {
   id: string;
@@ -52,15 +139,21 @@ interface BookingRow {
   scheduled_date: string;
   start_time: string;
   end_time: string;
-  status: SessionStatus;
+  /** Status BRUTO do banco. Para exibir use `displayStatus(b)`. */
+  status: RawBookingStatus;
+  is_retroactive?: boolean | null;
+  report_required?: boolean | null;
   zoom_join_url: string | null;
   zoom_link: string | null;
   observations: string | null;
   cancellation_reason: string | null;
   availability_id: string | null;
   liberty: { full_name: string; member_tier?: "begin" | "liberty" | null } | null;
-  sessions: { name: string } | null;
+  sessions: { name: string; duration_minutes?: number | null; is_kickoff?: boolean | null } | null;
 }
+
+const BOOKING_SELECT =
+  "*, liberty:profiles!bookings_liberty_id_fkey(full_name, member_tier), sessions(name, duration_minutes, is_kickoff)";
 
 /* ───── Constants ───── */
 // 9 distinct hues, one per mentor (cycles only if >9 mentors)
@@ -70,38 +163,14 @@ const mentorColors = [
   { header: "bg-status-yellow/15 border-b-2 border-status-yellow", dot: "bg-status-yellow", text: "text-status-yellow", bg: "bg-status-yellow/15 border-status-yellow/50" },
   { header: "bg-destructive/15 border-b-2 border-destructive", dot: "bg-destructive", text: "text-destructive", bg: "bg-destructive/15 border-destructive/50" },
   { header: "bg-primary/15 border-b-2 border-primary/20", dot: "bg-primary", text: "text-primary", bg: "bg-primary/15 border-primary/50" },
-  { header: "bg-[#a855f7]/15 border-b-2 border-[#a855f7]", dot: "bg-[#a855f7]", text: "text-[#a855f7]", bg: "bg-[#a855f7]/15 border-[#a855f7]/50" },
-  { header: "bg-[#ec4899]/15 border-b-2 border-[#ec4899]", dot: "bg-[#ec4899]", text: "text-[#ec4899]", bg: "bg-[#ec4899]/15 border-[#ec4899]/50" },
-  { header: "bg-[#06b6d4]/15 border-b-2 border-[#06b6d4]", dot: "bg-[#06b6d4]", text: "text-[#06b6d4]", bg: "bg-[#06b6d4]/15 border-[#06b6d4]/50" },
-  { header: "bg-[#f97316]/15 border-b-2 border-[#f97316]", dot: "bg-[#f97316]", text: "text-[#f97316]", bg: "bg-[#f97316]/15 border-[#f97316]/50" },
+  { header: "bg-status-orange/15 border-b-2 border-status-orange", dot: "bg-status-orange", text: "text-status-orange", bg: "bg-status-orange/15 border-status-orange/50" },
+  { header: "bg-silver-light/15 border-b-2 border-silver-light", dot: "bg-silver-light", text: "text-silver-light", bg: "bg-silver-light/15 border-silver-light/50" },
+  { header: "bg-muted-foreground/15 border-b-2 border-muted-foreground", dot: "bg-muted-foreground", text: "text-muted-foreground", bg: "bg-muted-foreground/15 border-muted-foreground/50" },
+  { header: "bg-accent-foreground/15 border-b-2 border-accent-foreground", dot: "bg-accent-foreground", text: "text-accent-foreground", bg: "bg-accent-foreground/15 border-accent-foreground/50" },
 ];
 
-const statusBg: Record<SessionStatus, string> = {
-  scheduled: "bg-status-blue/10 border-status-blue/25",
-  completed: "bg-status-green/10 border-status-green/25",
-  rescheduled: "bg-status-yellow/10 border-status-yellow/30",
-  cancelled: "bg-muted/40 border-border",
-  pending_approval: "bg-status-yellow/10 border-status-yellow/30",
-  not_realized: "bg-status-yellow/10 border-status-yellow/30",
-};
-
-const statusText: Record<SessionStatus, string> = {
-  scheduled: "text-status-blue",
-  completed: "text-status-green",
-  rescheduled: "text-status-yellow",
-  cancelled: "text-muted-foreground",
-  pending_approval: "text-status-yellow",
-  not_realized: "text-status-yellow",
-};
-
-const statusLabel: Record<SessionStatus, string> = {
-  scheduled: "Agendada",
-  completed: "Realizada",
-  rescheduled: "Remarcada",
-  cancelled: "Cancelada",
-  pending_approval: "Aguardando aprovação",
-  not_realized: "Não realizada",
-};
+/** Rótulo único de status (mesmo texto/cor das outras telas). */
+const statusLabel = (s: SessionStatus) => bookingStatusConfig[s]?.label ?? s;
 
 
 const hours = Array.from({ length: 34 }, (_, i) => {
@@ -115,10 +184,11 @@ const AdminAgendaPage = () => {
   const queryClient = useQueryClient();
   // Se o mentor aprovar/recusar primeiro, a pendência sai da tela do admin sozinha
   useBookingsRealtime(
-    ["agenda-pending-approvals", "agenda-bookings", "agenda-not-realized", "notifications-bell"],
+    ["agenda-pending-approvals", "agenda-bookings", "agenda-not-realized", "agenda-pending-confirmation", "notifications-bell"],
     "admin-agenda",
   );
   const { demoEnabled } = useDemoData();
+  const [searchParams, setSearchParams] = useSearchParams();
   const [currentDate, setCurrentDate] = useState(new Date());
   const [viewMode, setViewMode] = useState<ViewMode>("month");
   const [selectedBooking, setSelectedBooking] = useState<BookingRow | null>(null);
@@ -127,11 +197,27 @@ const AdminAgendaPage = () => {
   const [showMentorSwap, setShowMentorSwap] = useState(false);
   const [showDateChange, setShowDateChange] = useState(false);
   const [showCancelModal, setShowCancelModal] = useState(false);
+  const [showNotRealizedModal, setShowNotRealizedModal] = useState(false);
   const [cancelReason, setCancelReason] = useState("");
+  const [notRealizedReason, setNotRealizedReason] = useState("");
   const [mentorFilter, setMentorFilter] = useState<string | null>(null);
-  const [statusFilter, setStatusFilter] = useState<SessionStatus | null>(null);
+  // Filtro inicial pode vir da URL (ex.: /admin/agenda?status=pending_confirmation, a partir do painel)
+  const [statusFilter, setStatusFilter] = useState<SessionStatus | null>(() => {
+    const fromUrl = searchParams.get("status");
+    return isSessionStatus(fromUrl) ? fromUrl : null;
+  });
   const [studentSearch, setStudentSearch] = useState("");
-  const [editStatus, setEditStatus] = useState<SessionStatus>("scheduled");
+  const [editStatus, setEditStatus] = useState<RawBookingStatus>("scheduled");
+  const [savingStatus, setSavingStatus] = useState(false);
+  // Recusa de pedido de horário (substitui o prompt nativo)
+  const [rejectTarget, setRejectTarget] = useState<BookingRow | null>(null);
+  const [rejectReason, setRejectReason] = useState("Mentor indisponível");
+
+  /** Invalida todas as leituras de bookings (agenda + painéis admin) após uma mutação. */
+  const invalidateBookings = () => {
+    ADMIN_BOOKING_QUERY_KEYS.forEach((key) => queryClient.invalidateQueries({ queryKey: [key] }));
+    queryClient.invalidateQueries({ queryKey: ["notifications-bell"] });
+  };
 
   // Manual booking form
   const [manualLiberty, setManualLiberty] = useState("");
@@ -175,9 +261,10 @@ const AdminAgendaPage = () => {
       const we = endOfWeek(currentDate, { weekStartsOn: 1 });
       return { start: format(ws, "yyyy-MM-dd"), end: format(we, "yyyy-MM-dd") };
     }
-    const ms = startOfMonth(currentDate);
-    const me = endOfMonth(currentDate);
-    return { start: format(ms, "yyyy-MM-dd"), end: format(me, "yyyy-MM-dd") };
+    // O grid mensal exibe dias do mês anterior/seguinte, então buscamos o intervalo completo do calendário.
+    const calStart = startOfWeek(startOfMonth(currentDate), { weekStartsOn: 1 });
+    const calEnd = endOfWeek(endOfMonth(currentDate), { weekStartsOn: 1 });
+    return { start: format(calStart, "yyyy-MM-dd"), end: format(calEnd, "yyyy-MM-dd") };
   }, [currentDate, viewMode, dateStr]);
 
   const navigatePrev = () => {
@@ -201,7 +288,7 @@ const AdminAgendaPage = () => {
         .select("user_id")
         .eq("role", "mentor");
       if (roleErr) throw roleErr;
-      const mentorUserIds = (roleRows ?? []).map((r: any) => r.user_id).filter(Boolean);
+      const mentorUserIds = (roleRows ?? []).map((r) => r.user_id).filter(Boolean);
       if (mentorUserIds.length === 0) return [] as MentorInfo[];
       const { data, error } = await supabase
         .from("profiles")
@@ -218,18 +305,23 @@ const AdminAgendaPage = () => {
   );
 
   // Fetch bookings for date range
-  const { data: _bookings = [] } = useQuery({
+  const {
+    data: _bookings = [],
+    isLoading: bookingsLoading,
+    isError: bookingsError,
+    refetch: refetchBookings,
+  } = useQuery({
     queryKey: ["agenda-bookings", dateRange.start, dateRange.end],
     queryFn: async () => {
       const { data, error } = await supabase
         .from("bookings")
-        .select("*, liberty:profiles!bookings_liberty_id_fkey(full_name, member_tier), sessions(name)")
+        .select(BOOKING_SELECT)
         .gte("scheduled_date", dateRange.start)
         .lte("scheduled_date", dateRange.end)
         .order("scheduled_date", { ascending: true })
         .order("start_time", { ascending: true });
       if (error) throw error;
-      return (data || []) as BookingRow[];
+      return (data || []) as unknown as BookingRow[];
     },
   });
 
@@ -239,12 +331,12 @@ const AdminAgendaPage = () => {
     queryFn: async () => {
       const { data, error } = await supabase
         .from("bookings")
-        .select("*, liberty:profiles!bookings_liberty_id_fkey(full_name, member_tier), sessions(name)")
-        .eq("status", "pending_approval" as any)
+        .select(BOOKING_SELECT)
+        .eq("status", "pending_approval")
         .order("scheduled_date", { ascending: true })
         .order("start_time", { ascending: true });
       if (error) throw error;
-      return (data || []) as BookingRow[];
+      return (data || []) as unknown as BookingRow[];
     },
   });
 
@@ -257,49 +349,103 @@ const AdminAgendaPage = () => {
     queryFn: async () => {
       const { data, error } = await supabase
         .from("bookings")
-        .select("*, liberty:profiles!bookings_liberty_id_fkey(full_name, member_tier), sessions(name)")
-        .eq("status", "not_realized" as any)
+        .select(BOOKING_SELECT)
+        .eq("status", "not_realized")
         .order("scheduled_date", { ascending: false })
         .order("start_time", { ascending: true });
       if (error) throw error;
-      return (data || []) as BookingRow[];
+      return (data || []) as unknown as BookingRow[];
     },
   });
 
+  // Sessões "A confirmar": passaram do horário e o mentor não fechou (qualquer data).
+  const { data: pendingConfirmationBookings = [] } = useQuery({
+    queryKey: ["agenda-pending-confirmation"],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("bookings")
+        .select(BOOKING_SELECT)
+        .in("status", ["scheduled", "rescheduled"])
+        .lte("scheduled_date", todayPlatformDate())
+        .order("scheduled_date", { ascending: true })
+        .order("start_time", { ascending: true });
+      if (error) throw error;
+      return ((data || []) as unknown as BookingRow[]).filter(
+        (b) => getEffectiveBookingStatus(b) === "pending_confirmation",
+      );
+    },
+  });
+
+  // Relatórios salvos para os bookings visíveis: distingue "Realizada" de "Realizada · sem relatório".
+  const visibleBookingIds = useMemo(() => {
+    const ids = new Set<string>();
+    [..._bookings, ...pendingBookings, ...notRealizedBookings, ...pendingConfirmationBookings].forEach((b) => ids.add(b.id));
+    if (selectedBooking) ids.add(selectedBooking.id);
+    return Array.from(ids).sort();
+  }, [_bookings, pendingBookings, notRealizedBookings, pendingConfirmationBookings, selectedBooking]);
+
+  const { data: reportedIdList = [] } = useQuery({
+    queryKey: ["agenda-booking-reports", visibleBookingIds.join("|")],
+    queryFn: async () => {
+      const out: string[] = [];
+      for (let i = 0; i < visibleBookingIds.length; i += 100) {
+        const chunk = visibleBookingIds.slice(i, i + 100);
+        const { data, error } = await supabase.from("booking_reports").select("booking_id").in("booking_id", chunk);
+        if (error) throw error;
+        (data || []).forEach((r) => out.push(r.booking_id));
+      }
+      return out;
+    },
+    enabled: visibleBookingIds.length > 0,
+  });
+  const reportedIds = useMemo(() => new Set(reportedIdList), [reportedIdList]);
+
   const approvePending = async (bk: BookingRow) => {
-    const { error } = await supabase.from("bookings").update({ status: "scheduled" as any, approval_required: false }).eq("id", bk.id);
-    if (error) { toast.error(bookingRuleErrorMessage(error) || "Erro ao aprovar"); return; }
-    if (bk.availability_id) {
-      await supabase.from("mentor_availability").update({ is_booked: true }).eq("id", bk.availability_id);
-    }
-    supabase.functions.invoke("google-calendar-sync", { body: { booking_id: bk.id } }).catch(() => {});
-    queryClient.invalidateQueries({ queryKey: ["agenda-pending-approvals"] });
-    queryClient.invalidateQueries({ queryKey: ["agenda-bookings"] });
-    queryClient.invalidateQueries({ queryKey: ["notifications-bell"] });
+    // `sync_availability_booked` (trigger) já marca a disponibilidade como ocupada.
+    const { error } = await supabase.from("bookings").update({ status: "scheduled", approval_required: false }).eq("id", bk.id);
+    if (error) { toast.error(translateBookingError(error, "Erro ao aprovar")); return; }
+    supabase.functions.invoke("google-calendar-sync", { body: { booking_id: bk.id } }).catch((e) => console.warn("google-calendar-sync", e));
+    invalidateBookings();
     toast.success("Sessão aprovada. Aluno e mentor foram notificados");
   };
 
   const rejectPending = async (bk: BookingRow, reason: string) => {
     const { error } = await supabase.from("bookings").update({
-      status: "cancelled" as any,
+      status: "cancelled",
       cancellation_reason: reason || "Mentor indisponível neste horário",
     }).eq("id", bk.id);
-    if (error) { toast.error("Erro ao recusar"); return; }
-    queryClient.invalidateQueries({ queryKey: ["agenda-pending-approvals"] });
-    queryClient.invalidateQueries({ queryKey: ["agenda-bookings"] });
-    queryClient.invalidateQueries({ queryKey: ["notifications-bell"] });
+    if (error) { toast.error(translateBookingError(error, "Erro ao recusar")); return; }
+    invalidateBookings();
     toast.success("Horário recusado. Aluno foi notificado");
   };
 
   const reopenNotRealized = async (bk: BookingRow) => {
     const { error } = await supabase
       .from("bookings")
-      .update({ status: "scheduled" as any, cancellation_reason: null })
+      .update({ status: "scheduled", cancellation_reason: null })
       .eq("id", bk.id);
-    if (error) { toast.error(bookingRuleErrorMessage(error) || "Erro ao reabrir sessão"); return; }
-    queryClient.invalidateQueries({ queryKey: ["agenda-not-realized"] });
-    queryClient.invalidateQueries({ queryKey: ["agenda-bookings"] });
+    if (error) { toast.error(translateBookingError(error, "Erro ao reabrir sessão")); return; }
+    invalidateBookings();
     toast.success("Sessão reaberta na agenda");
+  };
+
+  /** Fecha uma sessão "A confirmar": realizada (mantém exigência de relatório) ou não realizada. */
+  const closePendingConfirmation = async (bk: BookingRow, outcome: "completed" | "not_realized", reason?: string) => {
+    setSavingStatus(true);
+    const patch =
+      outcome === "completed"
+        ? { status: "completed" as const }
+        : { status: "not_realized" as const, cancellation_reason: reason?.trim() || "Marcada como não realizada pelo administrador" };
+    const { error } = await supabase.from("bookings").update(patch).eq("id", bk.id);
+    setSavingStatus(false);
+    if (error) { toast.error(translateBookingError(error, "Erro ao atualizar a sessão")); return false; }
+    if (selectedBooking?.id === bk.id) {
+      setSelectedBooking({ ...selectedBooking, ...patch });
+      setEditStatus(outcome);
+    }
+    invalidateBookings();
+    toast.success(outcome === "completed" ? "Sessão confirmada como realizada" : "Sessão marcada como não realizada");
+    return true;
   };
   const demoAdminBks = useMemo(() => {
     if (!demoEnabled) return [];
@@ -345,7 +491,7 @@ const AdminAgendaPage = () => {
     const start = parseISO(dateRange.start);
     const end = parseISO(dateRange.end);
     const result: SlotRef[] = [];
-    allAvailability.forEach((av: any) => {
+    allAvailability.forEach((av) => {
       if (av.specific_date) {
         const d = parseISO(av.specific_date);
         if (d >= start && d <= end) {
@@ -477,9 +623,16 @@ const AdminAgendaPage = () => {
 
   
   const matchesFilters = (b: BookingRow) => {
-    if (!isVisibleSessionBooking(b)) return false;
+    const st = displayStatus(b);
+    // Canceladas/não realizadas só aparecem quando o chip correspondente está ativo.
+    const wantsHidden = statusFilter === "cancelled" || statusFilter === "not_realized";
+    if (!wantsHidden && !isVisibleSessionBooking(b)) return false;
     if (mentorFilter && b.mentor_id !== mentorFilter) return false;
-    if (statusFilter && displayStatus(b) !== statusFilter) return false;
+    if (statusFilter) {
+      // "Realizada" agrupa realizadas com e sem relatório.
+      const matches = statusFilter === "completed" ? st === "completed" || st === "awaiting_report" : st === statusFilter;
+      if (!matches) return false;
+    }
     if (studentSearch.trim()) {
       const name = b.liberty?.full_name || b.guest_name || "";
       if (!matchesSearch(name, studentSearch)) return false;
@@ -493,7 +646,8 @@ const AdminAgendaPage = () => {
       bookings
         .filter((b) => b.scheduled_date === dateStr && matchesFilters(b))
         .sort((a, b) => (a.start_time || "").localeCompare(b.start_time || "")),
-    [bookings, dateStr, mentorFilter, statusFilter, studentSearch]
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [bookings, dateStr, mentorFilter, statusFilter, studentSearch, reportedIds]
   );
 
   const totalInRange = bookings.filter(matchesFilters).length;
@@ -514,7 +668,9 @@ const AdminAgendaPage = () => {
     return m ? shortName(m.full_name) : "Sem dados";
   };
 
-  const displayStatus = (booking: BookingRow) => getEffectiveBookingStatus(booking) as SessionStatus;
+  /** Status efetivo (regra única), considerando se há relatório salvo. */
+  const displayStatus = (booking: BookingRow): SessionStatus =>
+    getEffectiveBookingStatus(booking, { hasReport: reportedIds.has(booking.id) }) as SessionStatus;
 
   // Color per mentor (overrides status colors for visual identification)
   const mentorColorFor = (mentorId: string) => {
@@ -524,59 +680,81 @@ const AdminAgendaPage = () => {
   const bookingBg = (b: BookingRow) => {
     const c = mentorColorFor(b.mentor_id);
     const st = displayStatus(b);
-    if (st === "cancelled") return "bg-muted/40 border-border opacity-60";
+    if (st === "cancelled" || st === "not_realized") return "bg-muted/40 border-border opacity-60";
     // Aguardando aprovação nunca deve parecer confirmada na agenda.
     if (st === "pending_approval")
       return "bg-status-yellow/10 border-dashed border-status-yellow/60 opacity-90";
+    // Passou do horário sem confirmação do mentor.
+    if (st === "pending_confirmation")
+      return "bg-status-orange/10 border-dashed border-status-orange/60";
     return c.bg;
   };
-  const bookingText = (b: BookingRow) =>
-    displayStatus(b) === "pending_approval" ? "text-status-yellow" : mentorColorFor(b.mentor_id).text;
+  const bookingText = (b: BookingRow) => {
+    const st = displayStatus(b);
+    if (st === "pending_approval") return "text-status-yellow";
+    if (st === "pending_confirmation") return "text-status-orange";
+    return mentorColorFor(b.mentor_id).text;
+  };
 
-  // Edit actions (now hitting DB)
-  const handleStatusChange = async (newStatus: SessionStatus) => {
-    if (!selectedBooking) return;
+  // Edit actions (now hitting DB). O select do drawer edita o status BRUTO.
+  const handleStatusChange = async (newStatus: RawBookingStatus) => {
+    if (!selectedBooking || savingStatus) return;
+    if (newStatus === selectedBooking.status) return;
+    if (newStatus === "cancelled") {
+      // Cancelamento exige motivo: roteia para o modal.
+      setShowCancelModal(true);
+      return;
+    }
+    if (newStatus === "not_realized") {
+      setShowNotRealizedModal(true);
+      return;
+    }
+    setSavingStatus(true);
     const { error } = await supabase.from("bookings").update({ status: newStatus }).eq("id", selectedBooking.id);
-    if (error) { toast.error(bookingRuleErrorMessage(error) || "Erro ao atualizar status"); return; }
+    setSavingStatus(false);
+    if (error) { toast.error(translateBookingError(error, "Erro ao atualizar status")); return; }
     setSelectedBooking({ ...selectedBooking, status: newStatus });
     setEditStatus(newStatus);
-    queryClient.invalidateQueries({ queryKey: ["agenda-not-realized"] });
-    queryClient.invalidateQueries({ queryKey: ["agenda-bookings"] });
+    invalidateBookings();
+    toast.success("Status atualizado");
   };
 
   const handleMentorSwap = async (newMentorId: string) => {
     if (!selectedBooking) return;
     const { error } = await supabase.from("bookings").update({ mentor_id: newMentorId }).eq("id", selectedBooking.id);
-    if (error) { toast.error("Erro ao trocar mentor"); return; }
+    if (error) { toast.error(translateBookingError(error, "Erro ao trocar mentor")); return; }
+    if (!selectedBooking.is_retroactive) {
+      supabase.functions.invoke("google-calendar-sync", { body: { booking_id: selectedBooking.id } }).catch((e) => console.warn("google-calendar-sync", e));
+    }
     setSelectedBooking({ ...selectedBooking, mentor_id: newMentorId });
     setShowMentorSwap(false);
-    queryClient.invalidateQueries({ queryKey: ["agenda-not-realized"] });
-    queryClient.invalidateQueries({ queryKey: ["agenda-bookings"] });
+    invalidateBookings();
     toast.success("Mentor atualizado");
   };
 
   const handleDateTimeChange = async () => {
     if (!selectedBooking || !newTime) return;
-    const [h, m] = newTime.split(":").map(Number);
-    const totalMin = h * 60 + m + 90;
-    const endH = Math.floor(totalMin / 60);
-    const endM = totalMin % 60;
-    const endTime = `${String(endH).padStart(2, "0")}:${String(endM).padStart(2, "0")}`;
-    const targetDate = newDate || dateStr;
+    const endTime = computeEndTime(newTime, selectedBooking.sessions?.duration_minutes);
+    // Se o admin só mudou o horário, mantém a data da própria sessão (não o dia exibido no calendário).
+    const targetDate = newDate || selectedBooking.scheduled_date;
 
-    // Move the booking in-place — keep it as scheduled (don't mark as rescheduled/cancelled)
+    // Sessão já realizada mantém o status; as demais voltam para "agendada".
+    // `availability_id: null` libera o slot antigo (trigger só libera quando o vínculo muda).
+    const keepStatus = selectedBooking.status === "completed";
     const { error } = await supabase.from("bookings").update({
       start_time: newTime,
       end_time: endTime,
       scheduled_date: targetDate,
-      status: "scheduled" as any,
+      availability_id: null,
+      ...(keepStatus ? {} : { status: "scheduled" as const }),
     }).eq("id", selectedBooking.id);
 
-    if (error) { toast.error(bookingRuleErrorMessage(error) || "Erro ao remarcar"); return; }
-    supabase.functions.invoke("google-calendar-sync", { body: { booking_id: selectedBooking.id } }).catch(() => {});
+    if (error) { toast.error(translateBookingError(error, "Erro ao remarcar")); return; }
+    if (!selectedBooking.is_retroactive) {
+      supabase.functions.invoke("google-calendar-sync", { body: { booking_id: selectedBooking.id } }).catch((e) => console.warn("google-calendar-sync", e));
+    }
     setShowDateChange(false);
-    queryClient.invalidateQueries({ queryKey: ["agenda-not-realized"] });
-    queryClient.invalidateQueries({ queryKey: ["agenda-bookings"] });
+    invalidateBookings();
     toast.success("Sessão remarcada");
     setDrawerOpen(false);
   };
@@ -584,38 +762,48 @@ const AdminAgendaPage = () => {
   const handleCancel = async () => {
     if (!selectedBooking || !cancelReason) return;
     const { error } = await supabase.from("bookings").update({
-      status: "cancelled" as any,
+      status: "cancelled",
       cancellation_reason: cancelReason,
     }).eq("id", selectedBooking.id);
 
-    if (error) { toast.error("Erro ao cancelar"); return; }
-    supabase.functions.invoke("google-calendar-sync", { body: { booking_id: selectedBooking.id } }).catch(() => {});
+    if (error) { toast.error(translateBookingError(error, "Erro ao cancelar")); return; }
+    if (!selectedBooking.is_retroactive) {
+      supabase.functions.invoke("google-calendar-sync", { body: { booking_id: selectedBooking.id } }).catch((e) => console.warn("google-calendar-sync", e));
+    }
     setShowCancelModal(false);
     setCancelReason("");
-    queryClient.invalidateQueries({ queryKey: ["agenda-not-realized"] });
-    queryClient.invalidateQueries({ queryKey: ["agenda-bookings"] });
+    invalidateBookings();
     toast.success("Sessão cancelada");
     setDrawerOpen(false);
   };
 
+  const handleNotRealized = async () => {
+    if (!selectedBooking) return;
+    const ok = await closePendingConfirmation(selectedBooking, "not_realized", notRealizedReason);
+    if (!ok) return;
+    setShowNotRealizedModal(false);
+    setNotRealizedReason("");
+  };
+
+  const manualSessionInfo = sessionsCatalog.find((s) => s.id === manualSession) ?? null;
+  const manualEndTime = manualTime ? computeEndTime(manualTime, manualSessionInfo?.duration_minutes) : "";
 
   const handleManualBook = async () => {
     if (submittingBook) return;
     const hasParticipant = manualIsGuest ? manualGuestName.trim().length > 0 : !!manualLiberty;
     if (!hasParticipant || !manualSession || !manualMentor || !manualTime || !manualDate) return;
-    const [h, m] = manualTime.split(":").map(Number);
-    const endM = m + 30;
-    const endTime = `${String(endM >= 60 ? h + 2 : h + 1).padStart(2, "0")}:${String(endM % 60).padStart(2, "0")}`;
+    const endTime = computeEndTime(manualTime, manualSessionInfo?.duration_minutes);
+    const isRetroactive = manualStatus === "completed";
 
     // Conflict check: same mentor on the same day with overlapping slot
     setSubmittingBook(true);
-    setManualConflict(null);
-    const { data: sameDay } = await supabase
+    const { data: sameDay, error: sameDayErr } = await supabase
       .from("bookings")
       .select("id, start_time, end_time, status, liberty_id, guest_name")
       .eq("mentor_id", manualMentor)
       .eq("scheduled_date", manualDate)
-      .neq("status", "cancelled");
+      .not("status", "in", "(cancelled,not_realized)");
+    if (sameDayErr) console.warn("Conflito: não foi possível checar a agenda do mentor", sameDayErr);
 
     const newStart = manualTime;
     const newEnd = endTime;
@@ -627,7 +815,7 @@ const AdminAgendaPage = () => {
     if (overlap && !manualConflict) {
       setSubmittingBook(false);
       setManualConflict(
-        `Este mentor já tem uma sessão das ${(overlap.start_time || "").slice(0, 5)} às ${(overlap.end_time || "").slice(0, 5)} neste dia. Clique novamente em "Agendar" para forçar mesmo assim.`
+        `Este mentor já tem uma sessão das ${(overlap.start_time || "").slice(0, 5)} às ${(overlap.end_time || "").slice(0, 5)} neste dia. Clique novamente em "Forçar mesmo assim" para agendar.`
       );
       return;
     }
@@ -641,12 +829,21 @@ const AdminAgendaPage = () => {
       start_time: manualTime,
       end_time: endTime,
       observations: manualNotes || null,
-      status: manualStatus as any,
+      status: manualStatus,
+      // Registro histórico: conta como realizada sem exigir relatório e sem cobrar o mentor.
+      is_retroactive: isRetroactive,
+      approval_required: false,
     }).select("id").single();
 
-    if (error) { setSubmittingBook(false); toast.error(bookingRuleErrorMessage(error) || "Erro ao agendar: " + (error.message || "verifique permissões")); console.error("Booking insert error:", error); return; }
-    if (createdBk?.id) {
-      supabase.functions.invoke("google-calendar-sync", { body: { booking_id: createdBk.id } }).catch(() => {});
+    if (error) {
+      setSubmittingBook(false);
+      toast.error(translateBookingError(error, "Erro ao agendar: " + (error.message || "verifique permissões")));
+      console.error("Booking insert error:", error);
+      return;
+    }
+    // Registro histórico não gera evento no Google Calendar.
+    if (createdBk?.id && !isRetroactive) {
+      supabase.functions.invoke("google-calendar-sync", { body: { booking_id: createdBk.id } }).catch((e) => console.warn("google-calendar-sync", e));
     }
 
     setShowManualModal(false);
@@ -654,20 +851,25 @@ const AdminAgendaPage = () => {
     setManualSession(""); setManualMentor("");
     setManualTime("09:00"); setManualNotes(""); setLibertySearch(""); setManualDate("");
     setManualStatus("scheduled"); setManualConflict(null);
-    queryClient.invalidateQueries({ queryKey: ["agenda-bookings"] });
-    toast.success(manualStatus === "completed" ? "Sessão registrada como realizada" : "Sessão agendada com sucesso");
+    invalidateBookings();
+    toast.success(isRetroactive ? "Sessão registrada como realizada (histórico)" : "Sessão agendada com sucesso");
     setSubmittingBook(false);
   };
 
   const openDrawer = (booking: BookingRow) => {
-    const effectiveStatus = displayStatus(booking);
-    setSelectedBooking({ ...booking, status: effectiveStatus });
-    setEditStatus(effectiveStatus);
+    // Mantém o status BRUTO no booking selecionado; o efetivo é derivado na hora de exibir.
+    setSelectedBooking(booking);
+    setEditStatus(toRawStatus(booking.status));
+    setNewDate(booking.scheduled_date);
+    setNewTime((booking.start_time || "09:00").substring(0, 5));
+    setShowMentorSwap(false);
+    setShowDateChange(false);
+    setShowCancelModal(false);
+    setShowNotRealizedModal(false);
     setDrawerOpen(true);
   };
 
   // Auto-open drawer when navigated with ?booking=<id> (e.g. from notifications bell)
-  const [searchParams, setSearchParams] = useSearchParams();
   useEffect(() => {
     const bookingId = searchParams.get("booking");
     if (!bookingId || drawerOpen) return;
@@ -675,7 +877,7 @@ const AdminAgendaPage = () => {
     (async () => {
       const { data } = await supabase
         .from("bookings")
-        .select("*, liberty:profiles!bookings_liberty_id_fkey(full_name, member_tier), sessions(name)")
+        .select(BOOKING_SELECT)
         .eq("id", bookingId)
         .maybeSingle();
       if (cancelled || !data) return;
@@ -765,1108 +967,1120 @@ const AdminAgendaPage = () => {
     return format(currentDate, "MMMM 'de' yyyy", { locale: ptBR });
   }, [currentDate, viewMode]);
 
+  const closeDrawer = () => {
+    setDrawerOpen(false);
+    setShowMentorSwap(false);
+    setShowDateChange(false);
+    setShowCancelModal(false);
+    setShowNotRealizedModal(false);
+  };
+
+  const participantName = (b: BookingRow) => (b.liberty ? shortName(b.liberty.full_name) : (b.guest_name || "Sem dados"));
+  const formatDayShort = (date: string) => format(parseISO(date), "EEE, dd/MM", { locale: ptBR });
+
+  /** Linha padrão dos painéis de pendência (aprovação / não realizadas / a confirmar). */
+  const renderPendingRow = (bk: BookingRow, last: boolean, trailing: ReactNode, extra?: ReactNode) => (
+    <ListRow
+      key={bk.id}
+      last={last}
+      leading={<DateBlock date={bk.scheduled_date} tone="muted" />}
+      title={
+        <span className="inline-flex items-center gap-2 flex-wrap">
+          <span>{bk.sessions?.name || "Sessão"}</span>
+          <span className="text-muted-foreground font-normal">· {participantName(bk)}</span>
+        </span>
+      }
+      subtitle={
+        <span className="inline-flex flex-wrap items-center gap-x-2 gap-y-0.5">
+          <span className="tabular-nums">{formatTime(bk.start_time)} às {formatTime(bk.end_time)}</span>
+          <span>· Mentor: {getMentorName(bk.mentor_id)}</span>
+          {extra}
+        </span>
+      }
+      trailing={trailing}
+    />
+  );
+
+  const slotActionButton = (label: string, onClick: (e: React.MouseEvent) => void, Icon: LucideIcon, danger?: boolean) => (
+    <button
+      type="button"
+      onClick={onClick}
+      aria-label={label}
+      title={label}
+      className={`h-5 w-5 rounded bg-card border border-border text-muted-foreground flex items-center justify-center transition-colors duration-ds-1 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${danger ? "hover:text-destructive" : "hover:text-primary"}`}
+    >
+      <Icon className="h-3 w-3" />
+    </button>
+  );
+
+  const selectedEffective = selectedBooking ? displayStatus(selectedBooking) : null;
+
   return (
     <AppLayout role="admin">
-      <motion.div variants={staggerContainer} initial="hidden" animate="show" className="space-y-6">
-        {/* Header */}
-        <motion.div variants={fadeUpItem} className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
-          <div>
-            <h1 className="text-2xl font-semibold text-foreground">Agenda Geral</h1>
-            <p className="text-muted-foreground text-sm mt-1 flex items-center gap-3 flex-wrap">
-              <span className="capitalize">{headerLabel}</span>
-              <span className="text-[10px] px-2.5 py-1 rounded-full bg-status-blue/10 text-status-blue border border-border font-medium">
-                {totalInRange} sessões
-              </span>
-            </p>
-          </div>
-          <div className="flex items-center gap-2 flex-wrap">
-            {/* View mode toggle */}
-            <div className="flex rounded-lg border border-border overflow-hidden">
-              {(["day", "week", "month"] as ViewMode[]).map((vm) => (
-                <button
-                  key={vm}
-                  onClick={() => setViewMode(vm)}
-                  className={`text-[11px] px-3 py-1.5 font-medium transition-colors ${
-                    viewMode === vm ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:text-foreground"
-                  }`}
-                >
-                  {vm === "day" ? "Hoje" : vm === "week" ? "Semana" : "Mês"}
-                </button>
-              ))}
-            </div>
-            <button onClick={() => setShowReminders((v) => !v)} className="text-xs px-3 py-2 rounded-lg border border-border text-muted-foreground hover:text-foreground hover:border-primary/30 transition-colors flex items-center gap-1.5">
-              <LinkIcon className="h-3.5 w-3.5" /> Lembretes
-            </button>
-            <button onClick={() => setShowManualModal(true)} className="btn-silver text-xs px-4 py-2 flex items-center gap-1.5">
-              <Plus className="h-3.5 w-3.5" /> Agendar
-            </button>
-            <div className="flex items-center gap-1">
-              <button onClick={navigatePrev} className="p-1.5 rounded-lg hover:bg-muted transition-colors">
-                <ChevronLeft className="h-4 w-4 text-muted-foreground" />
-              </button>
-              <button onClick={() => setCurrentDate(new Date())} className="px-3 py-1.5 text-xs font-medium text-primary hover:bg-primary/5 rounded-lg transition-colors">
-                Hoje
-              </button>
-              <button onClick={navigateNext} className="p-1.5 rounded-lg hover:bg-muted transition-colors">
-                <ChevronRight className="h-4 w-4 text-muted-foreground" />
-              </button>
-            </div>
-          </div>
-        </motion.div>
-
-        {/* Aprovações pendentes: sessões pedidas com menos de 48h */}
-        {pendingBookings.length > 0 && (
-          <motion.div variants={fadeUpItem} className="glass-card p-4 border border-status-yellow/30" style={{ transform: "none" }}>
-            <div className="flex items-center gap-2 mb-3">
-              <AlertTriangle className="h-4 w-4 text-status-yellow" />
-              <h2 className="text-sm font-semibold text-foreground">
-                Aguardando aprovação <span className="text-muted-foreground font-normal">({pendingBookings.length})</span>
-              </h2>
-            </div>
-            <p className="text-xs text-muted-foreground mb-3">
-              Sessões pedidas com menos de 48h de antecedência. Confirme com o mentor a disponibilidade antes de aprovar.
-            </p>
-            <div className="space-y-2">
-              {pendingBookings.map((bk) => (
-                <div key={bk.id} className="flex flex-col sm:flex-row sm:items-center gap-3 rounded-lg border border-border bg-card p-3">
-                  <div className="flex-1 min-w-0">
-                    <p className="text-sm font-medium text-foreground truncate">
-                      {bk.sessions?.name || "Sessão"} <span className="text-muted-foreground font-normal">· {bk.liberty?.full_name || bk.guest_name || "Aluno"}</span>
-                    </p>
-                    <p className="text-[11px] text-muted-foreground mt-0.5">
-                      {format(parseISO(bk.scheduled_date), "EEE, dd/MM", { locale: ptBR })} · {formatTime(bk.start_time)}–{formatTime(bk.end_time)} · Mentor: {getMentorName(bk.mentor_id)}
-                    </p>
-                  </div>
-                  <div className="flex gap-2">
-                    <button
-                      onClick={() => approvePending(bk)}
-                      className="px-3 py-1.5 rounded-md text-xs font-medium bg-status-green/15 text-status-green border border-status-green/30 hover:bg-status-green/25 transition-colors flex items-center gap-1.5"
-                    >
-                      <Check className="h-3.5 w-3.5" /> Aprovar
-                    </button>
-                    <button
-                      onClick={() => {
-                        const reason = window.prompt("Motivo da recusa (opcional):", "Mentor indisponível");
-                        if (reason !== null) rejectPending(bk, reason);
-                      }}
-                      className="px-3 py-1.5 rounded-md text-xs font-medium bg-destructive/10 text-destructive border border-destructive/30 hover:bg-destructive/20 transition-colors flex items-center gap-1.5"
-                    >
-                      <Ban className="h-3.5 w-3.5" /> Recusar
-                    </button>
-                  </div>
-                </div>
-              ))}
-            </div>
+      <PageContainer variant="wide">
+        <motion.div variants={staggerContainer} initial="hidden" animate="show" className="space-y-6">
+          <motion.div variants={fadeUpItem}>
+            <PageHeader
+              eyebrow="Admin"
+              title="Agenda geral"
+              description={
+                <span className="inline-flex items-center gap-2 flex-wrap">
+                  <span className="capitalize">{headerLabel}</span>
+                  <StatusPill tone="info" size="sm" withDot={false}>{totalInRange} sessões</StatusPill>
+                </span>
+              }
+              actions={
+                <>
+                  <Button variant="outline" size="sm" onClick={() => setShowReminders(true)}>
+                    <LinkIcon className="h-4 w-4" /> Lembretes
+                  </Button>
+                  <Button size="sm" onClick={() => setShowManualModal(true)}>
+                    <Plus className="h-4 w-4" /> Agendar
+                  </Button>
+                </>
+              }
+            />
           </motion.div>
-        )}
 
-
-        {/* Not realized sessions reported by mentors */}
-        {notRealizedBookings.length > 0 && (
-          <motion.div variants={fadeUpItem} className="glass-card p-4 border border-status-yellow/30" style={{ transform: "none" }}>
-            <div className="flex items-center gap-2 mb-3">
-              <AlertTriangle className="h-4 w-4 text-status-yellow" />
-              <h2 className="text-sm font-semibold text-foreground">
-                Sessões marcadas como não realizadas <span className="text-muted-foreground font-normal">({notRealizedBookings.length})</span>
-              </h2>
-            </div>
-            <div className="space-y-2">
-              {notRealizedBookings.map((bk) => (
-                <div key={bk.id} className="flex flex-col sm:flex-row sm:items-center gap-3 rounded-lg border border-status-yellow/20 bg-status-yellow/5 p-3">
-                  <div className="flex-1 min-w-0">
-                    <p className="text-sm font-medium text-foreground truncate">
-                      {bk.sessions?.name || "Sessão"} <span className="text-muted-foreground font-normal">· {bk.liberty?.full_name || bk.guest_name || "Aluno"}</span>
-                    </p>
-                    <p className="text-[11px] text-muted-foreground mt-0.5">
-                      {format(parseISO(bk.scheduled_date), "EEE, dd/MM", { locale: ptBR })} · {formatTime(bk.start_time)}–{formatTime(bk.end_time)} · Mentor: {getMentorName(bk.mentor_id)}
-                    </p>
-                    {bk.cancellation_reason && (
-                      <p className="text-[11px] text-status-yellow mt-1 truncate">Motivo: {bk.cancellation_reason}</p>
-                    )}
-                  </div>
-                  <div className="flex gap-2">
-                    <button
-                      onClick={() => openDrawer({ ...bk, status: "not_realized" })}
-                      className="px-3 py-1.5 rounded-md text-xs font-medium border border-border text-muted-foreground hover:text-foreground hover:border-primary/30 transition-colors"
-                    >
-                      Gerenciar
-                    </button>
-                    <button
-                      onClick={() => reopenNotRealized(bk)}
-                      className="px-3 py-1.5 rounded-md text-xs font-medium bg-status-blue/15 text-status-blue border border-status-blue/30 hover:bg-status-blue/25 transition-colors"
-                    >
-                      Reabrir
-                    </button>
-                  </div>
+          {/* Aprovações pendentes: sessões pedidas com menos de 48h */}
+          {pendingBookings.length > 0 && (
+            <motion.div variants={fadeUpItem}>
+              <SectionCard tone="warning" padding="none">
+                <div className="px-4 pt-4 pb-2">
+                  <SectionHeader
+                    title={
+                      <span className="inline-flex items-center gap-2">
+                        <AlertTriangle className="h-4 w-4 text-status-yellow" aria-hidden />
+                        Aguardando aprovação
+                        <span className="text-muted-foreground font-normal tabular-nums">({pendingBookings.length})</span>
+                      </span>
+                    }
+                    description="Sessões pedidas com menos de 48h de antecedência. Confirme com o mentor a disponibilidade antes de aprovar."
+                  />
                 </div>
-              ))}
-            </div>
-          </motion.div>
-        )}
-
-        {/* Filters row: mentor + status + student search */}
-        <motion.div variants={fadeUpItem} className="space-y-2">
-          {/* Mentor chips */}
-          <div className="flex gap-2 flex-wrap">
-            <button
-              onClick={() => setMentorFilter(null)}
-              className={`text-[10px] px-3 py-1.5 rounded-full border transition-colors font-medium ${
-                mentorFilter === null ? "bg-primary text-primary-foreground border-primary/20" : "border-border text-muted-foreground hover:text-foreground"
-              }`}
-            >
-              Todos os mentores ({allMentors.length})
-            </button>
-            {allMentors.map((m, i) => (
-              <button
-                key={m.id}
-                onClick={() => setMentorFilter(mentorFilter === m.id ? null : m.id)}
-                className={`text-[10px] px-3 py-1.5 rounded-full border transition-colors font-medium flex items-center gap-1.5 ${
-                  mentorFilter === m.id ? "bg-primary text-primary-foreground border-primary/20" : "border-border text-muted-foreground hover:text-foreground"
-                }`}
-              >
-                <span className={`w-1.5 h-1.5 rounded-full ${mentorColors[i % mentorColors.length].dot}`} />
-                {shortName(m.full_name)}
-              </button>
-            ))}
-          </div>
-
-          {/* Status chips + student search + clear */}
-          <div className="flex gap-2 flex-wrap items-center">
-            {(["scheduled", "pending_approval", "completed", "not_realized", "cancelled"] as SessionStatus[]).map((s) => (
-              <button
-                key={s}
-                onClick={() => setStatusFilter(statusFilter === s ? null : s)}
-                className={`text-[10px] px-3 py-1.5 rounded-full border transition-colors font-medium ${
-                  statusFilter === s ? "bg-primary text-primary-foreground border-primary/20" : "border-border text-muted-foreground hover:text-foreground"
-                }`}
-              >
-                {statusLabel[s]}
-              </button>
-            ))}
-            <div className="relative flex-1 min-w-[180px] max-w-[260px]">
-              <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground pointer-events-none" />
-              <input
-                value={studentSearch}
-                onChange={(e) => setStudentSearch(e.target.value)}
-                placeholder="Buscar aluno..."
-                className="w-full text-[11px] pl-8 pr-3 py-1.5 rounded-full border border-border bg-background text-foreground placeholder:text-muted-foreground focus:outline-none focus:border-primary/40"
-              />
-            </div>
-            {hasActiveFilters && (
-              <button
-                onClick={() => { setMentorFilter(null); setStatusFilter(null); setStudentSearch(""); }}
-                className="text-[10px] px-3 py-1.5 rounded-full border border-border text-muted-foreground hover:text-foreground flex items-center gap-1.5"
-              >
-                <X className="h-3 w-3" /> Limpar filtros
-              </button>
-            )}
-          </div>
-        </motion.div>
-
-
-        {/* Reminders panel */}
-        <AnimatePresence>
-          {showReminders && (
-            <motion.div
-              initial={{ opacity: 0, height: 0 }}
-              animate={{ opacity: 1, height: "auto" }}
-              exit={{ opacity: 0, height: 0 }}
-              className="overflow-hidden"
-            >
-              <div className="glass-card p-5 space-y-3">
-                <div className="flex items-start justify-between gap-3 flex-wrap">
-                  <div>
-                    <h3 className="text-sm font-semibold text-foreground flex items-center gap-2">
-                      <Clock className="h-4 w-4 text-primary" />
-                      Lembretes de disponibilidade
-                    </h3>
-                    <p className="text-xs text-muted-foreground mt-1">
-                      Copie o link e envie para o mentor lembrá-lo de cadastrar a disponibilidade.
-                    </p>
-                  </div>
-                  <button
-                    onClick={() => copyReminderLink()}
-                    className="text-[10px] px-3 py-1.5 rounded-lg border border-primary/30 text-primary hover:bg-primary/5 transition-colors flex items-center gap-1.5"
-                  >
-                    <Copy className="h-3 w-3" />
-                    Copiar link genérico
-                  </button>
-                </div>
-
-                {mentorsWithoutAvailability.length > 0 && (
-                  <div className="rounded-lg border border-status-yellow/20 bg-status-yellow/5 p-3">
-                    <p className="text-[11px] font-semibold text-status-yellow mb-2">
-                      {mentorsWithoutAvailability.length} mentor{mentorsWithoutAvailability.length !== 1 ? "es" : ""} sem disponibilidade no período
-                    </p>
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
-                      {mentorsWithoutAvailability.map((m) => (
-                        <div key={m.id} className="flex items-center justify-between p-2 rounded-lg bg-card border border-border">
-                          <span className="text-xs text-foreground truncate">{shortName(m.full_name)}</span>
-                          <button
-                            onClick={() => copyReminderLink(m.full_name)}
-                            className="text-[10px] px-2 py-1 rounded border border-primary/30 text-primary hover:bg-primary/5 flex items-center gap-1 shrink-0 ml-2"
-                          >
-                            <Copy className="h-2.5 w-2.5" /> Copiar
-                          </button>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
+                {pendingBookings.map((bk, i) =>
+                  renderPendingRow(
+                    bk,
+                    i === pendingBookings.length - 1,
+                    <>
+                      <Button size="sm" variant="outline" className="text-status-green" onClick={() => approvePending(bk)}>
+                        <Check className="h-4 w-4" /> Aprovar
+                      </Button>
+                      <Button size="sm" variant="outline" className="text-destructive" onClick={() => { setRejectTarget(bk); setRejectReason("Mentor indisponível"); }}>
+                        <Ban className="h-4 w-4" /> Recusar
+                      </Button>
+                    </>,
+                  ),
                 )}
-
-                <div>
-                  <p className="text-[10px] text-muted-foreground uppercase tracking-wider mb-2">Todos os mentores</p>
-                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-2">
-                    {allMentors.map((m) => (
-                      <div key={m.id} className="flex items-center justify-between p-2 rounded-lg bg-muted/30 border border-border">
-                        <span className="text-xs text-foreground truncate">{shortName(m.full_name)}</span>
-                        <button
-                          onClick={() => copyReminderLink(m.full_name)}
-                          className="text-[10px] px-2 py-1 rounded border border-border text-muted-foreground hover:text-primary hover:border-primary/30 flex items-center gap-1 shrink-0 ml-2"
-                        >
-                          <Copy className="h-2.5 w-2.5" /> Copiar
-                        </button>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              </div>
+              </SectionCard>
             </motion.div>
           )}
-        </AnimatePresence>
 
-        {/* ═══════ DAY VIEW ═══════ */}
-        {viewMode === "day" && (
-          <>
-            {/* Desktop grid */}
-            <motion.div variants={fadeUpItem} className="hidden lg:block glass-card overflow-auto" style={{ transform: "none" }}>
-              {(() => {
-                const ROW_H = 22; // px per 30 min (compact)
-                const totalH = hours.length * ROW_H;
-                const HEADER_H = 56;
-                const TIME_COL_W = 48;
-                const MIN_COL_W = 110;
-                return (
-                  <div className="relative" style={{ minWidth: TIME_COL_W + filteredMentorIds.length * MIN_COL_W }}>
-                    <div className="flex">
-                      {/* Sticky time column */}
-                      <div
-                        className="sticky left-0 z-20 bg-card shrink-0"
-                        style={{ width: TIME_COL_W }}
-                      >
-                        {/* Header spacer */}
-                        <div
-                          className="bg-muted/10 sticky top-0 z-10"
-                          style={{ height: HEADER_H }}
-                        />
-                        {/* Hour labels */}
-                        {hours.map((hour) => (
-                          <div
-                            key={hour}
-                            className="text-[9px] text-muted-foreground/70 tabular-nums text-right pr-1.5 flex items-start justify-end"
-                            style={{ height: ROW_H }}
-                          >
-                            {hour.endsWith(":00") ? hour : ""}
-                          </div>
-                        ))}
-                      </div>
+          {/* Não realizadas, marcadas pelos mentores */}
+          {notRealizedBookings.length > 0 && (
+            <motion.div variants={fadeUpItem}>
+              <SectionCard tone="warning" padding="none">
+                <div className="px-4 pt-4 pb-2">
+                  <SectionHeader
+                    title={
+                      <span className="inline-flex items-center gap-2">
+                        <AlertTriangle className="h-4 w-4 text-status-yellow" aria-hidden />
+                        Sessões marcadas como não realizadas
+                        <span className="text-muted-foreground font-normal tabular-nums">({notRealizedBookings.length})</span>
+                      </span>
+                    }
+                  />
+                </div>
+                {notRealizedBookings.map((bk, i) =>
+                  renderPendingRow(
+                    bk,
+                    i === notRealizedBookings.length - 1,
+                    <>
+                      <Button size="sm" variant="outline" onClick={() => openDrawer({ ...bk, status: "not_realized" })}>Gerenciar</Button>
+                      <Button size="sm" variant="outline" className="text-status-blue" onClick={() => reopenNotRealized(bk)}>Reabrir</Button>
+                    </>,
+                    bk.cancellation_reason ? <span className="text-status-yellow truncate">· Motivo: {bk.cancellation_reason}</span> : undefined,
+                  ),
+                )}
+              </SectionCard>
+            </motion.div>
+          )}
 
-                      {/* Mentor columns */}
-                      <div className="flex-1 flex">
-                        {filteredMentorIds.map((mId) => {
-                          const idx = mentorIndexMap[mId] ?? 0;
-                          const mentor = allMentors.find((m) => m.id === mId);
-                          const color = mentorColors[idx % mentorColors.length];
-                          const colBookings = dayBookings.filter((b) => b.mentor_id === mId);
-                          const colSlots = availability.filter((a) => a.mentor_id === mId);
-                          return (
-                            <div
-                              key={mId}
-                              className="flex-1 border-l border-border/30 relative"
-                              style={{ minWidth: MIN_COL_W }}
-                            >
-                              {/* Sticky mentor header */}
-                              <div
-                                className={`sticky top-0 z-10 text-center ${color.header}`}
-                                style={{ height: HEADER_H }}
-                              >
-                                <div className="pt-1.5 flex flex-col items-center">
-                                  <div className={`w-6 h-6 rounded-full ${color.dot} flex items-center justify-center text-[9px] font-bold text-background`}>
-                                    {mentor ? getInitials(mentor.full_name) : "?"}
+          {/* Passaram do horário sem confirmação do mentor */}
+          {pendingConfirmationBookings.length > 0 && (
+            <motion.div variants={fadeUpItem}>
+              <SectionCard tone="warning" padding="none" className="border-status-orange/30">
+                <div className="px-4 pt-4 pb-2">
+                  <SectionHeader
+                    title={
+                      <span className="inline-flex items-center gap-2">
+                        <Clock className="h-4 w-4 text-status-orange" aria-hidden />
+                        Sessões a confirmar
+                        <span className="text-muted-foreground font-normal tabular-nums">({pendingConfirmationBookings.length})</span>
+                      </span>
+                    }
+                    description={PENDING_CONFIRMATION_HINT}
+                  />
+                </div>
+                {pendingConfirmationBookings.map((bk, i) => {
+                  const overdue = isPendingConfirmationOverdue(bk);
+                  const days = daysSinceBookingEnd(bk);
+                  return renderPendingRow(
+                    bk,
+                    i === pendingConfirmationBookings.length - 1,
+                    <>
+                      <Button size="sm" variant="outline" onClick={() => openDrawer(bk)}>Gerenciar</Button>
+                      <Button size="sm" variant="outline" className="text-status-green" disabled={savingStatus} onClick={() => closePendingConfirmation(bk, "completed")}>
+                        <Check className="h-4 w-4" /> Marcar realizada
+                      </Button>
+                      <Button size="sm" variant="outline" className="text-status-yellow" disabled={savingStatus} onClick={() => { openDrawer(bk); setShowNotRealizedModal(true); }}>
+                        <Ban className="h-4 w-4" /> Não realizada
+                      </Button>
+                    </>,
+                    <span className={overdue ? "text-destructive font-medium" : ""}>
+                      · há {days} dia{days !== 1 ? "s" : ""}{overdue ? " · mentor não respondeu" : ""}
+                    </span>,
+                  );
+                })}
+              </SectionCard>
+            </motion.div>
+          )}
+
+          {/* Barra de filtros fixa: período, visão, mentor, status e busca */}
+          <motion.div variants={fadeUpItem} className="sticky top-0 z-20 -mx-4 sm:-mx-6 lg:-mx-8 px-4 sm:px-6 lg:px-8 py-3 bg-background/90 backdrop-blur-sm border-b border-border space-y-3">
+            <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-3">
+              <div className="flex items-center gap-2 flex-wrap">
+                <div className="flex items-center gap-1">
+                  <IconButton aria-label={viewMode === "day" ? "Dia anterior" : viewMode === "week" ? "Semana anterior" : "Mês anterior"} size="sm" onClick={navigatePrev}>
+                    <ChevronLeft className="h-4 w-4" />
+                  </IconButton>
+                  <Button variant="ghost" size="sm" onClick={() => setCurrentDate(new Date())}>Hoje</Button>
+                  <IconButton aria-label={viewMode === "day" ? "Próximo dia" : viewMode === "week" ? "Próxima semana" : "Próximo mês"} size="sm" onClick={navigateNext}>
+                    <ChevronRight className="h-4 w-4" />
+                  </IconButton>
+                </div>
+                <span className="text-sm font-medium text-foreground capitalize min-w-[140px]">{headerLabel}</span>
+              </div>
+              <div className="flex items-center gap-2 flex-wrap">
+                <div className="flex items-center gap-1" role="group" aria-label="Visualização">
+                  {(["day", "week", "month"] as ViewMode[]).map((vm) => (
+                    <Chip key={vm} active={viewMode === vm} onClick={() => setViewMode(vm)}>
+                      {vm === "day" ? "Dia" : vm === "week" ? "Semana" : "Mês"}
+                    </Chip>
+                  ))}
+                </div>
+                <div className="relative flex-1 min-w-[180px] sm:max-w-[260px]">
+                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground pointer-events-none" aria-hidden />
+                  <TextField
+                    type="search"
+                    aria-label="Buscar aluno"
+                    value={studentSearch}
+                    onChange={(e) => setStudentSearch(e.target.value)}
+                    placeholder="Buscar aluno"
+                    className="pl-10 h-9"
+                  />
+                </div>
+              </div>
+            </div>
+
+            <div className="flex gap-2 flex-wrap" role="group" aria-label="Filtrar por mentor">
+              <Chip active={mentorFilter === null} onClick={() => setMentorFilter(null)} count={allMentors.length}>Todos os mentores</Chip>
+              {allMentors.map((m, i) => (
+                <Chip key={m.id} active={mentorFilter === m.id} onClick={() => setMentorFilter(mentorFilter === m.id ? null : m.id)}>
+                  <span className={`w-2 h-2 rounded-full ${mentorColors[i % mentorColors.length].dot}`} aria-hidden />
+                  {shortName(m.full_name)}
+                </Chip>
+              ))}
+            </div>
+
+            <div className="flex gap-2 flex-wrap items-center" role="group" aria-label="Filtrar por status">
+              {STATUS_FILTER_OPTIONS.map((s) => (
+                <Chip
+                  key={s}
+                  active={statusFilter === s}
+                  onClick={() => setStatusFilter(statusFilter === s ? null : s)}
+                  className={statusFilter === s && s === "pending_confirmation" ? "bg-status-orange border-status-orange text-primary-foreground hover:bg-status-orange" : undefined}
+                >
+                  <span className={`w-2 h-2 rounded-full ${bookingStatusConfig[s]?.dot ?? "bg-muted-foreground"}`} aria-hidden />
+                  {statusLabel(s)}
+                </Chip>
+              ))}
+              {hasActiveFilters && (
+                <Button variant="ghost" size="sm" onClick={() => { setMentorFilter(null); setStatusFilter(null); setStudentSearch(""); }}>
+                  <X className="h-4 w-4" /> Limpar filtros
+                </Button>
+              )}
+            </div>
+          </motion.div>
+
+          {/* Estados de carregamento / erro do período */}
+          {bookingsLoading ? (
+            <LoadingState variant="cards" rows={4} />
+          ) : bookingsError ? (
+            <ErrorState title="Não foi possível carregar a agenda" onRetry={() => refetchBookings()} />
+          ) : (
+            <>
+              {/* ═══════ DIA ═══════ */}
+              {viewMode === "day" && (
+                <>
+                  {/* Desktop grid */}
+                  <motion.div variants={fadeUpItem} className="hidden lg:block">
+                    <SectionCard padding="none" className="overflow-auto">
+                      {(() => {
+                        const ROW_H = 24; // px por 30 min
+                        const totalH = hours.length * ROW_H;
+                        const HEADER_H = 60;
+                        const TIME_COL_W = 52;
+                        const MIN_COL_W = 120;
+                        return (
+                          <div className="relative" style={{ minWidth: TIME_COL_W + filteredMentorIds.length * MIN_COL_W }}>
+                            <div className="flex">
+                              {/* Coluna das horas */}
+                              <div className="sticky left-0 z-20 bg-card shrink-0" style={{ width: TIME_COL_W }}>
+                                <div className="bg-muted/10 sticky top-0 z-10" style={{ height: HEADER_H }} />
+                                {hours.map((hour) => (
+                                  <div
+                                    key={hour}
+                                    className="text-[11px] text-muted-foreground tabular-nums text-right pr-2 flex items-start justify-end"
+                                    style={{ height: ROW_H }}
+                                  >
+                                    {hour.endsWith(":00") ? hour : ""}
                                   </div>
-                                  <span className="text-[10px] font-semibold text-foreground mt-0.5 leading-tight">
-                                    {mentor ? shortName(mentor.full_name) : "Sem dados"}
-                                  </span>
-                                </div>
+                                ))}
                               </div>
-                              {/* Time grid background — subtle hour marks only */}
-                              <div
-                                className="relative"
-                                style={{
-                                  height: totalH,
-                                  backgroundImage: `repeating-linear-gradient(to bottom, transparent 0, transparent ${ROW_H * 2 - 1}px, hsl(var(--border) / 0.18) ${ROW_H * 2 - 1}px, hsl(var(--border) / 0.18) ${ROW_H * 2}px)`,
-                                }}
-                              >
-                                {/* Available slots */}
-                                {colSlots.map((slot, i) => {
-                                  const top = timeToRow(slot.start_time) * ROW_H;
-                                  const h = getSessionSpan(slot.start_time, slot.end_time) * ROW_H;
-                                  // skip if overlapped by booking
-                                  const overlaps = colBookings.some(
-                                    (b) => timeToRow(b.start_time) < timeToRow(slot.end_time) && timeToRow(b.end_time) > timeToRow(slot.start_time)
-                                  );
-                                  if (overlaps) return null;
+
+                              {/* Colunas por mentor */}
+                              <div className="flex-1 flex">
+                                {filteredMentorIds.map((mId) => {
+                                  const idx = mentorIndexMap[mId] ?? 0;
+                                  const mentor = allMentors.find((m) => m.id === mId);
+                                  const color = mentorColors[idx % mentorColors.length];
+                                  const colBookings = dayBookings.filter((b) => b.mentor_id === mId);
+                                  const colSlots = availability.filter((a) => a.mentor_id === mId);
                                   return (
-                                    <div
-                                      key={`slot-${i}`}
-                                      className="absolute left-0.5 right-0.5 rounded-lg border border-dashed border-status-green/35 bg-status-green/5 hover:bg-status-green/10 hover:border-status-green/55 transition-colors group"
-                                      style={{ top, height: h - 2 }}
-                                    >
-                                      <button
-                                        onClick={() => openBookingFromSlot(mId, dateStr, slot.start_time)}
-                                        className="absolute inset-0 flex items-center justify-center px-1"
-                                        title="Clique para agendar neste horário"
+                                    <div key={mId} className="flex-1 border-l border-border/30 relative" style={{ minWidth: MIN_COL_W }}>
+                                      <div className={`sticky top-0 z-10 text-center ${color.header}`} style={{ height: HEADER_H }}>
+                                        <div className="pt-2 flex flex-col items-center gap-1">
+                                          <div className={`w-7 h-7 rounded-full ${color.dot} flex items-center justify-center text-[11px] font-bold text-background`}>
+                                            {mentor ? getInitials(mentor.full_name) : "?"}
+                                          </div>
+                                          <span className="text-xs font-semibold text-foreground leading-tight">
+                                            {mentor ? shortName(mentor.full_name) : "Sem dados"}
+                                          </span>
+                                        </div>
+                                      </div>
+                                      <div
+                                        className="relative"
+                                        style={{
+                                          height: totalH,
+                                          backgroundImage: `repeating-linear-gradient(to bottom, transparent 0, transparent ${ROW_H * 2 - 1}px, hsl(var(--border) / 0.2) ${ROW_H * 2 - 1}px, hsl(var(--border) / 0.2) ${ROW_H * 2}px)`,
+                                        }}
                                       >
-                                        <span className="text-[9px] text-status-green/70 tabular-nums group-hover:text-status-green text-center">
-                                          {formatTime(slot.start_time)} – {formatTime(slot.end_time)}
-                                        </span>
-                                      </button>
-                                      <div className="absolute top-0.5 right-0.5 flex gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
-                                        <button
-                                          onClick={(e) => { e.stopPropagation(); openSlotEdit(slot); }}
-                                          title="Editar disponibilidade"
-                                          className="p-0.5 rounded bg-card border border-border text-muted-foreground hover:text-primary"
-                                        >
-                                          <Pencil className="h-2.5 w-2.5" />
-                                        </button>
-                                        <button
-                                          onClick={(e) => { e.stopPropagation(); setSlotDelete(slot); }}
-                                          title="Excluir disponibilidade"
-                                          className="p-0.5 rounded bg-card border border-border text-muted-foreground hover:text-destructive"
-                                        >
-                                          <X className="h-2.5 w-2.5" />
-                                        </button>
+                                        {/* Disponibilidades */}
+                                        {colSlots.map((slot, i) => {
+                                          const top = timeToRow(slot.start_time) * ROW_H;
+                                          const h = getSessionSpan(slot.start_time, slot.end_time) * ROW_H;
+                                          const overlaps = colBookings.some(
+                                            (b) => timeToRow(b.start_time) < timeToRow(slot.end_time) && timeToRow(b.end_time) > timeToRow(slot.start_time)
+                                          );
+                                          if (overlaps) return null;
+                                          return (
+                                            <div
+                                              key={`slot-${i}`}
+                                              className="absolute left-0.5 right-0.5 rounded-ds border border-dashed border-status-green/35 bg-status-green/5 hover:bg-status-green/10 hover:border-status-green/55 transition-colors duration-ds-1 group"
+                                              style={{ top, height: h - 2 }}
+                                            >
+                                              <button
+                                                type="button"
+                                                onClick={() => openBookingFromSlot(mId, dateStr, slot.start_time)}
+                                                className="absolute inset-0 flex items-center justify-center px-1 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring rounded-ds"
+                                                aria-label={`Agendar com ${mentor ? shortName(mentor.full_name) : "mentor"} das ${formatTime(slot.start_time)} às ${formatTime(slot.end_time)}`}
+                                                title="Agendar neste horário"
+                                              >
+                                                <span className="text-[11px] text-status-green tabular-nums text-center">
+                                                  {formatTime(slot.start_time)} às {formatTime(slot.end_time)}
+                                                </span>
+                                              </button>
+                                              <div className="absolute top-0.5 right-0.5 flex gap-0.5 opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 transition-opacity duration-ds-1">
+                                                {slotActionButton("Editar disponibilidade", (e) => { e.stopPropagation(); openSlotEdit(slot); }, Pencil)}
+                                                {slotActionButton("Excluir disponibilidade", (e) => { e.stopPropagation(); setSlotDelete(slot); }, X, true)}
+                                              </div>
+                                            </div>
+                                          );
+                                        })}
+
+                                        {/* Sessões */}
+                                        {colBookings.map((b) => {
+                                          const top = timeToRow(b.start_time) * ROW_H;
+                                          const h = getSessionSpan(b.start_time, b.end_time) * ROW_H;
+                                          const st = displayStatus(b);
+                                          return (
+                                            <button
+                                              key={b.id}
+                                              type="button"
+                                              onClick={() => openDrawer(b)}
+                                              aria-label={`${participantName(b)}, ${b.sessions?.name || "sessão"}, ${formatTime(b.start_time)} às ${formatTime(b.end_time)}, ${statusLabel(st)}`}
+                                              className={`absolute left-0.5 right-0.5 rounded-ds border px-2 py-1 text-left transition-colors duration-ds-1 hover:brightness-110 overflow-hidden focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${bookingBg(b)}`}
+                                              style={{ top, height: h - 2 }}
+                                            >
+                                              <p className={`text-[11px] font-medium tabular-nums leading-tight ${bookingText(b)}`}>
+                                                {formatTime(b.start_time)} às {formatTime(b.end_time)}
+                                              </p>
+                                              <p className="text-xs font-medium text-foreground truncate leading-tight">{participantName(b)}</p>
+                                              {(st === "pending_approval" || st === "pending_confirmation") && h >= 40 && (
+                                                <p className={`text-[11px] truncate leading-tight ${st === "pending_approval" ? "text-status-yellow" : "text-status-orange"}`}>{statusLabel(st)}</p>
+                                              )}
+                                              {h >= 56 && (
+                                                <p className="text-[11px] text-muted-foreground truncate leading-tight">{b.sessions?.name || "Sem dados"}</p>
+                                              )}
+                                            </button>
+                                          );
+                                        })}
                                       </div>
                                     </div>
                                   );
                                 })}
-
-                                {/* Bookings */}
-                                {colBookings.map((b) => {
-                                  const top = timeToRow(b.start_time) * ROW_H;
-                                  const h = getSessionSpan(b.start_time, b.end_time) * ROW_H;
-                                  return (
-                                    <button
-                                      key={b.id}
-                                      onClick={() => openDrawer(b)}
-                                      className={`absolute left-0.5 right-0.5 rounded-md border px-1.5 py-1 text-left transition-all hover:brightness-125 cursor-pointer overflow-hidden ${bookingBg(b)}`}
-                                      style={{ top, height: h - 2 }}
-                                    >
-                                      <p className={`text-[9px] font-medium tabular-nums leading-tight ${bookingText(b)}`}>
-                                        {formatTime(b.start_time)}–{formatTime(b.end_time)}
-                                      </p>
-                                       <p className="text-[10px] font-medium text-foreground truncate leading-tight">
-                                         {displayStatus(b) === "pending_approval" ? "⏳ " : ""}
-                                         {(b.liberty ? shortName(b.liberty.full_name) : (b.guest_name || "Sem dados"))}
-                                       </p>
-                                       {displayStatus(b) === "pending_approval" && h >= 34 && (
-                                         <p className="text-[9px] text-status-yellow truncate leading-tight">Aguardando confirmação</p>
-                                       )}
-                                      {h >= 50 && (
-                                        <p className="text-[9px] text-muted-foreground truncate leading-tight">{b.sessions?.name || "Sem dados"}</p>
-                                      )}
-                                    </button>
-                                  );
-                                })}
                               </div>
                             </div>
-                          );
-                        })}
-                      </div>
-                    </div>
-                  </div>
-                );
-              })()}
-            </motion.div>
+                          </div>
+                        );
+                      })()}
+                    </SectionCard>
+                  </motion.div>
 
-            {/* Mobile list */}
-            <motion.div variants={fadeUpItem} className="lg:hidden space-y-3">
-              {hours.map((hour) => {
-                const hourBookings = dayBookings.filter((b) => formatTime(b.start_time) === hour && filteredMentorIds.includes(b.mentor_id));
-                const hourSlots = availability.filter((a) => formatTime(a.start_time) === hour && filteredMentorIds.includes(a.mentor_id));
-                if (hourBookings.length === 0 && hourSlots.length === 0) return null;
-                return (
-                  <div key={hour}>
-                    <p className="text-xs text-muted-foreground mb-2 font-medium tabular-nums">{hour}</p>
-                    <div className="space-y-2">
-                      {hourBookings.map((b) => {
-                        const idx = mentorIndexMap[b.mentor_id] ?? 0;
+                  {/* Lista mobile */}
+                  <motion.div variants={fadeUpItem} className="lg:hidden space-y-4">
+                    {dayBookings.length === 0 && availability.filter((a) => filteredMentorIds.includes(a.mentor_id)).length === 0 && (
+                      <EmptyState
+                        icon={CalendarDays}
+                        title="Nenhuma sessão neste dia"
+                        description="Nenhum horário disponível ou sessão agendada com os filtros atuais."
+                        action={<Button size="sm" onClick={() => setShowManualModal(true)}><Plus className="h-4 w-4" /> Agendar</Button>}
+                      />
+                    )}
+                    {hours.map((hour) => {
+                      const hourBookings = dayBookings.filter((b) => formatTime(b.start_time) === hour && filteredMentorIds.includes(b.mentor_id));
+                      const hourSlots = availability.filter((a) => formatTime(a.start_time) === hour && filteredMentorIds.includes(a.mentor_id));
+                      if (hourBookings.length === 0 && hourSlots.length === 0) return null;
+                      const total = hourBookings.length + hourSlots.length;
+                      return (
+                        <div key={hour} className="space-y-2">
+                          <p className="text-xs text-muted-foreground font-medium tabular-nums">{hour}</p>
+                          <SectionCard padding="none">
+                            {hourBookings.map((b, i) => (
+                              <ListRow
+                                key={b.id}
+                                last={i === total - 1}
+                                onPress={() => openDrawer(b)}
+                                leading={
+                                  <span className={`flex h-10 w-10 items-center justify-center rounded-full text-xs font-bold text-background ${mentorColorFor(b.mentor_id).dot}`} aria-hidden>
+                                    {getInitials(getMentorName(b.mentor_id))}
+                                  </span>
+                                }
+                                title={participantName(b)}
+                                subtitle={`${b.sessions?.name || "Sem dados"} · ${formatTime(b.start_time)} às ${formatTime(b.end_time)} · ${getMentorName(b.mentor_id)}`}
+                                trailing={<StatusPill status={displayStatus(b)} size="sm" />}
+                                chevron
+                              />
+                            ))}
+                            {hourSlots.map((sl, i) => (
+                              <ListRow
+                                key={`slot-${i}`}
+                                last={hourBookings.length + i === total - 1}
+                                onPress={() => openBookingFromSlot(sl.mentor_id, dateStr, sl.start_time)}
+                                leading={<span className="flex h-10 w-10 items-center justify-center rounded-full border border-dashed border-status-green/50 text-status-green" aria-hidden><Plus className="h-4 w-4" /></span>}
+                                title={<span className="text-status-green">Disponível · {getMentorName(sl.mentor_id)}</span>}
+                                subtitle={`${formatTime(sl.start_time)} às ${formatTime(sl.end_time)} · Toque para agendar`}
+                                trailing={
+                                  <span className="flex items-center gap-0.5" onClick={(e) => e.stopPropagation()}>
+                                    <IconButton aria-label="Editar disponibilidade" size="sm" onClick={() => openSlotEdit(sl)}><Pencil className="h-4 w-4" /></IconButton>
+                                    <IconButton aria-label="Excluir disponibilidade" size="sm" className="hover:text-destructive" onClick={() => setSlotDelete(sl)}><Trash2 className="h-4 w-4" /></IconButton>
+                                  </span>
+                                }
+                              />
+                            ))}
+                          </SectionCard>
+                        </div>
+                      );
+                    })}
+                  </motion.div>
+                </>
+              )}
+
+              {/* ═══════ SEMANA ═══════ */}
+              {viewMode === "week" && (
+                <motion.div variants={fadeUpItem}>
+                  <SectionCard padding="none" className="overflow-auto">
+                    <div className="grid grid-cols-7 min-w-[760px]">
+                      {weekDays.map((day) => (
+                        <div key={day.toISOString()} className={`p-3 border-b border-r border-border text-center ${isToday(day) ? "bg-primary/5" : "bg-muted/20"}`}>
+                          <p className="text-xs text-muted-foreground capitalize">{format(day, "EEE", { locale: ptBR })}</p>
+                          <p className={`text-lg font-semibold tabular-nums ${isToday(day) ? "text-primary" : "text-foreground"}`}>{format(day, "dd")}</p>
+                        </div>
+                      ))}
+                      {weekDays.map((day) => {
+                        const dayBks = bookingsForDate(day);
+                        const dayAvail = availabilityForDate(day);
+                        const ds = format(day, "yyyy-MM-dd");
+                        const isDropTarget = draggingSlot && dragOverDay === ds && draggingSlot.date !== ds;
                         return (
-                          <button key={b.id} onClick={() => openDrawer(b)} className={`glass-card p-4 w-full text-left border ${bookingBg(b)}`} style={{ transform: "none" }}>
-                            <div className="flex items-center justify-between mb-2">
-                              <span className={`text-[10px] px-2 py-0.5 rounded-full font-medium ${mentorColors[idx % mentorColors.length].header}`}>{getMentorName(b.mentor_id)}</span>
-                              <span className={`text-[10px] font-medium ${statusText[displayStatus(b)]}`}>● {statusLabel[displayStatus(b)]}</span>
+                          <div
+                            key={`cell-${day.toISOString()}`}
+                            onDragOver={(e) => { if (draggingSlot) { e.preventDefault(); setDragOverDay(ds); } }}
+                            onDragLeave={() => setDragOverDay((d) => (d === ds ? null : d))}
+                            onDrop={(e) => {
+                              e.preventDefault();
+                              if (draggingSlot) moveSlotToDate(draggingSlot, ds);
+                              setDraggingSlot(null);
+                              setDragOverDay(null);
+                            }}
+                            className={`relative border-r border-b border-border p-2 min-h-[220px] transition-colors duration-ds-1 ${isToday(day) ? "bg-primary/5" : ""} ${isDropTarget ? "bg-status-green/10 ring-2 ring-inset ring-status-green/50" : ""}`}
+                          >
+                            <div className="space-y-1.5">
+                              {dayBks.length === 0 && dayAvail.length === 0 && (
+                                <p className="text-[11px] text-muted-foreground text-center py-6">Sem sessões</p>
+                              )}
+                              {dayBks.map((b) => {
+                                const st = displayStatus(b);
+                                return (
+                                  <button
+                                    key={b.id}
+                                    type="button"
+                                    onClick={() => openDrawer(b)}
+                                    aria-label={`${participantName(b)}, ${formatTime(b.start_time)}, ${statusLabel(st)}`}
+                                    className={`w-full rounded-ds border p-2 text-left transition-colors duration-ds-1 hover:brightness-110 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${bookingBg(b)}`}
+                                  >
+                                    <p className={`text-[11px] font-medium tabular-nums flex items-center gap-1.5 ${bookingText(b)}`}>
+                                      <span className={`w-1.5 h-1.5 rounded-full ${bookingStatusConfig[st]?.dot ?? "bg-muted-foreground"}`} aria-hidden />
+                                      {formatTime(b.start_time)} às {formatTime(b.end_time)}
+                                    </p>
+                                    <p className="text-xs font-medium text-foreground truncate">{participantName(b)}</p>
+                                    <p className="text-[11px] text-muted-foreground truncate">{getMentorName(b.mentor_id)} · {b.sessions?.name || "Sem dados"}</p>
+                                  </button>
+                                );
+                              })}
+                              {dayAvail.map((sl, i) => (
+                                <div
+                                  key={`av-${i}`}
+                                  draggable
+                                  onDragStart={() => setDraggingSlot(sl)}
+                                  onDragEnd={() => { setDraggingSlot(null); setDragOverDay(null); }}
+                                  className={`group/slot relative w-full rounded-ds border border-dashed border-status-green/40 bg-status-green/10 p-1.5 hover:bg-status-green/15 transition-colors duration-ds-1 cursor-grab active:cursor-grabbing ${draggingSlot?.id === sl.id && draggingSlot?.date === sl.date ? "opacity-40" : ""}`}
+                                  title="Arraste para outro dia para mover"
+                                >
+                                  <button
+                                    type="button"
+                                    onClick={() => openBookingFromSlot(sl.mentor_id, sl.date, sl.start_time)}
+                                    className="w-full text-left pr-12 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring rounded-ds"
+                                    aria-label={`Agendar com ${getMentorName(sl.mentor_id)} às ${formatTime(sl.start_time)}`}
+                                  >
+                                    <p className="text-[11px] tabular-nums text-status-green">{formatTime(sl.start_time)} às {formatTime(sl.end_time)}</p>
+                                    <p className="text-[11px] text-muted-foreground truncate">{getMentorName(sl.mentor_id)}</p>
+                                  </button>
+                                  <div className="absolute top-1 right-1 flex gap-0.5 opacity-0 group-hover/slot:opacity-100 group-focus-within/slot:opacity-100 transition-opacity duration-ds-1">
+                                    {slotActionButton("Editar disponibilidade", (e) => { e.stopPropagation(); openSlotEdit(sl); }, Pencil)}
+                                    {slotActionButton("Excluir disponibilidade", (e) => { e.stopPropagation(); setSlotDelete(sl); }, X, true)}
+                                  </div>
+                                </div>
+                              ))}
+                              <button
+                                type="button"
+                                onClick={() => { setSlotAddDate(ds); setSlotAddMentor(mentorFilter || allMentors[0]?.id || ""); setSlotAddStart("07:00"); }}
+                                className="w-full rounded-ds border border-dashed border-border min-h-[32px] text-[11px] text-muted-foreground hover:text-status-green hover:border-status-green/40 transition-colors duration-ds-1 flex items-center justify-center gap-1 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                              >
+                                <Plus className="h-3 w-3" aria-hidden /> Disponibilidade
+                              </button>
                             </div>
-                            <p className="text-sm font-medium text-foreground">{(b.liberty ? shortName(b.liberty.full_name) : (b.guest_name || "Sem dados"))}</p>
-                            <p className="text-xs text-muted-foreground">{b.sessions?.name || "Sem dados"} · {formatTime(b.start_time)}–{formatTime(b.end_time)}</p>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </SectionCard>
+                </motion.div>
+              )}
+
+              {/* ═══════ MÊS ═══════ */}
+              {viewMode === "month" && (
+                <motion.div variants={fadeUpItem} className="space-y-3">
+                  <SectionCard padding="none" className="overflow-auto">
+                    <div className="grid grid-cols-7 min-w-[640px]">
+                      {["Seg", "Ter", "Qua", "Qui", "Sex", "Sáb", "Dom"].map((d) => (
+                        <div key={d} className="h-10 flex items-center justify-center border-b border-border text-xs font-medium text-muted-foreground bg-muted/20">{d}</div>
+                      ))}
+                      {monthDays.map((day) => {
+                        const dayBks = bookingsForDate(day);
+                        const dayAvail = availabilityForDate(day);
+                        const inMonth = isSameMonth(day, currentDate);
+                        const ds = format(day, "yyyy-MM-dd");
+                        const isDropTarget = draggingSlot && dragOverDay === ds && draggingSlot.date !== ds;
+                        return (
+                          <button
+                            key={day.toISOString()}
+                            type="button"
+                            onClick={() => { setCurrentDate(day); setViewMode("day"); }}
+                            onDragOver={(e) => { if (draggingSlot) { e.preventDefault(); setDragOverDay(ds); } }}
+                            onDragLeave={() => setDragOverDay((d) => (d === ds ? null : d))}
+                            onDrop={(e) => {
+                              e.preventDefault();
+                              if (draggingSlot) moveSlotToDate(draggingSlot, ds);
+                              setDraggingSlot(null);
+                              setDragOverDay(null);
+                            }}
+                            aria-label={`${format(day, "d 'de' MMMM", { locale: ptBR })}, ${dayBks.length} sessões`}
+                            className={`border-r border-b border-border p-2 min-h-[96px] text-left transition-colors duration-ds-1 hover:bg-accent/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring ${
+                              !inMonth ? "opacity-40" : ""
+                            } ${isToday(day) ? "bg-primary/5" : ""} ${isDropTarget ? "bg-status-green/10 ring-2 ring-inset ring-status-green/50" : ""}`}
+                          >
+                            <div className="flex items-center justify-between mb-1.5">
+                              <span className={`inline-flex h-6 min-w-6 px-1 items-center justify-center rounded-full text-xs font-medium tabular-nums ${isToday(day) ? "bg-primary text-primary-foreground" : "text-foreground"}`}>
+                                {format(day, "d")}
+                              </span>
+                              {dayAvail.length > 0 && (
+                                <span className="text-[11px] text-status-green tabular-nums" title={`${dayAvail.length} horário(s) disponível(is)`}>
+                                  {dayAvail.length} disp.
+                                </span>
+                              )}
+                            </div>
+                            {dayBks.length > 0 && (
+                              <div className="space-y-0.5">
+                                {dayBks.slice(0, 3).map((b) => {
+                                  const st = displayStatus(b);
+                                  return (
+                                    <div key={b.id} className="flex items-center gap-1.5 text-[11px] truncate">
+                                      <span className={`w-2 h-2 rounded-full shrink-0 ${bookingStatusConfig[st]?.dot ?? "bg-muted-foreground"}`} aria-hidden />
+                                      <span className="tabular-nums text-muted-foreground">{formatTime(b.start_time)}</span>
+                                      <span className="text-foreground truncate">{participantName(b).split(" ")[0]}</span>
+                                    </div>
+                                  );
+                                })}
+                                {dayBks.length > 3 && (
+                                  <p className="text-[11px] text-muted-foreground">+{dayBks.length - 3} mais</p>
+                                )}
+                              </div>
+                            )}
                           </button>
                         );
                       })}
-                      {hourSlots.map((sl, i) => (
-                        <div
-                          key={`slot-${i}`}
-                          className="glass-card p-3 w-full border border-dashed border-status-green/40 bg-status-green/10 flex items-center gap-2"
-                          style={{ transform: "none" }}
-                        >
-                          <button onClick={() => openBookingFromSlot(sl.mentor_id, dateStr, sl.start_time)} className="flex-1 text-left">
-                            <span className="text-xs text-status-green/70">{getMentorName(sl.mentor_id)} · {formatTime(sl.start_time)}–{formatTime(sl.end_time)} · Disponível · Toque p/ agendar</span>
-                          </button>
-                          <button onClick={() => openSlotEdit(sl)} title="Editar" className="p-1.5 rounded-lg border border-border text-muted-foreground hover:text-primary">
-                            <Pencil className="h-3.5 w-3.5" />
-                          </button>
-                          <button onClick={() => setSlotDelete(sl)} title="Excluir" className="p-1.5 rounded-lg border border-border text-muted-foreground hover:text-destructive">
-                            <Trash2 className="h-3.5 w-3.5" />
-                          </button>
-                        </div>
-                      ))}
-
                     </div>
+                  </SectionCard>
+
+                  {/* Legenda */}
+                  <div className="flex flex-wrap gap-x-4 gap-y-1 text-[11px] text-muted-foreground px-1">
+                    {STATUS_FILTER_OPTIONS.map((s) => (
+                      <span key={s} className="inline-flex items-center gap-1.5">
+                        <span className={`w-2 h-2 rounded-full ${bookingStatusConfig[s]?.dot ?? "bg-muted-foreground"}`} aria-hidden /> {statusLabel(s)}
+                      </span>
+                    ))}
+                    <span className="inline-flex items-center gap-1.5">
+                      <span className="w-2 h-2 rounded-full border border-dashed border-status-green" aria-hidden /> Disponibilidade
+                    </span>
                   </div>
-                );
-              })}
-            </motion.div>
-          </>
-        )}
+                </motion.div>
+              )}
+            </>
+          )}
+        </motion.div>
+      </PageContainer>
 
-        {/* ═══════ WEEK VIEW ═══════ */}
-        {viewMode === "week" && (
-          <motion.div variants={fadeUpItem} className="glass-card overflow-auto" style={{ transform: "none" }}>
-            <div className="grid grid-cols-7 min-w-[700px]">
-              {/* Day headers */}
-              {weekDays.map((day) => (
-                <div key={day.toISOString()} className={`p-3 border-b border-r border-border text-center ${isToday(day) ? "bg-primary/5" : "bg-muted/20"}`}>
-                  <p className="text-[10px] text-muted-foreground uppercase">{format(day, "EEE", { locale: ptBR })}</p>
-                  <p className={`text-lg font-semibold ${isToday(day) ? "text-primary" : "text-foreground"}`}>{format(day, "dd")}</p>
-                </div>
-              ))}
-              {/* Day cells */}
-              {weekDays.map((day) => {
-                const dayBks = bookingsForDate(day);
-                const dayAvail = availabilityForDate(day);
-                const ds = format(day, "yyyy-MM-dd");
-                const isDropTarget = draggingSlot && dragOverDay === ds && draggingSlot.date !== ds;
-                return (
-                  <div
-                    key={`cell-${day.toISOString()}`}
-                    onDragOver={(e) => { if (draggingSlot) { e.preventDefault(); setDragOverDay(ds); } }}
-                    onDragLeave={() => setDragOverDay((d) => (d === ds ? null : d))}
-                    onDrop={(e) => {
-                      e.preventDefault();
-                      if (draggingSlot) moveSlotToDate(draggingSlot, ds);
-                      setDraggingSlot(null);
-                      setDragOverDay(null);
-                    }}
-                    className={`group/cell relative border-r border-b border-border p-2 min-h-[200px] transition-colors ${isToday(day) ? "bg-primary/[0.02]" : ""} ${isDropTarget ? "bg-status-green/10 ring-2 ring-inset ring-status-green/50" : ""}`}
-                  >
-                    {dayBks.length === 0 && dayAvail.length === 0 && (
-                      <p className="text-[10px] text-muted-foreground/40 text-center mt-8">Sem sessões</p>
-                    )}
-                    <div className="space-y-1.5">
-                      {dayBks.map((b) => (
-                        <button
-                          key={b.id}
-                          onClick={() => openDrawer(b)}
-                          className={`w-full rounded-lg border p-2 text-left transition-all hover:brightness-125 ${bookingBg(b)}`}
-                        >
-                          <p className={`text-[9px] font-medium tabular-nums ${bookingText(b)}`}>{formatTime(b.start_time)}–{formatTime(b.end_time)}</p>
-                          <p className="text-[10px] font-medium text-foreground truncate">{(b.liberty ? shortName(b.liberty.full_name) : (b.guest_name || "Sem dados"))}</p>
-                          <p className="text-[9px] text-muted-foreground truncate">{getMentorName(b.mentor_id)} · {b.sessions?.name || "Sem dados"}</p>
-                        </button>
-                      ))}
-                      {dayAvail.map((sl, i) => (
-                        <div
-                          key={`av-${i}`}
-                          draggable
-                          onDragStart={() => setDraggingSlot(sl)}
-                          onDragEnd={() => { setDraggingSlot(null); setDragOverDay(null); }}
-                          className={`group/slot relative w-full rounded-lg border border-dashed border-status-green/40 bg-status-green/10 p-1.5 hover:bg-status-green/15 transition-colors cursor-grab active:cursor-grabbing ${draggingSlot?.id === sl.id && draggingSlot?.date === sl.date ? "opacity-40" : ""}`}
-                          title="Arraste para outro dia para mover"
-                        >
-                          <button onClick={() => openBookingFromSlot(sl.mentor_id, sl.date, sl.start_time)} className="w-full text-left pr-9">
-                            <p className="text-[9px] tabular-nums text-status-green/70">{formatTime(sl.start_time)}–{formatTime(sl.end_time)}</p>
-                            <p className="text-[9px] text-muted-foreground truncate">{getMentorName(sl.mentor_id)}</p>
-                          </button>
-                          <div className="absolute top-1 right-1 flex gap-0.5 opacity-0 group-hover/slot:opacity-100 transition-opacity">
-                            <button
-                              onClick={(e) => { e.stopPropagation(); openSlotEdit(sl); }}
-                              title="Editar disponibilidade"
-                              className="p-0.5 rounded bg-card border border-border text-muted-foreground hover:text-primary"
-                            >
-                              <Pencil className="h-2.5 w-2.5" />
-                            </button>
-                            <button
-                              onClick={(e) => { e.stopPropagation(); setSlotDelete(sl); }}
-                              title="Excluir disponibilidade"
-                              className="p-0.5 rounded bg-card border border-border text-muted-foreground hover:text-destructive"
-                            >
-                              <X className="h-2.5 w-2.5" />
-                            </button>
-                          </div>
-                        </div>
-                      ))}
-                      <button
-                        onClick={() => { setSlotAddDate(ds); setSlotAddMentor(mentorFilter || allMentors[0]?.id || ""); setSlotAddStart("07:00"); }}
-                        className="w-full rounded-lg border border-dashed border-border py-1 text-[9px] text-muted-foreground hover:text-status-green hover:border-status-green/40 transition-colors opacity-0 group-hover/cell:opacity-100 flex items-center justify-center gap-1"
-                      >
-                        <Plus className="h-2.5 w-2.5" /> disponibilidade
-                      </button>
-                    </div>
-                  </div>
-                );
-              })}
-
-            </div>
-          </motion.div>
-        )}
-
-        {/* ═══════ MONTH VIEW ═══════ */}
-        {viewMode === "month" && (
-          <motion.div variants={fadeUpItem} className="glass-card overflow-auto" style={{ transform: "none" }}>
-            <div className="grid grid-cols-7 min-w-[600px]">
-              {/* Weekday headers */}
-              {["Seg", "Ter", "Qua", "Qui", "Sex", "Sáb", "Dom"].map((d) => (
-                <div key={d} className="p-2 border-b border-border text-center text-[10px] font-semibold text-muted-foreground uppercase bg-muted/20">{d}</div>
-              ))}
-              {/* Calendar cells */}
-              {monthDays.map((day) => {
-                const dayBks = bookingsForDate(day);
-                const dayAvail = availabilityForDate(day);
-                const inMonth = isSameMonth(day, currentDate);
-                const ds = format(day, "yyyy-MM-dd");
-                const isDropTarget = draggingSlot && dragOverDay === ds && draggingSlot.date !== ds;
-                return (
-                  <button
-                    key={day.toISOString()}
-                    onClick={() => { setCurrentDate(day); setViewMode("day"); }}
-                    onDragOver={(e) => { if (draggingSlot) { e.preventDefault(); setDragOverDay(ds); } }}
-                    onDragLeave={() => setDragOverDay((d) => (d === ds ? null : d))}
-                    onDrop={(e) => {
-                      e.preventDefault();
-                      if (draggingSlot) moveSlotToDate(draggingSlot, ds);
-                      setDraggingSlot(null);
-                      setDragOverDay(null);
-                    }}
-                    className={`border-r border-b border-border p-2 min-h-[80px] text-left transition-colors hover:bg-muted/30 ${
-                      !inMonth ? "opacity-30" : ""
-                    } ${isToday(day) ? "bg-primary/5" : ""} ${isDropTarget ? "bg-status-green/10 ring-2 ring-inset ring-status-green/50" : ""}`}
-                  >
-
-                    <div className="flex items-center justify-between mb-1">
-                      <p className={`text-xs font-medium ${isToday(day) ? "text-primary" : "text-foreground"}`}>{format(day, "d")}</p>
-                      {dayAvail.length > 0 && (
-                        <span className="text-[8px] px-1.5 py-0.5 rounded-full bg-status-green/10 text-status-green border border-border tabular-nums">
-                          {dayAvail.length} disp.
-                        </span>
-                      )}
-                    </div>
-                    {dayBks.length > 0 && (
-                      <div className="space-y-0.5">
-                        {dayBks.slice(0, 3).map((b) => (
-                          <div key={b.id} className={`text-[8px] px-1.5 py-0.5 rounded truncate ${bookingBg(b)} border`}>
-                            <span className={bookingText(b)}>{formatTime(b.start_time)}</span>
-                            <span className="text-foreground ml-1">{(b.liberty ? shortName(b.liberty.full_name).split(" ")[0] : (b.guest_name?.split(" ")[0] || "Sem dados"))}</span>
-                          </div>
-                        ))}
-                        {dayBks.length > 3 && (
-                          <p className="text-[8px] text-muted-foreground text-center">+{dayBks.length - 3} mais</p>
-                        )}
-                      </div>
-                    )}
-                  </button>
-                );
-              })}
-            </div>
-          </motion.div>
-        )}
-      </motion.div>
-
-      {/* ═══════ SESSION DRAWER ═══════ */}
-      <AnimatePresence>
-        {drawerOpen && selectedBooking && (
-          <>
-            <motion.div
-              initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
-              className="fixed inset-0 bg-background/60 backdrop-blur-sm z-40"
-              onClick={() => { setDrawerOpen(false); setShowMentorSwap(false); setShowDateChange(false); setShowCancelModal(false); }}
-            />
-            <motion.div
-              initial={{ x: "100%" }} animate={{ x: 0 }} exit={{ x: "100%" }}
-              transition={{ type: "spring", damping: 28, stiffness: 260 }}
-              className="fixed right-0 top-0 bottom-0 w-full max-w-md bg-card border-l border-border z-50 overflow-y-auto"
-            >
-              <div className="p-6 space-y-6">
-                <div className="flex items-center justify-between">
-                  <h2 className="text-lg font-semibold text-foreground">Gerenciar Sessão</h2>
-                  <button onClick={() => { setDrawerOpen(false); setShowMentorSwap(false); setShowDateChange(false); setShowCancelModal(false); }} className="p-2 hover:bg-muted rounded-lg transition-colors">
-                    <X className="h-4 w-4 text-muted-foreground" />
-                  </button>
-                </div>
-
-                <div className="space-y-4">
-                  <div className="flex items-center gap-3">
-                    <div className="w-10 h-10 rounded-full bg-muted flex items-center justify-center text-sm font-bold text-foreground">
-                      {selectedBooking.liberty ? getInitials(selectedBooking.liberty.full_name) : (selectedBooking.guest_name ? getInitials(selectedBooking.guest_name) : "?")}
-                    </div>
-                    <div>
-                      <p className="text-sm font-medium text-foreground">{selectedBooking.liberty ? shortName(selectedBooking.liberty.full_name) : (selectedBooking.guest_name || "Sem dados")}</p>
-                      <p className="text-xs text-muted-foreground">
-                        {selectedBooking.liberty
-                          ? (selectedBooking.liberty.member_tier === "liberty" ? "Liberty" : "Liberty Begin")
-                          : "Convidado"}
-                      </p>
-                    </div>
-                  </div>
-
-                  <div className="glass-card p-4 space-y-3" style={{ transform: "none" }}>
-                    <div className="flex justify-between text-sm">
-                      <span className="text-muted-foreground">Sessão</span>
-                      <span className="text-foreground font-medium">{selectedBooking.sessions?.name || "Sem dados"}</span>
-                    </div>
-                    <div className="border-t border-border" />
-                    <div className="flex justify-between items-center text-sm">
-                      <span className="text-muted-foreground">Mentor</span>
-                      <div className="flex items-center gap-2">
-                        <span className="text-foreground font-medium">{getMentorName(selectedBooking.mentor_id)}</span>
-                        <button onClick={() => setShowMentorSwap(true)} className="text-[10px] px-2 py-0.5 rounded bg-primary/10 text-primary hover:bg-primary/20 transition-colors">
-                          Trocar
-                        </button>
-                      </div>
-                    </div>
-                    <div className="border-t border-border" />
-                    <div className="flex justify-between items-center text-sm">
-                      <span className="text-muted-foreground">Data</span>
-                      <div className="flex items-center gap-2">
-                        <span className="text-foreground font-medium">{format(new Date(selectedBooking.scheduled_date + "T12:00:00"), "dd/MM/yyyy")}</span>
-                        <button onClick={() => setShowDateChange(true)} className="text-[10px] px-2 py-0.5 rounded bg-primary/10 text-primary hover:bg-primary/20 transition-colors">
-                          Alterar
-                        </button>
-                      </div>
-                    </div>
-                    <div className="border-t border-border" />
-                    <div className="flex justify-between items-center text-sm">
-                      <span className="text-muted-foreground">Horário</span>
-                      <div className="flex items-center gap-2">
-                        <span className="text-foreground font-medium tabular-nums">{formatTime(selectedBooking.start_time)} – {formatTime(selectedBooking.end_time)}</span>
-                        <button onClick={() => setShowDateChange(true)} className="text-[10px] px-2 py-0.5 rounded bg-primary/10 text-primary hover:bg-primary/20 transition-colors">
-                          Alterar
-                        </button>
-                      </div>
-                    </div>
-                    <div className="border-t border-border" />
-                    <div className="flex justify-between items-center text-sm">
-                      <span className="text-muted-foreground">Status</span>
-                      <select
-                        value={editStatus}
-                        onChange={(e) => handleStatusChange(e.target.value as SessionStatus)}
-                        className="bg-card border border-border rounded-lg px-2 py-1 text-xs text-foreground focus:border-primary/20 focus:outline-none"
-                      >
-                        <option value="scheduled">Agendada</option>
-                        <option value="completed">Realizada</option>
-                        <option value="rescheduled">Remarcada</option>
-                        <option value="not_realized">Não realizada</option>
-                        <option value="cancelled">Cancelada</option>
-                      </select>
-                    </div>
-                  </div>
-
-                  {selectedBooking.observations && (
-                    <div className="glass-card p-3" style={{ transform: "none" }}>
-                      <p className="text-[10px] text-muted-foreground mb-1">Observações</p>
-                      <p className="text-xs text-foreground">{selectedBooking.observations}</p>
-                    </div>
-                  )}
-
-                  {selectedBooking.cancellation_reason && (
-                    <div className="border border-border rounded-lg p-3 bg-destructive/5">
-                      <p className="text-[10px] text-destructive mb-1">Motivo</p>
-                      <p className="text-xs text-foreground">{selectedBooking.cancellation_reason}</p>
-                    </div>
-                  )}
-
-                  <div className="flex flex-col gap-2">
-                    <button onClick={() => setShowDateChange(true)} className="w-full py-2.5 border border-border rounded-lg text-sm text-muted-foreground hover:text-foreground hover:border-primary/30 transition-colors flex items-center justify-center gap-2">
-                      <RefreshCw className="h-3.5 w-3.5" /> Remarcar
-                    </button>
-                    {selectedBooking.status !== "cancelled" && (
-                      <button onClick={() => setShowCancelModal(true)} className="w-full py-2.5 border border-border rounded-lg text-sm text-destructive hover:bg-destructive/5 transition-colors flex items-center justify-center gap-2">
-                        <Ban className="h-3.5 w-3.5" /> Cancelar sessão
-                      </button>
-                    )}
-                    {(selectedBooking.zoom_join_url || selectedBooking.zoom_link) && (
-                      <a href={selectedBooking.zoom_join_url || selectedBooking.zoom_link || "#"} target="_blank" rel="noopener noreferrer" className="w-full py-2.5 border border-border rounded-lg text-sm text-status-blue hover:bg-status-blue/5 transition-colors flex items-center justify-center gap-2">
-                        <Video className="h-3.5 w-3.5" /> Abrir Zoom
-                      </a>
-                    )}
-                  </div>
-                </div>
-
-                {/* Mentor Swap */}
-                <AnimatePresence>
-                  {showMentorSwap && (
-                    <motion.div initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: "auto" }} exit={{ opacity: 0, height: 0 }} className="overflow-hidden">
-                      <div className="border border-primary/20 rounded-lg p-4 space-y-3">
-                        <div className="flex items-center justify-between">
-                          <h3 className="text-sm font-semibold text-foreground">Trocar mentor</h3>
-                          <button onClick={() => setShowMentorSwap(false)} className="text-muted-foreground hover:text-foreground"><X className="h-3.5 w-3.5" /></button>
-                        </div>
-                        <div className="space-y-2">
-                          {allMentors.map((m) => {
-                            const isCurrent = m.id === selectedBooking.mentor_id;
-                            return (
-                              <button
-                                key={m.id}
-                                onClick={() => handleMentorSwap(m.id)}
-                                disabled={isCurrent}
-                                className={`w-full p-3 rounded-lg border text-left flex items-center justify-between transition-all ${
-                                  isCurrent ? "border-primary/30 bg-primary/5 opacity-60 cursor-not-allowed" : "border-border hover:border-primary/30"
-                                }`}
-                              >
-                                <div className="flex items-center gap-3">
-                                  <div className="w-8 h-8 rounded-full bg-muted flex items-center justify-center text-[10px] font-bold text-foreground">{getInitials(m.full_name)}</div>
-                                  <p className="text-xs font-medium text-foreground">{shortName(m.full_name)} {isCurrent && <span className="text-primary">(atual)</span>}</p>
-                                </div>
-                              </button>
-                            );
-                          })}
-                        </div>
-                      </div>
-                    </motion.div>
-                  )}
-                </AnimatePresence>
-
-                {/* Date/Time Change */}
-                <AnimatePresence>
-                  {showDateChange && (
-                    <motion.div initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: "auto" }} exit={{ opacity: 0, height: 0 }} className="overflow-hidden">
-                      <div className="border border-primary/20 rounded-lg p-4 space-y-3">
-                        <div className="flex items-center justify-between">
-                          <h3 className="text-sm font-semibold text-foreground">Alterar data/horário</h3>
-                          <button onClick={() => setShowDateChange(false)} className="text-muted-foreground hover:text-foreground"><X className="h-3.5 w-3.5" /></button>
-                        </div>
-                        <div>
-                          <label className="text-[10px] text-muted-foreground block mb-1">Nova data</label>
-                          <input type="date" value={newDate} onChange={(e) => setNewDate(e.target.value)} className="w-full bg-card border border-border rounded-lg px-3 py-2 text-sm text-foreground focus:border-primary/20 focus:outline-none" />
-                        </div>
-                        <div>
-                          <label className="text-[10px] text-muted-foreground block mb-1">Novo horário (início)</label>
-                          <input type="time" value={newTime} onChange={(e) => setNewTime(e.target.value)} className="w-full bg-card border border-border rounded-lg px-3 py-2 text-sm text-foreground focus:border-primary/20 focus:outline-none" />
-                          <p className="text-[10px] text-muted-foreground mt-1">Fim automático: +1h30</p>
-                        </div>
-                        <button onClick={handleDateTimeChange} className="btn-silver w-full text-xs">Confirmar alteração</button>
-                      </div>
-                    </motion.div>
-                  )}
-                </AnimatePresence>
-
-                {/* Cancel Modal */}
-                <AnimatePresence>
-                  {showCancelModal && (
-                    <motion.div initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: "auto" }} exit={{ opacity: 0, height: 0 }} className="overflow-hidden">
-                      <div className="border border-border rounded-lg p-4 space-y-3 bg-destructive/5">
-                        <div className="flex items-center justify-between">
-                          <h3 className="text-sm font-semibold text-destructive flex items-center gap-2">
-                            <AlertTriangle className="h-4 w-4" /> Cancelar sessão
-                          </h3>
-                          <button onClick={() => setShowCancelModal(false)} className="text-muted-foreground hover:text-foreground"><X className="h-3.5 w-3.5" /></button>
-                        </div>
-                        <p className="text-xs text-muted-foreground">Esta ação cancelará a sessão.</p>
-                        <div>
-                          <label className="text-[10px] text-muted-foreground block mb-1">Motivo <span className="text-destructive">*</span></label>
-                          <textarea
-                            value={cancelReason}
-                            onChange={(e) => setCancelReason(e.target.value)}
-                            className="w-full bg-card border border-border rounded-lg p-3 text-sm text-foreground placeholder:text-muted-foreground focus:border-destructive focus:outline-none resize-none h-20"
-                            placeholder="Informe o motivo..."
-                          />
-                        </div>
-                        <button onClick={handleCancel} disabled={!cancelReason} className="w-full py-2.5 bg-destructive text-destructive-foreground rounded-lg text-sm font-semibold disabled:opacity-40 disabled:cursor-not-allowed transition-colors">
-                          Confirmar cancelamento
-                        </button>
-                      </div>
-                    </motion.div>
-                  )}
-                </AnimatePresence>
+      {/* ═══════ LEMBRETES ═══════ */}
+      <BottomSheet
+        open={showReminders}
+        onOpenChange={setShowReminders}
+        title="Lembretes de disponibilidade"
+        description="Copie o link e envie para o mentor lembrar de cadastrar a disponibilidade."
+        footer={
+          <Button variant="outline" onClick={() => copyReminderLink()}>
+            <Copy className="h-4 w-4" /> Copiar link genérico
+          </Button>
+        }
+      >
+        <div className="space-y-4">
+          {mentorsWithoutAvailability.length > 0 && (
+            <SectionCard tone="warning" padding="none">
+              <div className="px-4 pt-3 pb-1">
+                <SectionHeader
+                  as="h3"
+                  title={`${mentorsWithoutAvailability.length} mentor${mentorsWithoutAvailability.length !== 1 ? "es" : ""} sem disponibilidade no período`}
+                />
               </div>
-            </motion.div>
-          </>
-        )}
-      </AnimatePresence>
+              {mentorsWithoutAvailability.map((m, i) => (
+                <ListRow
+                  key={m.id}
+                  last={i === mentorsWithoutAvailability.length - 1}
+                  title={shortName(m.full_name)}
+                  trailing={
+                    <Button size="sm" variant="outline" onClick={() => copyReminderLink(m.full_name)}>
+                      <Copy className="h-4 w-4" /> Copiar
+                    </Button>
+                  }
+                />
+              ))}
+            </SectionCard>
+          )}
+          <SectionCard padding="none">
+            <div className="px-4 pt-3 pb-1">
+              <SectionHeader as="h3" title="Todos os mentores" />
+            </div>
+            {allMentors.map((m, i) => (
+              <ListRow
+                key={m.id}
+                last={i === allMentors.length - 1}
+                title={shortName(m.full_name)}
+                trailing={
+                  <IconButton aria-label={`Copiar lembrete para ${shortName(m.full_name)}`} size="sm" onClick={() => copyReminderLink(m.full_name)}>
+                    <Copy className="h-4 w-4" />
+                  </IconButton>
+                }
+              />
+            ))}
+          </SectionCard>
+        </div>
+      </BottomSheet>
 
-      {/* ═══════ MANUAL BOOKING MODAL ═══════ */}
-      <AnimatePresence>
-        {showManualModal && (
-          <>
-            <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="fixed inset-0 bg-background/60 backdrop-blur-sm z-40" onClick={() => setShowManualModal(false)} />
-            <div className="fixed inset-0 z-50 flex items-center justify-center p-4 pointer-events-none">
-            <motion.div
-              initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.95 }}
-              className="w-full lg:max-w-lg bg-card border border-border rounded-xl overflow-y-auto max-h-[90vh] pointer-events-auto"
-            >
-              <div className="p-6 space-y-4">
-                <div className="flex items-center justify-between">
-                  <h2 className="text-lg font-semibold text-foreground">Agendar manualmente</h2>
-                  <button onClick={() => setShowManualModal(false)} className="p-2 hover:bg-muted rounded-lg transition-colors">
-                    <X className="h-4 w-4 text-muted-foreground" />
-                  </button>
-                </div>
+      {/* ═══════ GERENCIAR SESSÃO ═══════ */}
+      <BottomSheet
+        open={drawerOpen && !!selectedBooking}
+        onOpenChange={(o) => !o && closeDrawer()}
+        title="Gerenciar sessão"
+        description={selectedBooking ? `${selectedBooking.sessions?.name || "Sessão"} · ${format(new Date(selectedBooking.scheduled_date + "T12:00:00"), "dd/MM/yyyy")}` : undefined}
+        locked={savingStatus}
+      >
+        {selectedBooking && selectedEffective && (
+          <div className="space-y-4">
+            <div className="flex items-center gap-3">
+              <UserAvatar name={selectedBooking.liberty?.full_name || selectedBooking.guest_name || "?"} size={40} />
+              <div className="min-w-0">
+                <p className="text-sm font-medium text-foreground truncate">{participantName(selectedBooking)}</p>
+                <p className="text-xs text-muted-foreground">
+                  {selectedBooking.liberty
+                    ? (selectedBooking.liberty.member_tier === "liberty" ? "Liberty" : "Liberty Begin")
+                    : "Convidado"}
+                </p>
+              </div>
+              <StatusPill status={selectedEffective} className="ml-auto" />
+            </div>
 
-                {/* Participant type toggle */}
-                <div>
-                  <label className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider block mb-1.5">Participante</label>
-                  <div className="flex gap-1 p-1 bg-muted/30 rounded-lg mb-2">
-                    <button
-                      type="button"
-                      onClick={() => { setManualIsGuest(false); setManualGuestName(""); }}
-                      className={`flex-1 text-xs h-8 rounded-md transition-colors ${!manualIsGuest ? "bg-card text-foreground" : "text-muted-foreground hover:text-foreground"}`}
-                    >
-                      Membro da plataforma
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => { setManualIsGuest(true); setManualLiberty(""); setLibertySearch(""); }}
-                      className={`flex-1 text-xs h-8 rounded-md transition-colors ${manualIsGuest ? "bg-card text-foreground" : "text-muted-foreground hover:text-foreground"}`}
-                    >
-                      Convidado externo
-                    </button>
-                  </div>
-
-                  {!manualIsGuest ? (
-                    <div className="relative">
-                      <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
-                      <input
-                        value={libertySearch}
-                        onChange={(e) => { setLibertySearch(e.target.value); setManualLiberty(""); }}
-                        placeholder="Buscar membro por nome..."
-                        className="input-begin text-sm h-10 w-full pl-9"
-                      />
-                      {libertySearch && !manualLiberty && (
-                        <div className="border border-border rounded-lg mt-1 max-h-40 overflow-y-auto bg-card">
-                          {filteredMembers.map((m) => (
-                            <button
-                              key={m.id}
-                              onClick={() => { setManualLiberty(m.id); setLibertySearch(shortName(m.full_name)); }}
-                              className="w-full px-3 py-2 text-left text-sm text-foreground hover:bg-muted transition-colors"
-                            >
-                              {shortName(m.full_name)}
-                            </button>
-                          ))}
-                          {filteredMembers.length === 0 && (
-                            <p className="px-3 py-2 text-xs text-muted-foreground">Nenhum membro encontrado</p>
-                          )}
-                        </div>
-                      )}
-                      {manualLiberty && (
-                        <p className="text-[10px] text-status-green mt-1 flex items-center gap-1"><Check className="h-3 w-3" /> Selecionado</p>
-                      )}
-                    </div>
-                  ) : (
-                    <input
-                      value={manualGuestName}
-                      onChange={(e) => setManualGuestName(e.target.value)}
-                      placeholder="Nome completo do convidado"
-                      maxLength={120}
-                      className="input-begin text-sm h-10 w-full"
-                    />
-                  )}
-                </div>
-
-                {/* Session */}
-                <div>
-                  <label className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider block mb-1.5">Sessão</label>
-                  <select
-                    value={manualSession}
-                    onChange={(e) => { setManualSession(e.target.value); setManualMentor(""); }}
-                    className="input-begin text-sm h-10 w-full"
-                  >
-                    <option value="">Selecione...</option>
-                    {sessionsCatalog.map((s) => (
-                      <option key={s.id} value={s.id}>{s.name}</option>
-                    ))}
-                  </select>
-                </div>
-
-                {/* Mentor */}
-                <div>
-                  <label className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider block mb-1.5">Mentor</label>
-                  <select
-                    value={manualMentor}
-                    onChange={(e) => setManualMentor(e.target.value)}
-                    className="input-begin text-sm h-10 w-full"
-                  >
-                    <option value="">Selecione...</option>
-                    {mentorsForSession.map((m) => (
-                      <option key={m.id} value={m.id}>{shortName(m.full_name)}</option>
-                    ))}
-                  </select>
-                </div>
-
-                {/* Date */}
-                <div>
-                  <label className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider block mb-1.5">Data</label>
-                  <input type="date" value={manualDate} onChange={(e) => setManualDate(e.target.value)} className="input-begin text-sm h-10 w-full" />
-                </div>
-
-                {/* Time */}
-                <div>
-                  <label className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider block mb-1.5">Horário (início)</label>
-                  <input type="time" value={manualTime} onChange={(e) => setManualTime(e.target.value)} className="input-begin text-sm h-10 w-full" />
-                  <p className="text-[10px] text-muted-foreground mt-1">Duração: 1h30 (fim automático)</p>
-                </div>
-
-                {/* Status inicial */}
-                <div>
-                  <label className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider block mb-1.5">Status inicial</label>
-                  <select
-                    value={manualStatus}
-                    onChange={(e) => setManualStatus(e.target.value as "scheduled" | "completed")}
-                    className="input-begin text-sm h-10 w-full"
+            <SectionCard padding="none">
+              <ListRow title={<span className="text-muted-foreground font-normal">Sessão</span>} trailing={<span className="text-sm font-medium text-foreground text-right">{selectedBooking.sessions?.name || "Sem dados"}</span>} />
+              <ListRow
+                title={<span className="text-muted-foreground font-normal">Mentor</span>}
+                trailing={
+                  <>
+                    <span className="text-sm font-medium text-foreground">{getMentorName(selectedBooking.mentor_id)}</span>
+                    <Button variant="ghost" size="sm" onClick={() => setShowMentorSwap((v) => !v)} aria-expanded={showMentorSwap}>Trocar</Button>
+                  </>
+                }
+              />
+              <ListRow
+                title={<span className="text-muted-foreground font-normal">Data e horário</span>}
+                trailing={
+                  <>
+                    <span className="text-sm font-medium text-foreground tabular-nums text-right">
+                      {format(new Date(selectedBooking.scheduled_date + "T12:00:00"), "dd/MM/yyyy")} · {formatTime(selectedBooking.start_time)} às {formatTime(selectedBooking.end_time)}
+                    </span>
+                    <Button variant="ghost" size="sm" onClick={() => setShowDateChange((v) => !v)} aria-expanded={showDateChange}>Alterar</Button>
+                  </>
+                }
+              />
+              <ListRow
+                last
+                title={<span className="text-muted-foreground font-normal">Status</span>}
+                trailing={
+                  <SelectField
+                    aria-label="Alterar status da sessão"
+                    value={editStatus}
+                    disabled={savingStatus}
+                    onChange={(e) => handleStatusChange(e.target.value as RawBookingStatus)}
+                    containerClassName="w-44"
+                    className="h-9"
                   >
                     <option value="scheduled">Agendada</option>
-                    <option value="completed">Realizada (registro histórico)</option>
-                  </select>
+                    <option value="completed">Realizada</option>
+                    <option value="not_realized">Não realizada</option>
+                    <option value="cancelled">Cancelada</option>
+                    {editStatus === "pending_approval" && <option value="pending_approval">Aguardando aprovação</option>}
+                  </SelectField>
+                }
+              />
+            </SectionCard>
+
+            {selectedEffective === "pending_confirmation" && (
+              <Callout tone="warning" icon={Clock} title="O mentor ainda não fechou esta sessão">
+                <p className="mb-3">{PENDING_CONFIRMATION_HINT}</p>
+                <div className="flex flex-col sm:flex-row gap-2">
+                  <Button variant="outline" size="sm" className="flex-1 text-status-green" disabled={savingStatus} onClick={() => closePendingConfirmation(selectedBooking, "completed")}>
+                    <Check className="h-4 w-4" /> Marcar realizada
+                  </Button>
+                  <Button variant="outline" size="sm" className="flex-1 text-status-yellow" disabled={savingStatus} onClick={() => setShowNotRealizedModal(true)}>
+                    <Ban className="h-4 w-4" /> Não realizada
+                  </Button>
                 </div>
+              </Callout>
+            )}
+            {selectedEffective === "awaiting_report" && (
+              <p className="text-xs text-muted-foreground">Marcada como realizada pelo mentor. O relatório ainda não foi salvo.</p>
+            )}
+            {selectedBooking.is_retroactive && (
+              <p className="text-xs text-muted-foreground">Registro histórico lançado pelo administrador (não exige relatório).</p>
+            )}
 
-                {/* Notes */}
-                <div>
-                  <label className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider block mb-1.5">Observações</label>
-                  <textarea
-                    value={manualNotes}
-                    onChange={(e) => setManualNotes(e.target.value)}
-                    className="input-begin text-sm w-full p-3 resize-none h-20"
-                    placeholder="Opcional..."
-                  />
+            {selectedBooking.observations && (
+              <SectionCard padding="compact">
+                <p className="ds-kicker mb-1">Observações</p>
+                <p className="text-sm text-foreground whitespace-pre-wrap">{selectedBooking.observations}</p>
+              </SectionCard>
+            )}
+
+            {selectedBooking.cancellation_reason && (
+              <Callout tone="danger" title="Motivo">{selectedBooking.cancellation_reason}</Callout>
+            )}
+
+            {/* Trocar mentor */}
+            {showMentorSwap && (
+              <SectionCard padding="none" className="border-primary/30">
+                <div className="px-4 pt-3 pb-1 flex items-center justify-between">
+                  <SectionHeader as="h3" title="Trocar mentor" />
+                  <IconButton aria-label="Fechar troca de mentor" size="sm" onClick={() => setShowMentorSwap(false)}><X className="h-4 w-4" /></IconButton>
                 </div>
+                {allMentors.map((m, i) => {
+                  const isCurrent = m.id === selectedBooking.mentor_id;
+                  return (
+                    <ListRow
+                      key={m.id}
+                      last={i === allMentors.length - 1}
+                      onPress={isCurrent ? undefined : () => handleMentorSwap(m.id)}
+                      active={isCurrent}
+                      leading={<UserAvatar name={m.full_name} size={32} />}
+                      title={shortName(m.full_name)}
+                      trailing={isCurrent ? <StatusPill tone="brand" size="sm" withDot={false}>Atual</StatusPill> : undefined}
+                      chevron={!isCurrent}
+                    />
+                  );
+                })}
+              </SectionCard>
+            )}
 
-                {manualConflict && (
-                  <div className="rounded-lg border border-status-yellow/40 bg-status-yellow/10 p-3 text-xs text-foreground">
-                    ⚠ {manualConflict}
-                  </div>
-                )}
-
-                <button
-                  onClick={handleManualBook}
-                  disabled={submittingBook || (manualIsGuest ? !manualGuestName.trim() : !manualLiberty) || !manualSession || !manualMentor || !manualTime || !manualDate}
-                  className="btn-silver w-full text-sm h-11 disabled:opacity-40 disabled:cursor-not-allowed"
-                >
-                  {submittingBook ? "Agendando..." : manualConflict ? "Forçar mesmo assim" : "Criar agendamento"}
-                </button>
-              </div>
-            </motion.div>
-            </div>
-          </>
-        )}
-      </AnimatePresence>
-
-      {/* ═══════ EDIT AVAILABILITY SLOT ═══════ */}
-      <AnimatePresence>
-        {slotEdit && (
-          <>
-            <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="fixed inset-0 bg-background/60 backdrop-blur-sm z-50" onClick={() => setSlotEdit(null)} />
-            <div className="fixed inset-0 z-50 flex items-center justify-center p-4 pointer-events-none">
-              <motion.div initial={{ opacity: 0, scale: 0.96 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.96 }} className="glass-card p-5 w-full max-w-sm space-y-4 pointer-events-auto" style={{ transform: "none" }}>
+            {/* Alterar data/horário */}
+            {showDateChange && (
+              <SectionCard padding="compact" className="border-primary/30 space-y-3">
                 <div className="flex items-center justify-between">
-                  <h2 className="text-base font-semibold text-foreground">Editar disponibilidade</h2>
-                  <button onClick={() => setSlotEdit(null)} className="p-1.5 hover:bg-muted rounded-lg"><X className="h-4 w-4 text-muted-foreground" /></button>
-                </div>
-                <p className="text-xs text-muted-foreground">{getMentorName(slotEdit.mentor_id)}</p>
-                {slotEdit.is_recurring && (
-                  <p className="text-[11px] text-status-yellow bg-status-yellow/10 border border-status-yellow/30 rounded-lg p-2">
-                    Este horário é recorrente semanal. Ao salvar, ele passa a valer apenas para a data escolhida.
-                  </p>
-                )}
-                <div>
-                  <label className="text-xs text-muted-foreground mb-1 block">Data</label>
-                  <input type="date" value={slotEditDate} onChange={(e) => setSlotEditDate(e.target.value)} className="w-full bg-card border border-border rounded-lg px-3 py-2 text-sm text-foreground focus:border-primary/30 focus:outline-none" />
+                  <SectionHeader as="h3" title="Alterar data e horário" />
+                  <IconButton aria-label="Fechar alteração de data" size="sm" onClick={() => setShowDateChange(false)}><X className="h-4 w-4" /></IconButton>
                 </div>
                 <div className="grid grid-cols-2 gap-3">
-                  <div>
-                    <label className="text-xs text-muted-foreground mb-1 block">Início</label>
-                    <input type="time" value={slotEditStart} onChange={(e) => { setSlotEditStart(e.target.value); setSlotEditEnd(addHours(e.target.value, 2)); }} className="w-full bg-card border border-border rounded-lg px-3 py-2 text-sm text-foreground focus:border-primary/30 focus:outline-none" />
-                  </div>
-                  <div>
-                    <label className="text-xs text-muted-foreground mb-1 block">Fim</label>
-                    <input type="time" value={slotEditEnd} onChange={(e) => setSlotEditEnd(e.target.value)} className="w-full bg-card border border-border rounded-lg px-3 py-2 text-sm text-foreground focus:border-primary/30 focus:outline-none" />
-                  </div>
+                  <TextField label="Nova data" type="date" value={newDate} onChange={(e) => setNewDate(e.target.value)} />
+                  <TextField
+                    label="Novo horário (início)"
+                    type="time"
+                    value={newTime}
+                    onChange={(e) => setNewTime(e.target.value)}
+                    hint={`Duração: ${formatDuration(selectedBooking.sessions?.duration_minutes)}${newTime ? ` · fim às ${computeEndTime(newTime, selectedBooking.sessions?.duration_minutes)}` : ""}`}
+                  />
                 </div>
-                <div className="flex gap-2 pt-1">
-                  <button onClick={() => { setSlotDelete(slotEdit); setSlotEdit(null); }} className="px-3 py-2 rounded-lg border border-border text-sm text-destructive hover:bg-destructive/5 flex items-center gap-1.5">
-                    <Trash2 className="h-3.5 w-3.5" /> Excluir
-                  </button>
-                  <button onClick={() => saveSlot(slotEdit, slotEditDate, slotEditStart, slotEditEnd)} className="btn-silver flex-1 py-2 text-sm">Salvar</button>
-                </div>
-              </motion.div>
-            </div>
-          </>
-        )}
-      </AnimatePresence>
+                <Button className="w-full" onClick={handleDateTimeChange}>
+                  <RefreshCw className="h-4 w-4" /> Confirmar alteração
+                </Button>
+              </SectionCard>
+            )}
 
-      {/* ═══════ DELETE AVAILABILITY SLOT ═══════ */}
-      <AnimatePresence>
-        {slotDelete && (
+            <div className="flex flex-col gap-2">
+              {selectedBooking.status !== "completed" && selectedBooking.status !== "cancelled" && !showDateChange && (
+                <Button variant="outline" className="w-full" onClick={() => setShowDateChange(true)}>
+                  <RefreshCw className="h-4 w-4" /> Remarcar
+                </Button>
+              )}
+              {selectedBooking.status !== "cancelled" && selectedBooking.status !== "completed" && (
+                <Button variant="outline" className="w-full text-destructive hover:text-destructive" onClick={() => setShowCancelModal(true)}>
+                  <Ban className="h-4 w-4" /> Cancelar sessão
+                </Button>
+              )}
+              {(selectedBooking.zoom_join_url || selectedBooking.zoom_link) && (
+                <Button variant="outline" className="w-full text-status-blue" asChild>
+                  <a href={selectedBooking.zoom_join_url || selectedBooking.zoom_link || "#"} target="_blank" rel="noopener noreferrer">
+                    <Video className="h-4 w-4" /> Abrir Zoom
+                  </a>
+                </Button>
+              )}
+            </div>
+          </div>
+        )}
+      </BottomSheet>
+
+      {/* ═══════ NÃO REALIZADA (motivo opcional) ═══════ */}
+      <BottomSheet
+        open={showNotRealizedModal && !!selectedBooking}
+        onOpenChange={(o) => { if (!o) { setShowNotRealizedModal(false); setNotRealizedReason(""); } }}
+        title="Marcar como não realizada"
+        description="A sessão sai das realizadas e libera a vaga na jornada. Membro e mentor são notificados."
+        size="sm"
+        locked={savingStatus}
+        footer={
           <>
-            <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="fixed inset-0 bg-background/60 backdrop-blur-sm z-50" onClick={() => setSlotDelete(null)} />
-            <div className="fixed inset-0 z-50 flex items-center justify-center p-4 pointer-events-none">
-              <motion.div initial={{ opacity: 0, scale: 0.96 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.96 }} className="glass-card p-5 w-full max-w-sm space-y-4 pointer-events-auto" style={{ transform: "none" }}>
-                <h2 className="text-base font-semibold text-foreground">Excluir disponibilidade</h2>
-                <p className="text-sm text-muted-foreground">
-                  {getMentorName(slotDelete.mentor_id)} · {format(parseISO(slotDelete.date), "dd/MM/yyyy")} · {formatTime(slotDelete.start_time)}–{formatTime(slotDelete.end_time)}
-                </p>
-                {slotDelete.is_recurring && (
-                  <p className="text-[11px] text-status-yellow bg-status-yellow/10 border border-status-yellow/30 rounded-lg p-2">
-                    Este é um horário recorrente — excluir remove todas as semanas.
-                  </p>
+            <Button variant="ghost" onClick={() => { setShowNotRealizedModal(false); setNotRealizedReason(""); }} disabled={savingStatus}>Voltar</Button>
+            <Button variant="destructive" onClick={handleNotRealized} disabled={savingStatus}>
+              <Ban className="h-4 w-4" /> Confirmar
+            </Button>
+          </>
+        }
+      >
+        <TextAreaField
+          label="Motivo (opcional)"
+          value={notRealizedReason}
+          onChange={(e) => setNotRealizedReason(e.target.value)}
+          placeholder="Ex.: membro não compareceu"
+          rows={3}
+        />
+      </BottomSheet>
+
+      {/* ═══════ CANCELAR SESSÃO (motivo obrigatório) ═══════ */}
+      <BottomSheet
+        open={showCancelModal && !!selectedBooking}
+        onOpenChange={(o) => { if (!o) setShowCancelModal(false); }}
+        title="Cancelar sessão"
+        description="Esta ação cancela a sessão. Aluno e mentor são notificados com o motivo."
+        size="sm"
+        footer={
+          <>
+            <Button variant="ghost" onClick={() => setShowCancelModal(false)}>Voltar</Button>
+            <Button variant="destructive" onClick={handleCancel} disabled={!cancelReason}>
+              <AlertTriangle className="h-4 w-4" /> Confirmar cancelamento
+            </Button>
+          </>
+        }
+      >
+        <TextAreaField
+          label="Motivo *"
+          value={cancelReason}
+          onChange={(e) => setCancelReason(e.target.value)}
+          placeholder="Informe o motivo"
+          rows={3}
+          required
+        />
+      </BottomSheet>
+
+      {/* ═══════ RECUSAR PEDIDO (motivo opcional) ═══════ */}
+      <BottomSheet
+        open={!!rejectTarget}
+        onOpenChange={(o) => { if (!o) setRejectTarget(null); }}
+        title="Recusar horário"
+        description={rejectTarget ? `${rejectTarget.sessions?.name || "Sessão"} · ${participantName(rejectTarget)} · ${formatDayShort(rejectTarget.scheduled_date)} ${formatTime(rejectTarget.start_time)}` : undefined}
+        size="sm"
+        footer={
+          <>
+            <Button variant="ghost" onClick={() => setRejectTarget(null)}>Voltar</Button>
+            <Button
+              variant="destructive"
+              onClick={async () => {
+                if (!rejectTarget) return;
+                const target = rejectTarget;
+                setRejectTarget(null);
+                await rejectPending(target, rejectReason);
+              }}
+            >
+              <Ban className="h-4 w-4" /> Recusar
+            </Button>
+          </>
+        }
+      >
+        <TextAreaField
+          label="Motivo da recusa (opcional)"
+          value={rejectReason}
+          onChange={(e) => setRejectReason(e.target.value)}
+          placeholder="Mentor indisponível"
+          rows={3}
+        />
+      </BottomSheet>
+
+      {/* ═══════ AGENDAR MANUALMENTE ═══════ */}
+      <BottomSheet
+        open={showManualModal}
+        onOpenChange={setShowManualModal}
+        title="Agendar manualmente"
+        description="Crie uma sessão para um membro ou convidado. O término é calculado pela duração da sessão."
+        locked={submittingBook}
+        footer={
+          <>
+            <Button variant="ghost" onClick={() => setShowManualModal(false)} disabled={submittingBook}>Cancelar</Button>
+            <Button
+              onClick={handleManualBook}
+              variant={manualConflict ? "destructive" : "default"}
+              disabled={submittingBook || (manualIsGuest ? !manualGuestName.trim() : !manualLiberty) || !manualSession || !manualMentor || !manualTime || !manualDate}
+            >
+              {submittingBook ? "Agendando" : manualConflict ? "Forçar mesmo assim" : "Criar agendamento"}
+            </Button>
+          </>
+        }
+      >
+        <div className="space-y-4">
+          <div className="space-y-2">
+            <p className="text-sm font-medium text-foreground">Participante</p>
+            <div className="flex gap-2" role="group" aria-label="Tipo de participante">
+              <Chip active={!manualIsGuest} onClick={() => { setManualIsGuest(false); setManualGuestName(""); }}>Membro da plataforma</Chip>
+              <Chip active={manualIsGuest} onClick={() => { setManualIsGuest(true); setManualLiberty(""); setLibertySearch(""); }}>Convidado externo</Chip>
+            </div>
+            {!manualIsGuest ? (
+              <div className="relative">
+                <Search className="absolute left-3 top-[38px] -translate-y-1/2 h-4 w-4 text-muted-foreground pointer-events-none" aria-hidden />
+                <TextField
+                  label="Membro"
+                  value={libertySearch}
+                  onChange={(e) => { setLibertySearch(e.target.value); setManualLiberty(""); }}
+                  placeholder="Buscar membro por nome"
+                  className="pl-10"
+                  hint={manualLiberty ? "Membro selecionado" : undefined}
+                  autoComplete="off"
+                />
+                {libertySearch && !manualLiberty && (
+                  <SectionCard padding="none" className="mt-1 max-h-44 overflow-y-auto" role="listbox" aria-label="Resultados">
+                    {filteredMembers.map((m, i) => (
+                      <ListRow
+                        key={m.id}
+                        last={i === filteredMembers.length - 1}
+                        onPress={() => { setManualLiberty(m.id); setLibertySearch(shortName(m.full_name)); }}
+                        leading={<UserAvatar name={m.full_name} size={28} />}
+                        title={shortName(m.full_name)}
+                        className="min-h-[44px]"
+                      />
+                    ))}
+                    {filteredMembers.length === 0 && <p className="px-4 py-3 text-xs text-muted-foreground">Nenhum membro encontrado</p>}
+                  </SectionCard>
                 )}
-                <div className="flex gap-2">
-                  <button onClick={() => setSlotDelete(null)} className="flex-1 py-2 rounded-lg border border-border text-sm text-muted-foreground hover:text-foreground">Cancelar</button>
-                  <button onClick={() => deleteSlot(slotDelete)} className="flex-1 py-2 rounded-lg bg-destructive text-destructive-foreground text-sm font-medium hover:brightness-110">Excluir</button>
-                </div>
-              </motion.div>
-            </div>
-          </>
-        )}
-      </AnimatePresence>
+              </div>
+            ) : (
+              <TextField
+                label="Convidado"
+                value={manualGuestName}
+                onChange={(e) => setManualGuestName(e.target.value)}
+                placeholder="Nome completo do convidado"
+                maxLength={120}
+              />
+            )}
+          </div>
 
-      {/* ═══════ ADD AVAILABILITY SLOT ═══════ */}
-      <AnimatePresence>
-        {slotAddDate && (
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <SelectField label="Sessão" value={manualSession} onChange={(e) => { setManualSession(e.target.value); setManualMentor(""); setManualConflict(null); }}>
+              <option value="">Selecione</option>
+              {sessionsCatalog.map((s) => (
+                <option key={s.id} value={s.id}>{s.name}</option>
+              ))}
+            </SelectField>
+            <SelectField label="Mentor" value={manualMentor} onChange={(e) => { setManualMentor(e.target.value); setManualConflict(null); }}>
+              <option value="">Selecione</option>
+              {mentorsForSession.map((m) => (
+                <option key={m.id} value={m.id}>{shortName(m.full_name)}</option>
+              ))}
+            </SelectField>
+            <TextField label="Data" type="date" value={manualDate} onChange={(e) => { setManualDate(e.target.value); setManualConflict(null); }} />
+            <TextField
+              label="Horário (início)"
+              type="time"
+              value={manualTime}
+              onChange={(e) => { setManualTime(e.target.value); setManualConflict(null); }}
+              hint={`Duração: ${formatDuration(manualSessionInfo?.duration_minutes)}${manualEndTime ? ` · fim às ${manualEndTime}` : ""}`}
+            />
+            <SelectField
+              containerClassName="sm:col-span-2"
+              label="Status inicial"
+              value={manualStatus}
+              onChange={(e) => setManualStatus(e.target.value as "scheduled" | "completed")}
+              hint={manualStatus === "completed" ? "Conta como realizada na jornada, não exige relatório e não vai para o Google Calendar." : undefined}
+            >
+              <option value="scheduled">Agendada</option>
+              <option value="completed">Realizada (registro histórico)</option>
+            </SelectField>
+            <TextAreaField
+              containerClassName="sm:col-span-2"
+              label="Observações"
+              value={manualNotes}
+              onChange={(e) => setManualNotes(e.target.value)}
+              placeholder="Opcional"
+              rows={3}
+            />
+          </div>
+
+          {manualConflict && (
+            <Callout tone="warning" icon={AlertTriangle} title="Conflito de horário">{manualConflict}</Callout>
+          )}
+        </div>
+      </BottomSheet>
+
+      {/* ═══════ EDITAR DISPONIBILIDADE ═══════ */}
+      <BottomSheet
+        open={!!slotEdit}
+        onOpenChange={(o) => { if (!o) setSlotEdit(null); }}
+        title="Editar disponibilidade"
+        description={slotEdit ? getMentorName(slotEdit.mentor_id) : undefined}
+        size="sm"
+        footer={
+          slotEdit ? (
+            <>
+              <Button variant="outline" className="text-destructive hover:text-destructive" onClick={() => { setSlotDelete(slotEdit); setSlotEdit(null); }}>
+                <Trash2 className="h-4 w-4" /> Excluir
+              </Button>
+              <Button onClick={() => saveSlot(slotEdit, slotEditDate, slotEditStart, slotEditEnd)}>Salvar</Button>
+            </>
+          ) : undefined
+        }
+      >
+        {slotEdit && (
+          <div className="space-y-4">
+            {slotEdit.is_recurring && (
+              <Callout tone="warning" icon={AlertTriangle}>
+                Este horário é recorrente semanal. Ao salvar, ele passa a valer apenas para a data escolhida.
+              </Callout>
+            )}
+            <TextField label="Data" type="date" value={slotEditDate} onChange={(e) => setSlotEditDate(e.target.value)} />
+            <div className="grid grid-cols-2 gap-3">
+              <TextField label="Início" type="time" value={slotEditStart} onChange={(e) => { setSlotEditStart(e.target.value); setSlotEditEnd(addHours(e.target.value, 2)); }} />
+              <TextField label="Fim" type="time" value={slotEditEnd} onChange={(e) => setSlotEditEnd(e.target.value)} />
+            </div>
+          </div>
+        )}
+      </BottomSheet>
+
+      {/* ═══════ EXCLUIR DISPONIBILIDADE ═══════ */}
+      <ConfirmDialog
+        open={!!slotDelete}
+        onOpenChange={(o) => { if (!o) setSlotDelete(null); }}
+        title="Excluir disponibilidade?"
+        description={
+          slotDelete
+            ? `${getMentorName(slotDelete.mentor_id)} · ${format(parseISO(slotDelete.date), "dd/MM/yyyy")} · ${formatTime(slotDelete.start_time)} às ${formatTime(slotDelete.end_time)}${slotDelete.is_recurring ? ". Este é um horário recorrente: excluir remove todas as semanas." : ""}`
+            : undefined
+        }
+        confirmLabel="Excluir"
+        destructive
+        onConfirm={() => { if (slotDelete) deleteSlot(slotDelete); }}
+      />
+
+      {/* ═══════ NOVA DISPONIBILIDADE ═══════ */}
+      <BottomSheet
+        open={!!slotAddDate}
+        onOpenChange={(o) => { if (!o) setSlotAddDate(null); }}
+        title="Nova disponibilidade"
+        description={slotAddDate ? format(parseISO(slotAddDate), "EEEE, dd/MM/yyyy", { locale: ptBR }) : undefined}
+        size="sm"
+        footer={
           <>
-            <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="fixed inset-0 bg-background/60 backdrop-blur-sm z-50" onClick={() => setSlotAddDate(null)} />
-            <div className="fixed inset-0 z-50 flex items-center justify-center p-4 pointer-events-none">
-              <motion.div initial={{ opacity: 0, scale: 0.96 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.96 }} className="glass-card p-5 w-full max-w-sm space-y-4 pointer-events-auto" style={{ transform: "none" }}>
-                <div className="flex items-center justify-between">
-                  <h2 className="text-base font-semibold text-foreground">Nova disponibilidade</h2>
-                  <button onClick={() => setSlotAddDate(null)} className="p-1.5 hover:bg-muted rounded-lg"><X className="h-4 w-4 text-muted-foreground" /></button>
-                </div>
-                <p className="text-xs text-muted-foreground">{format(parseISO(slotAddDate), "dd/MM/yyyy")}</p>
-                <div>
-                  <label className="text-xs text-muted-foreground mb-1 block">Mentor</label>
-                  <select value={slotAddMentor} onChange={(e) => setSlotAddMentor(e.target.value)} className="w-full bg-card border border-border rounded-lg px-3 py-2 text-sm text-foreground focus:border-primary/30 focus:outline-none">
-                    <option value="">Selecione</option>
-                    {allMentors.map((m) => <option key={m.id} value={m.id}>{shortName(m.full_name)}</option>)}
-                  </select>
-                </div>
-                <div>
-                  <label className="text-xs text-muted-foreground mb-1 block">Início (blocos de 2h)</label>
-                  <input type="time" value={slotAddStart} onChange={(e) => setSlotAddStart(e.target.value)} className="w-full bg-card border border-border rounded-lg px-3 py-2 text-sm text-foreground focus:border-primary/30 focus:outline-none" />
-                  <p className="text-[10px] text-muted-foreground mt-1">Término automático: {addHours(slotAddStart, 2)}</p>
-                </div>
-                <button onClick={createSlot} className="btn-silver w-full py-2 text-sm">Adicionar</button>
-              </motion.div>
-            </div>
+            <Button variant="ghost" onClick={() => setSlotAddDate(null)}>Cancelar</Button>
+            <Button onClick={createSlot}><Plus className="h-4 w-4" /> Adicionar</Button>
           </>
-        )}
-      </AnimatePresence>
-
+        }
+      >
+        <div className="space-y-4">
+          <SelectField label="Mentor" value={slotAddMentor} onChange={(e) => setSlotAddMentor(e.target.value)}>
+            <option value="">Selecione</option>
+            {allMentors.map((m) => <option key={m.id} value={m.id}>{shortName(m.full_name)}</option>)}
+          </SelectField>
+          <TextField
+            label="Início (blocos de 2h)"
+            type="time"
+            value={slotAddStart}
+            onChange={(e) => setSlotAddStart(e.target.value)}
+            hint={`Término automático: ${addHours(slotAddStart, 2)}`}
+          />
+        </div>
+      </BottomSheet>
     </AppLayout>
   );
 };

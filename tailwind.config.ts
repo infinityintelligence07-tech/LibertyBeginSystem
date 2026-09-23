@@ -14,7 +14,23 @@ export default {
     },
     extend: {
       fontFamily: {
-        sans: ['"Plus Jakarta Sans"', 'sans-serif'],
+        sans: ["var(--ds-font)"],
+        mono: ["var(--ds-font-mono)"],
+      },
+      transitionTimingFunction: {
+        ds: "var(--ds-ease)",
+        "ds-out": "var(--ds-ease-out)",
+        "ds-spring": "var(--ds-ease-spring)",
+      },
+      transitionDuration: {
+        "ds-1": "120ms",
+        "ds-2": "200ms",
+        "ds-3": "320ms",
+      },
+      boxShadow: {
+        "ds-1": "var(--ds-shadow-1)",
+        "ds-2": "var(--ds-shadow-2)",
+        "ds-3": "var(--ds-shadow-3)",
       },
       colors: {
         border: "hsl(var(--border))",
@@ -69,6 +85,7 @@ export default {
         "status-yellow": "hsl(var(--status-yellow))",
         "status-red": "hsl(var(--status-red))",
         "status-blue": "hsl(var(--status-blue))",
+        "status-orange": "hsl(var(--status-orange))",
         surface: {
           DEFAULT: "hsl(var(--bg-surface))",
           2: "hsl(var(--bg-surface-2))",
@@ -78,6 +95,9 @@ export default {
         lg: "var(--radius)",
         md: "calc(var(--radius) - 2px)",
         sm: "calc(var(--radius) - 4px)",
+        ds: "var(--ds-radius-md)",
+        "ds-lg": "var(--ds-radius-lg)",
+        "ds-xl": "var(--ds-radius-xl)",
       },
       keyframes: {
         "accordion-down": {

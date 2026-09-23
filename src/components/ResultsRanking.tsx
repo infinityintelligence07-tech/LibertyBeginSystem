@@ -1,8 +1,9 @@
 import { useState, useMemo } from "react";
-import { Trophy, TrendingUp, MessageSquare, Filter } from "lucide-react";
+import { Trophy, TrendingUp, MessageSquare } from "lucide-react";
 import { motion } from "framer-motion";
 import { fadeUpItem } from "@/lib/animations";
-import { shortName, initials } from "@/lib/formatName";
+import { shortName } from "@/lib/formatName";
+import { Chip, EmptyState, SectionCard, SectionHeader } from "@/components/ds";
 
 type Task = {
   id: string;
@@ -58,40 +59,28 @@ export const ResultsRanking = ({ tasks, profileMap }: Props) => {
 
   return (
     <motion.div variants={fadeUpItem} className="space-y-4">
-      <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2">
-        <h2 className="text-lg font-semibold text-foreground flex items-center gap-2">
-          <Trophy className="h-5 w-5 text-status-yellow" />
-          Ranking de Resultados
-        </h2>
-        <div className="flex flex-wrap items-center gap-1 min-w-0">
-          <Filter className="h-3.5 w-3.5 text-muted-foreground mr-1 shrink-0" />
-          {filters.map((f) => (
-            <button
-              key={f.key}
-              onClick={() => setFilter(f.key)}
-              className={`text-xs px-3 py-1.5 rounded-full border transition-colors ${
-                filter === f.key
-                  ? "bg-primary/10 text-primary border-primary/30"
-                  : "bg-card text-muted-foreground border-border hover:border-primary/20"
-              }`}
-            >
-              {f.label}
-            </button>
-          ))}
-        </div>
-      </div>
+      <SectionHeader
+        title="Ranking de resultados"
+        actions={
+          <div className="flex flex-wrap items-center gap-2" role="group" aria-label="Filtrar por tipo de resultado">
+            {filters.map((f) => (
+              <Chip key={f.key} active={filter === f.key} onClick={() => setFilter(f.key)}>
+                {f.icon && <f.icon className="h-3.5 w-3.5" aria-hidden />}
+                {f.label}
+              </Chip>
+            ))}
+          </div>
+        }
+      />
 
       {ranking.length === 0 ? (
-        <div className="glass-card p-6 text-center">
-          <Trophy className="h-6 w-6 text-muted-foreground/40 mx-auto mb-2" />
-          <p className="text-sm text-muted-foreground">Nenhum resultado registrado ainda</p>
-        </div>
+        <EmptyState icon={Trophy} title="Nenhum resultado registrado ainda" compact />
       ) : (
         <div className="space-y-3">
           {ranking.slice(0, 10).map((member, i) => (
-            <div key={member.name} className="glass-card p-4">
+            <SectionCard key={member.name} padding="compact">
               <div className="flex items-center gap-3 mb-2">
-                <div className={`w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold ${
+                <div className={`w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold tabular-nums shrink-0 ${
                   i === 0 ? "bg-status-yellow/20 text-status-yellow" :
                   i === 1 ? "bg-muted text-foreground" :
                   i === 2 ? "bg-primary/10 text-primary" :
@@ -99,8 +88,8 @@ export const ResultsRanking = ({ tasks, profileMap }: Props) => {
                 }`}>
                   {i + 1}º
                 </div>
-                <div className="flex-1">
-                  <p className="text-sm font-medium text-foreground">{shortName(member.name)}</p>
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm font-medium text-foreground truncate">{shortName(member.name)}</p>
                   <p className="text-xs text-muted-foreground">{member.count} resultado{member.count !== 1 ? "s" : ""}</p>
                 </div>
               </div>
@@ -108,9 +97,9 @@ export const ResultsRanking = ({ tasks, profileMap }: Props) => {
                 {member.results.slice(0, 3).map((r) => (
                   <div key={r.id} className="flex items-start gap-2 text-xs">
                     {r.result_type === "quantitative" ? (
-                      <TrendingUp className="h-3 w-3 text-status-green mt-0.5 shrink-0" />
+                      <TrendingUp className="h-3 w-3 text-status-green mt-0.5 shrink-0" aria-hidden />
                     ) : (
-                      <MessageSquare className="h-3 w-3 text-status-blue mt-0.5 shrink-0" />
+                      <MessageSquare className="h-3 w-3 text-status-blue mt-0.5 shrink-0" aria-hidden />
                     )}
                     <div>
                       <span className="text-foreground">{r.description}</span>
@@ -123,10 +112,10 @@ export const ResultsRanking = ({ tasks, profileMap }: Props) => {
                   </div>
                 ))}
                 {member.results.length > 3 && (
-                  <p className="text-[10px] text-muted-foreground">+{member.results.length - 3} mais</p>
+                  <p className="text-[11px] text-muted-foreground">+{member.results.length - 3} mais</p>
                 )}
               </div>
-            </div>
+            </SectionCard>
           ))}
         </div>
       )}

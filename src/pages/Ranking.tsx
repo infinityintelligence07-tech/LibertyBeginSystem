@@ -3,23 +3,29 @@ import { useRankingData, DEMO_TESTIMONIALS } from "@/hooks/useRankingData";
 import { useDemoData } from "@/contexts/DemoDataContext";
 import { useAuth } from "@/hooks/useAuth";
 import { useViewAs } from "@/contexts/ViewAsContext";
-import { Trophy, Medal, Star } from "lucide-react";
+import { Medal, Star } from "lucide-react";
 import { shortName } from "@/lib/formatName";
-import { Loader2 } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { useQuery } from "@tanstack/react-query";
-
-const initials = (name: string) => {
-  const parts = name.trim().split(/\s+/);
-  return ((parts[0]?.[0] || "") + (parts[parts.length - 1]?.[0] || "")).toUpperCase() || "?";
-};
+import { UserAvatar } from "@/components/UserAvatar";
+import {
+  EmptyState,
+  ErrorState,
+  ListRow,
+  LoadingState,
+  PageContainer,
+  PageHeader,
+  SectionCard,
+  SectionHeader,
+  StatusPill,
+} from "@/components/ds";
 
 const RankingPage = () => {
   const { profile, roles } = useAuth();
   const { viewAs, canSwitch } = useViewAs();
   const actualRole = roles.includes("admin") || roles.includes("super_admin") ? "admin" : roles.includes("mentor") ? "mentor" : "liberty";
   const role = canSwitch ? (viewAs ?? actualRole) : actualRole;
-  const { data: members = [], isLoading } = useRankingData();
+  const { data: members = [], isLoading, isError, refetch } = useRankingData();
   const { demoEnabled } = useDemoData();
 
   const { data: liveTestimonials = [] } = useQuery({
@@ -43,116 +49,118 @@ const RankingPage = () => {
 
   return (
     <AppLayout role={role as any}>
-      <div className="max-w-5xl mx-auto space-y-8">
-        <div className="flex items-center gap-3">
-          <div className="h-11 w-11 rounded-2xl bg-primary/10 flex items-center justify-center">
-            <Trophy className="h-5 w-5 text-primary" />
-          </div>
-          <div>
-            <h1 className="text-2xl font-semibold text-foreground">Ranking Liberty</h1>
-            <p className="text-sm text-muted-foreground">Destaques da comunidade e top resultados do mês.</p>
-          </div>
-        </div>
+      <PageContainer>
+        <PageHeader
+          eyebrow="Comunidade"
+          title="Ranking Liberty"
+          description="Destaques da comunidade e top resultados do mês."
+        />
+
+        {isError && <ErrorState compact onRetry={() => refetch()} />}
 
         {isLoading ? (
-          <div className="flex justify-center py-12"><Loader2 className="h-6 w-6 animate-spin text-muted-foreground" /></div>
+          <LoadingState variant="page" />
         ) : (
           <>
-            {/* Featured (up to 3) */}
+            {/* Destaques (até 3) */}
             {featured.length > 0 && (
               <section className="space-y-3">
-                <div className="flex items-center gap-2 text-primary text-[10px] font-semibold uppercase tracking-wider">
-                  <Star className="h-3.5 w-3.5" /> Destaques
-                </div>
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                <SectionHeader title="Destaques" />
+                <ol className="grid grid-cols-1 md:grid-cols-3 gap-3 list-none m-0 p-0">
                   {featured.map((m, idx) => (
-                    <div
-                      key={m.id}
-                      className="rounded-2xl border border-primary/40 bg-gradient-to-br from-primary/10 to-transparent p-5 flex items-center gap-4"
-                    >
-                      <div className="relative">
-                        {m.photo_url ? (
-                          <img src={m.photo_url} alt={m.full_name} className="h-16 w-16 rounded-full object-cover" />
-                        ) : (
-                          <div className="h-16 w-16 rounded-full bg-primary/20 flex items-center justify-center text-lg font-bold text-primary">
-                            {initials(m.full_name)}
-                          </div>
-                        )}
-                        <div className="absolute -bottom-1 -right-1 h-6 w-6 rounded-full bg-primary text-primary-foreground flex items-center justify-center text-xs font-bold border-2 border-card">
-                          {idx + 1}
+                    <li key={m.id}>
+                      <SectionCard tone="brand" padding="compact" className="flex items-center gap-4 h-full">
+                        <div className="relative shrink-0">
+                          <UserAvatar name={m.full_name} avatarUrl={m.photo_url ?? undefined} size={56} />
+                          <span
+                            className="absolute -bottom-1 -right-1 h-6 w-6 rounded-full bg-primary text-primary-foreground flex items-center justify-center text-xs font-bold ring-2 ring-card"
+                            aria-label={`${idx + 1}º lugar`}
+                          >
+                            {idx + 1}
+                          </span>
                         </div>
-                      </div>
-                      <div className="min-w-0">
-                        <p className="text-sm font-semibold text-foreground truncate">{shortName(m.full_name)}</p>
-                        {m.company_name && <p className="text-xs text-muted-foreground truncate">{m.company_name}</p>}
-                        <p className="text-xs text-primary font-semibold mt-1 tabular-nums">{m.points} pts</p>
-                      </div>
-                    </div>
+                        <div className="min-w-0">
+                          <p className="text-[15px] font-semibold text-foreground truncate">{shortName(m.full_name)}</p>
+                          {m.company_name && <p className="text-xs text-muted-foreground truncate">{m.company_name}</p>}
+                          <p className="text-xs text-primary font-semibold mt-1 tabular-nums">{m.points} pts</p>
+                        </div>
+                      </SectionCard>
+                    </li>
                   ))}
-                </div>
+                </ol>
               </section>
             )}
 
-            {/* Top list */}
+            {/* Top resultados */}
             <section className="space-y-3">
-              <div className="flex items-center gap-2 text-muted-foreground text-[10px] font-semibold uppercase tracking-wider">
-                <Medal className="h-3.5 w-3.5" /> Top resultados
-              </div>
-              <div className="rounded-2xl border border-border bg-card/70 divide-y divide-border">
-                {rest.length === 0 ? (
-                  <p className="p-6 text-center text-sm text-muted-foreground">Ainda sem resultados registrados.</p>
-                ) : (
-                  rest.map((m, i) => {
-                    const rank = i + 1;
-                    return (
-                      <div key={m.id} className="flex items-center gap-3 p-3">
-                        <span className="w-6 text-center text-sm font-bold tabular-nums text-muted-foreground">{rank}</span>
-                        {m.photo_url ? (
-                          <img src={m.photo_url} alt={m.full_name} className="h-10 w-10 rounded-full object-cover" />
-                        ) : (
-                          <div className="h-10 w-10 rounded-full bg-muted flex items-center justify-center text-xs font-bold text-muted-foreground">
-                            {initials(m.full_name)}
-                          </div>
-                        )}
-                        <div className="min-w-0 flex-1">
-                          <p className="text-sm font-medium text-foreground truncate">{shortName(m.full_name)}</p>
-                          <div className="flex items-center gap-1.5 flex-wrap">
-                            {m.role_label && (
-                              <span className="text-[9px] uppercase tracking-wider font-semibold text-primary/80 bg-primary/10 rounded px-1.5 py-0.5">
-                                {m.role_label}
-                              </span>
-                            )}
-                            {m.company_name && <p className="text-xs text-muted-foreground truncate">{m.company_name}</p>}
-                          </div>
-                        </div>
-                        <span className="text-sm font-semibold text-primary tabular-nums">{m.points ?? 0}<span className="text-[10px] text-muted-foreground ml-1">pts</span></span>
-                      </div>
-                    );
-                  })
-                )}
-              </div>
+              <SectionHeader title="Top resultados" />
+              {rest.length === 0 ? (
+                <EmptyState
+                  icon={Medal}
+                  title="Ainda sem resultados registrados"
+                  description="Os resultados enviados pelos membros e validados pela equipe aparecem aqui."
+                  compact
+                />
+              ) : (
+                <SectionCard padding="none">
+                  <ol className="list-none m-0 p-0">
+                    {rest.map((m, i) => {
+                      const rank = i + 1;
+                      return (
+                        <li key={m.id}>
+                        <ListRow
+                          last={i === rest.length - 1}
+                          active={m.id === profile?.id}
+                          leading={
+                            <div className="flex items-center gap-2">
+                              <span className="w-6 text-center text-sm font-bold tabular-nums text-muted-foreground">{rank}</span>
+                              <UserAvatar name={m.full_name} avatarUrl={m.photo_url ?? undefined} size={40} />
+                            </div>
+                          }
+                          title={shortName(m.full_name)}
+                          subtitle={
+                            <span className="flex items-center gap-1.5 flex-wrap">
+                              {m.role_label && <StatusPill tone="brand" size="sm" withDot={false}>{m.role_label}</StatusPill>}
+                              {m.company_name && <span className="truncate">{m.company_name}</span>}
+                            </span>
+                          }
+                          trailing={
+                            <span className="text-sm font-semibold text-primary tabular-nums">
+                              {m.points ?? 0}<span className="text-xs text-muted-foreground ml-1">pts</span>
+                            </span>
+                          }
+                        />
+                        </li>
+                      );
+                    })}
+                  </ol>
+                </SectionCard>
+              )}
             </section>
 
-            {/* Recent testimonials */}
+            {/* Depoimentos recentes */}
             {myTestimonials.length > 0 && (
               <section className="space-y-3">
-                <div className="flex items-center gap-2 text-muted-foreground text-[10px] font-semibold uppercase tracking-wider">
-                  <Star className="h-3.5 w-3.5" /> Depoimentos recentes
-                </div>
+                <SectionHeader title="Depoimentos recentes" />
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                   {myTestimonials.map((t: any) => {
                     const m = members.find((mm) => mm.id === t.member_id);
                     return (
-                      <div key={t.id} className="rounded-2xl border border-border bg-card/70 p-4 space-y-2">
-                        <p className="text-sm font-semibold text-foreground">{t.headline}</p>
-                        <p className="text-xs text-muted-foreground leading-relaxed line-clamp-4">{t.content}</p>
+                      <SectionCard key={t.id} as="article" padding="compact" className="space-y-2">
+                        <div className="flex items-start gap-2">
+                          <Star className="h-4 w-4 text-primary shrink-0 mt-0.5" aria-hidden />
+                          <p className="text-[15px] font-semibold text-foreground">{t.headline}</p>
+                        </div>
+                        <p className="text-sm text-muted-foreground leading-relaxed line-clamp-4">{t.content}</p>
                         {t.result_metric && (
                           <p className="text-xs text-primary font-semibold">Resultado: {t.result_metric}</p>
                         )}
                         {m && (
-                          <p className="text-[11px] text-muted-foreground pt-1 border-t border-border">{shortName(m.full_name)}{m.company_name ? ` · ${m.company_name}` : ""}</p>
+                          <p className="text-xs text-muted-foreground pt-2 border-t border-border">
+                            {shortName(m.full_name)}{m.company_name ? ` · ${m.company_name}` : ""}
+                          </p>
                         )}
-                      </div>
+                      </SectionCard>
                     );
                   })}
                 </div>
@@ -160,7 +168,7 @@ const RankingPage = () => {
             )}
           </>
         )}
-      </div>
+      </PageContainer>
     </AppLayout>
   );
 };

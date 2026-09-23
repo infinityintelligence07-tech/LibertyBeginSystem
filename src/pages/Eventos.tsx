@@ -1,9 +1,8 @@
 import { useEffect, useState } from "react";
-import { motion } from "framer-motion";
 import { AppLayout } from "@/components/AppLayout";
 import { CalendarDays, MapPin, Clock, ExternalLink, Video, Check, X, Users } from "lucide-react";
-import { staggerContainer, fadeUpItem } from "@/lib/animations";
-import { EmptyState } from "@/components/EmptyState";
+import { Button } from "@/components/ui/button";
+import { EmptyState, LoadingState, PageContainer, PageHeader, SectionCard, StatusPill } from "@/components/ds";
 import { supabase } from "@/integrations/supabase/client";
 import { format, parseISO } from "date-fns";
 import { ptBR } from "date-fns/locale";
@@ -90,28 +89,19 @@ const EventosPage = () => {
 
   return (
     <AppLayout role="liberty">
-      <motion.div variants={staggerContainer} initial="hidden" animate="show" className="space-y-8">
-        <motion.div variants={fadeUpItem}>
-          <h1 className="text-2xl font-semibold text-foreground">Eventos</h1>
-          <p className="text-muted-foreground text-sm">Próximos encontros e eventos exclusivos</p>
-        </motion.div>
+      <PageContainer>
+        <PageHeader title="Eventos" description="Próximos encontros e eventos exclusivos" />
 
         {loading ? (
-          <div className="space-y-4">
-            {[0, 1].map((i) => (
-              <div key={i} className="glass-card p-6 h-32 animate-pulse" />
-            ))}
-          </div>
+          <LoadingState variant="cards" rows={2} />
         ) : events.length === 0 ? (
-          <motion.div variants={fadeUpItem}>
-            <EmptyState
-              icon={CalendarDays}
-              title="Nenhum evento agendado"
-              description="Assim que um novo encontro for confirmado, ele aparecerá aqui."
-            />
-          </motion.div>
+          <EmptyState
+            icon={CalendarDays}
+            title="Nenhum evento agendado"
+            description="Assim que um novo encontro for confirmado, ele aparecerá aqui."
+          />
         ) : (
-          <motion.div variants={staggerContainer} className="space-y-6">
+          <ul className="space-y-4 list-none m-0 p-0">
             {events.map((event) => {
               const myStatus = rsvps[event.id];
               const deadlinePassed = event.rsvp_deadline
@@ -120,113 +110,114 @@ const EventosPage = () => {
               const going = counts[event.id] || 0;
               const isFull = event.capacity != null && going >= event.capacity && myStatus !== "going";
               const canRsvp = event.rsvp_enabled !== false && !deadlinePassed && !isFull;
+              const saving = savingId === event.id;
 
               return (
-                <motion.div key={event.id} variants={fadeUpItem} className="glass-card p-6 overflow-hidden">
-                  <div className="flex-1 min-w-0">
-                    <h3 className="text-lg font-medium text-foreground mb-3 break-words">{event.title}</h3>
-
-                    <div className="space-y-2 text-sm text-muted-foreground">
-                      <div className="flex items-center gap-2">
-                        <CalendarDays className="h-4 w-4 text-primary shrink-0" />
-                        <span>{format(parseISO(event.event_date), "dd 'de' MMMM 'de' yyyy", { locale: ptBR })}</span>
+                <li key={event.id}>
+                  <SectionCard as="article" padding="none" className="overflow-hidden">
+                    {event.cover_image_url && (
+                      <div className="aspect-video bg-muted">
+                        <img src={event.cover_image_url} alt="" className="h-full w-full object-cover" loading="lazy" />
                       </div>
-                      {event.event_time && (
-                        <div className="flex items-center gap-2">
-                          <Clock className="h-4 w-4 text-primary shrink-0" />
-                          <span>{event.event_time}</span>
-                        </div>
-                      )}
-                      {(event.location || event.is_online) && (
-                        <div className="flex items-start gap-2">
-                          {event.is_online ? (
-                            <Video className="h-4 w-4 text-primary shrink-0 mt-0.5" />
-                          ) : (
-                            <MapPin className="h-4 w-4 text-primary shrink-0 mt-0.5" />
-                          )}
-                          <div className="min-w-0">
-                            <span className="break-words">{event.location || "Online"}</span>
-                            {event.location_url && (
-                              <a
-                                href={event.location_url}
-                                target="_blank"
-                                rel="noopener noreferrer"
-                                className="ml-2 inline-flex items-center gap-1 text-primary hover:text-silver-light transition-colors"
-                              >
-                                Abrir <ExternalLink className="h-3 w-3" />
-                              </a>
-                            )}
-                          </div>
-                        </div>
-                      )}
-                      {going > 0 && (
-                        <div className="flex items-center gap-2">
-                          <Users className="h-4 w-4 text-primary shrink-0" />
-                          <span>
-                            {going} confirmado{going !== 1 ? "s" : ""}
-                            {event.capacity ? ` de ${event.capacity} vagas` : ""}
-                          </span>
-                        </div>
-                      )}
-                    </div>
-
-                    {event.description && (
-                      <p className="text-sm text-muted-foreground mt-4 break-words">{event.description}</p>
                     )}
+                    <div className="p-4 sm:p-6">
+                      <div className="flex flex-wrap items-start justify-between gap-2">
+                        <h2 className="text-[17px] font-semibold text-foreground break-words">{event.title}</h2>
+                        {myStatus === "going" && <StatusPill tone="success">Presença confirmada</StatusPill>}
+                        {myStatus === "not_going" && <StatusPill tone="neutral">Não vai participar</StatusPill>}
+                      </div>
 
-                    {/* Confirmação de presença */}
-                    <div className="mt-5 pt-4 border-t border-border/40">
-                      {myStatus && (
-                        <p className="text-xs mb-2.5">
-                          {myStatus === "going" ? (
-                            <span className="text-status-green font-medium">Presença confirmada ✦</span>
-                          ) : (
-                            <span className="text-muted-foreground">Você marcou que não vai participar.</span>
-                          )}
-                        </p>
-                      )}
-                      {canRsvp ? (
-                        <div className="flex flex-wrap gap-2">
-                          <button
-                            disabled={savingId === event.id}
-                            onClick={() => setRsvp(event.id, "going")}
-                            className={`text-xs px-4 py-2 rounded-lg flex items-center gap-1.5 transition-colors disabled:opacity-50 ${
-                              myStatus === "going"
-                                ? "bg-status-green/15 text-status-green border border-status-green/30"
-                                : "btn-silver"
-                            }`}
-                          >
-                            <Check className="h-3.5 w-3.5" /> Confirmar presença
-                          </button>
-                          <button
-                            disabled={savingId === event.id}
-                            onClick={() => setRsvp(event.id, "not_going")}
-                            className={`text-xs px-4 py-2 rounded-lg border flex items-center gap-1.5 transition-colors disabled:opacity-50 ${
-                              myStatus === "not_going"
-                                ? "border-status-red/40 text-status-red bg-status-red/10"
-                                : "border-border text-muted-foreground hover:text-foreground"
-                            }`}
-                          >
-                            <X className="h-3.5 w-3.5" /> Não vou participar
-                          </button>
+                      <dl className="mt-3 space-y-2 text-sm text-muted-foreground">
+                        <div className="flex items-center gap-2">
+                          <dt className="sr-only">Data</dt>
+                          <CalendarDays className="h-4 w-4 text-primary shrink-0" aria-hidden />
+                          <dd>{format(parseISO(event.event_date), "dd 'de' MMMM 'de' yyyy", { locale: ptBR })}</dd>
                         </div>
-                      ) : (
-                        <p className="text-xs text-muted-foreground">
-                          {isFull
-                            ? "As vagas para este evento foram preenchidas."
-                            : deadlinePassed
-                              ? "O prazo de confirmação para este evento encerrou."
-                              : "Confirmação de presença não habilitada para este evento."}
-                        </p>
+                        {event.event_time && (
+                          <div className="flex items-center gap-2">
+                            <dt className="sr-only">Horário</dt>
+                            <Clock className="h-4 w-4 text-primary shrink-0" aria-hidden />
+                            <dd>{event.event_time}</dd>
+                          </div>
+                        )}
+                        {(event.location || event.is_online) && (
+                          <div className="flex items-start gap-2">
+                            <dt className="sr-only">Local</dt>
+                            {event.is_online ? (
+                              <Video className="h-4 w-4 text-primary shrink-0 mt-0.5" aria-hidden />
+                            ) : (
+                              <MapPin className="h-4 w-4 text-primary shrink-0 mt-0.5" aria-hidden />
+                            )}
+                            <dd className="min-w-0">
+                              <span className="break-words">{event.location || "Online"}</span>
+                              {event.location_url && (
+                                <a
+                                  href={event.location_url}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  className="ml-2 inline-flex items-center gap-1 text-primary hover:underline"
+                                >
+                                  Abrir <ExternalLink className="h-3 w-3" aria-hidden />
+                                </a>
+                              )}
+                            </dd>
+                          </div>
+                        )}
+                        {going > 0 && (
+                          <div className="flex items-center gap-2">
+                            <dt className="sr-only">Confirmados</dt>
+                            <Users className="h-4 w-4 text-primary shrink-0" aria-hidden />
+                            <dd className="tabular-nums">
+                              {going} confirmado{going !== 1 ? "s" : ""}
+                              {event.capacity ? ` de ${event.capacity} vagas` : ""}
+                            </dd>
+                          </div>
+                        )}
+                      </dl>
+
+                      {event.description && (
+                        <p className="text-sm text-muted-foreground mt-4 break-words">{event.description}</p>
                       )}
+
+                      {/* Confirmação de presença */}
+                      <div className="mt-5 pt-4 border-t border-border">
+                        {canRsvp ? (
+                          <div className="flex flex-wrap gap-2">
+                            <Button
+                              variant={myStatus === "going" ? "secondary" : "default"}
+                              disabled={saving}
+                              aria-pressed={myStatus === "going"}
+                              onClick={() => setRsvp(event.id, "going")}
+                            >
+                              <Check className="h-4 w-4" aria-hidden /> Confirmar presença
+                            </Button>
+                            <Button
+                              variant="outline"
+                              disabled={saving}
+                              aria-pressed={myStatus === "not_going"}
+                              onClick={() => setRsvp(event.id, "not_going")}
+                            >
+                              <X className="h-4 w-4" aria-hidden /> Não vou participar
+                            </Button>
+                          </div>
+                        ) : (
+                          <p className="text-sm text-muted-foreground">
+                            {isFull
+                              ? "As vagas para este evento foram preenchidas."
+                              : deadlinePassed
+                                ? "O prazo de confirmação para este evento encerrou."
+                                : "Confirmação de presença não habilitada para este evento."}
+                          </p>
+                        )}
+                      </div>
                     </div>
-                  </div>
-                </motion.div>
+                  </SectionCard>
+                </li>
               );
             })}
-          </motion.div>
+          </ul>
         )}
-      </motion.div>
+      </PageContainer>
     </AppLayout>
   );
 };

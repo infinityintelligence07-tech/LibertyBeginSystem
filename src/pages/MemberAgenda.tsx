@@ -1,7 +1,21 @@
 import { useState, useMemo } from "react";
 import { motion } from "framer-motion";
 import { AppLayout } from "@/components/AppLayout";
-import { Calendar, Clock, ChevronLeft, ChevronRight, ExternalLink, Target } from "lucide-react";
+import { Calendar, Clock, ChevronLeft, ChevronRight, ExternalLink, Target, User } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import {
+  BottomSheet,
+  DateBlock,
+  EmptyState as DsEmptyState,
+  ErrorState,
+  IconButton,
+  ListRow,
+  LoadingState,
+  PageContainer,
+  PageHeader,
+  SectionCard,
+  StatusPill,
+} from "@/components/ds";
 import { staggerContainer, fadeUpItem } from "@/lib/animations";
 import { useAuth } from "@/hooks/useAuth";
 import { supabase } from "@/integrations/supabase/client";
@@ -16,9 +30,17 @@ import {
   demoBookingsForMember, demoTasksForBookings,
   demoMentorProfiles, mergeDemoSessions,
 } from "@/lib/demoForUser";
-import { getEffectiveBookingStatus, isVisibleSessionBooking, sortByScheduledDateAsc } from "@/lib/bookingStatus";
-import { StatusBadge } from "@/components/StatusBadge";
-import { EmptyState } from "@/components/EmptyState";
+import {
+  bookingStatusConfig,
+  getEffectiveBookingStatus,
+  isVisibleSessionBooking,
+  PENDING_CONFIRMATION_HINT,
+  sortByScheduledDateAsc,
+  todayPlatformDate,
+} from "@/lib/bookingStatus";
+
+/** Status que aparecem na agenda do membro: futuras, aguardando aprovação e as de hoje ainda "A confirmar". */
+const AGENDA_STATUSES = new Set(["scheduled", "pending_approval", "pending_confirmation"]);
 
 const MemberAgendaPage = () => {
   const { profile } = useAuth();
@@ -26,28 +48,30 @@ const MemberAgendaPage = () => {
   const [currentMonth, setCurrentMonth] = useState(new Date());
   const [expandedBooking, setExpandedBooking] = useState<string | null>(null);
 
-  const today = useMemo(() => {
-    const d = new Date();
-    d.setHours(0, 0, 0, 0);
-    return d;
-  }, []);
-  const monthStart = startOfMonth(currentMonth);
-  const monthEnd = addMonths(monthStart, 1);
-  // Always from today forward — never show past sessions on the member agenda
-  const queryStart = monthStart > today ? monthStart : today;
+  // "Hoje" no fuso da plataforma (São Paulo), não no fuso do navegador.
+  const today = useMemo(() => parseISO(todayPlatformDate()), []);
+  const { queryStart, monthEnd } = useMemo(() => {
+    const monthStart = startOfMonth(currentMonth);
+    const end = addMonths(monthStart, 1);
+    // Sempre de hoje em diante: a agenda do membro não mostra sessões passadas.
+    return { queryStart: monthStart > today ? monthStart : today, monthEnd: end };
+  }, [currentMonth, today]);
+  const queryStartStr = format(queryStart, "yyyy-MM-dd");
+  const monthEndStr = format(monthEnd, "yyyy-MM-dd");
 
-  const { data: _bookings = [], isLoading } = useQuery({
-    queryKey: ["member-agenda", profile?.id, queryStart.toISOString()],
+  const { data: _bookings = [], isLoading, isError, refetch } = useQuery({
+    queryKey: ["member-agenda", profile?.id, queryStartStr, monthEndStr],
     queryFn: async () => {
       if (!profile?.id) return [];
-      const { data } = await supabase
+      const { data, error } = await supabase
         .from("bookings")
         .select("*")
         .eq("liberty_id", profile.id)
-        .gte("scheduled_date", format(queryStart, "yyyy-MM-dd"))
-        .lt("scheduled_date", format(monthEnd, "yyyy-MM-dd"))
+        .gte("scheduled_date", queryStartStr)
+        .lt("scheduled_date", monthEndStr)
         .order("scheduled_date", { ascending: true })
         .order("start_time", { ascending: true });
+      if (error) throw error;
       return data || [];
     },
     enabled: !!profile?.id,
@@ -59,16 +83,17 @@ const MemberAgendaPage = () => {
       const d = parseISO(b.scheduled_date);
       return d >= queryStart && d < monthEnd;
     });
-  }, [demoEnabled, profile?.id, queryStart.toISOString(), monthEnd.toISOString()]);
+  }, [demoEnabled, profile?.id, queryStart, monthEnd]);
   // Mostramos confirmadas e pendentes de aprovação. Canceladas ficam fora da agenda do aluno.
   const bookings = (demoEnabled ? [..._bookings, ...demoBks] : _bookings).filter(isVisibleSessionBooking);
 
-  const mentorIds = [...new Set(bookings.map((b) => b.mentor_id))];
+  const mentorIds = [...new Set(bookings.map((b) => b.mentor_id).filter((id) => !id.startsWith("demo-")))];
   const { data: _mentorProfiles = [] } = useQuery({
     queryKey: ["member-agenda-mentors", mentorIds],
     queryFn: async () => {
       if (!mentorIds.length) return [];
-      const { data } = await supabase.from("profiles").select("id, full_name").in("id", mentorIds);
+      const { data, error } = await supabase.from("profiles").select("id, full_name").in("id", mentorIds);
+      if (error) throw error;
       return data || [];
     },
     enabled: mentorIds.length > 0,
@@ -78,11 +103,12 @@ const MemberAgendaPage = () => {
   const { data: _sessions = [] } = useQuery({
     queryKey: ["sessions-list-member"],
     queryFn: async () => {
-      const { data } = await supabase.from("sessions").select("id, name, cover_image_url").order("order");
+      const { data, error } = await supabase.from("sessions").select("id, name, cover_image_url").order("order");
+      if (error) throw error;
       return data || [];
     },
   });
-  const sessions = demoEnabled ? mergeDemoSessions(_sessions as any[]) : _sessions;
+  const sessions = demoEnabled ? mergeDemoSessions(_sessions) : _sessions;
 
 
   const realBookingIds = _bookings.map((b) => b.id);
@@ -90,193 +116,212 @@ const MemberAgendaPage = () => {
     queryKey: ["member-agenda-tasks", realBookingIds],
     queryFn: async () => {
       if (!realBookingIds.length) return [];
-      const { data } = await supabase
+      const { data, error } = await supabase
         .from("session_tasks")
         .select("*")
         .in("booking_id", realBookingIds)
         .order("created_at");
+      if (error) throw error;
       return data || [];
     },
     enabled: realBookingIds.length > 0,
   });
   const demoTks = useMemo(() => (demoEnabled ? demoTasksForBookings(demoBks) : []), [demoEnabled, demoBks]);
   const allTasks = demoEnabled ? [..._allTasks, ...demoTks] : _allTasks;
-  const bookingIds = bookings.map((b) => b.id);
 
   const mentorMap = Object.fromEntries(mentorProfiles.map((p) => [p.id, p.full_name]));
   const sessionMap = Object.fromEntries(sessions.map((s) => [s.id, s.name]));
   const sessionCoverMap = Object.fromEntries(sessions.map((s) => [s.id, s.cover_image_url]));
 
   const scheduledBookings = sortByScheduledDateAsc(
-    bookings.filter((b) => {
-      const s = getEffectiveBookingStatus(b);
-      return s === "scheduled" || s === "pending_approval";
-    })
+    bookings.filter((b) => AGENDA_STATUSES.has(getEffectiveBookingStatus(b)))
   );
+  const confirmedCount = scheduledBookings.filter((b) => getEffectiveBookingStatus(b) === "scheduled").length;
   const pendingCount = scheduledBookings.filter((b) => getEffectiveBookingStatus(b) === "pending_approval").length;
-  // Auto-evidence: the next upcoming booking opens by default
-  const autoExpandedId = scheduledBookings[0]?.id ?? null;
-  const effectiveExpanded = expandedBooking ?? autoExpandedId;
+  const pendingConfirmationCount = scheduledBookings.filter(
+    (b) => getEffectiveBookingStatus(b) === "pending_confirmation",
+  ).length;
+  // A próxima sessão é destacada na lista.
+  const nextBookingId = scheduledBookings[0]?.id ?? null;
+  const selectedBooking = expandedBooking ? scheduledBookings.find((b) => b.id === expandedBooking) ?? null : null;
+  const selectedStatus = selectedBooking ? getEffectiveBookingStatus(selectedBooking) : null;
+  const selectedTasks = selectedBooking ? allTasks.filter((t) => t.booking_id === selectedBooking.id) : [];
+  const selectedCover = selectedBooking ? sessionCoverMap[selectedBooking.session_id] : null;
+  const monthLabel = format(currentMonth, "MMMM yyyy", { locale: ptBR });
 
   return (
     <AppLayout role="liberty">
+      <PageContainer>
       <motion.div variants={staggerContainer} initial="hidden" animate="show" className="space-y-6">
-        <motion.div variants={fadeUpItem} className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
-          <div>
-            <h1 className="text-2xl font-semibold text-foreground">Minha Agenda</h1>
-            <p className="text-muted-foreground text-sm mt-1">Próximas sessões de mentoria</p>
-          </div>
-          <div className="flex items-center gap-2">
-            <Link
-              to="/agenda/overview"
-              className="btn-silver text-sm px-4 py-2 flex items-center gap-2"
-            >
-              <Calendar className="h-4 w-4" /> Agendar sessão
-            </Link>
-          </div>
-
+        <motion.div variants={fadeUpItem}>
+          <PageHeader
+            title="Minha agenda"
+            description="Próximas sessões de mentoria."
+            actions={
+              <Button asChild>
+                <Link to="/agenda/overview">
+                  <Calendar className="h-4 w-4" aria-hidden /> Agendar sessão
+                </Link>
+              </Button>
+            }
+          />
         </motion.div>
 
-        {/* Month nav + stats */}
+        {/* Navegação por mês + resumo */}
         <motion.div variants={fadeUpItem} className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
-          <div className="flex items-center gap-2">
-            <button onClick={() => setCurrentMonth(subMonths(currentMonth, 1))} className="p-1.5 rounded-lg hover:bg-muted transition-colors">
-              <ChevronLeft className="h-4 w-4 text-muted-foreground" />
-            </button>
-            <span className="text-sm font-semibold text-foreground capitalize min-w-[140px] text-center">
-              {format(currentMonth, "MMMM yyyy", { locale: ptBR })}
+          <div className="flex items-center gap-1">
+            <IconButton
+              aria-label="Mês anterior"
+              onClick={() => setCurrentMonth(subMonths(currentMonth, 1))}
+              disabled={startOfMonth(currentMonth) <= startOfMonth(today)}
+            >
+              <ChevronLeft className="h-4 w-4" />
+            </IconButton>
+            <span className="text-sm font-semibold text-foreground first-letter:uppercase min-w-[140px] text-center" aria-live="polite">
+              {monthLabel}
             </span>
-            <button onClick={() => setCurrentMonth(addMonths(currentMonth, 1))} className="p-1.5 rounded-lg hover:bg-muted transition-colors">
-              <ChevronRight className="h-4 w-4 text-muted-foreground" />
-            </button>
+            <IconButton aria-label="Próximo mês" onClick={() => setCurrentMonth(addMonths(currentMonth, 1))}>
+              <ChevronRight className="h-4 w-4" />
+            </IconButton>
           </div>
-          <div className="flex items-center gap-4">
-            <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
-              <Calendar className="h-3.5 w-3.5 text-status-blue" />
-              <span>{scheduledBookings.length - pendingCount} confirmada{scheduledBookings.length - pendingCount !== 1 ? "s" : ""}</span>
-            </div>
+          <div className="flex items-center gap-2 flex-wrap" aria-label="Resumo do mês">
+            <StatusPill tone="info">
+              {confirmedCount} {confirmedCount !== 1 ? bookingStatusConfig.scheduled.label.toLowerCase() + "s" : bookingStatusConfig.scheduled.label.toLowerCase()}
+            </StatusPill>
             {pendingCount > 0 && (
-              <div className="flex items-center gap-1.5 text-xs text-status-yellow">
-                <Clock className="h-3.5 w-3.5" />
-                <span>{pendingCount} aguardando aprovação</span>
-              </div>
+              <StatusPill tone="warning">
+                {pendingCount} {bookingStatusConfig.pending_approval.label.toLowerCase()}
+              </StatusPill>
+            )}
+            {pendingConfirmationCount > 0 && (
+              <span title={PENDING_CONFIRMATION_HINT} className="inline-flex">
+                <StatusPill tone="pending">
+                  {pendingConfirmationCount} {bookingStatusConfig.pending_confirmation.label.toLowerCase()}
+                </StatusPill>
+              </span>
             )}
           </div>
         </motion.div>
 
-        {/* Sessions list */}
-        <motion.div variants={fadeUpItem} className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          {isLoading ? (
-            <div className="glass-card p-8 text-center">
-              <p className="text-sm text-muted-foreground">Carregando...</p>
-            </div>
+        {/* Lista de sessões */}
+        <motion.div variants={fadeUpItem}>
+          {isError ? (
+            <ErrorState
+              compact
+              title="Não foi possível carregar sua agenda"
+              description="Verifique sua conexão e tente novamente."
+              onRetry={() => void refetch()}
+            />
+          ) : isLoading ? (
+            <LoadingState variant="list" rows={3} />
           ) : scheduledBookings.length === 0 ? (
-            <div className="md:col-span-2">
-              <EmptyState
-                icon={Calendar}
-                title="Nenhuma sessão futura neste mês"
-                description="Agende uma nova sessão para continuar avançando na jornada."
-                action={
-                  <Link to="/agenda/overview" className="btn-silver text-sm px-4 py-2 inline-flex items-center gap-2">
-                    <Calendar className="h-4 w-4" /> Agendar sessão
+            <DsEmptyState
+              icon={Calendar}
+              title="Nenhuma sessão futura neste mês"
+              description="Agende uma nova sessão para continuar avançando na jornada."
+              action={
+                <Button asChild>
+                  <Link to="/agenda/overview">
+                    <Calendar className="h-4 w-4" aria-hidden /> Agendar sessão
                   </Link>
-                }
-              />
-            </div>
+                </Button>
+              }
+            />
           ) : (
-            scheduledBookings.map((booking) => {
-              const effectiveStatus = getEffectiveBookingStatus(booking);
-              
-              const bTasks = allTasks.filter((t) => t.booking_id === booking.id);
-              const completedTaskCount = bTasks.filter((t) => t.is_completed).length;
-              const isExpanded = effectiveExpanded === booking.id;
-              const coverUrl = sessionCoverMap[booking.session_id];
+            <SectionCard padding="none">
+              {scheduledBookings.map((booking, i) => {
+                const effectiveStatus = getEffectiveBookingStatus(booking);
+                const statusHint = effectiveStatus === "pending_confirmation" ? PENDING_CONFIRMATION_HINT : undefined;
+                const bTasks = allTasks.filter((t) => t.booking_id === booking.id);
+                const completedTaskCount = bTasks.filter((t) => t.is_completed).length;
+                const sessionName = sessionMap[booking.session_id] || "Sessão";
 
-              return (
-                <div key={booking.id} className="dark glass-card overflow-hidden bg-card text-card-foreground">
-                  {coverUrl && (
-                    <div
-                      className="relative h-24 w-full cursor-pointer overflow-hidden"
-                      onClick={() => setExpandedBooking(isExpanded ? null : booking.id)}
-                    >
-                      <img src={coverUrl} alt={sessionMap[booking.session_id] || "Sessão"} className="w-full h-full object-cover" />
-                      <div className="absolute inset-0 bg-gradient-to-t from-background via-background/40 to-transparent" />
-                      <div className="absolute bottom-2 left-4 right-4 flex items-center gap-2 flex-wrap">
-                        <span className="text-sm font-semibold text-foreground drop-shadow-sm">
-                          {sessionMap[booking.session_id] || "Sessão"}
+                return (
+                  <ListRow
+                    key={booking.id}
+                    active={booking.id === nextBookingId}
+                    last={i === scheduledBookings.length - 1}
+                    onPress={() => setExpandedBooking(booking.id)}
+                    leading={<DateBlock date={booking.scheduled_date} tone={booking.id === nextBookingId ? "brand" : "default"} />}
+                    title={sessionName}
+                    subtitle={
+                      <span className="inline-flex items-center gap-x-2 gap-y-1 flex-wrap">
+                        <span className="inline-flex items-center gap-1">
+                          <Clock className="h-3 w-3" aria-hidden />
+                          {booking.start_time.slice(0, 5)} · {booking.end_time.slice(0, 5)}
                         </span>
-                        <StatusBadge status={effectiveStatus} />
-                      </div>
-                    </div>
-                  )}
-                  <div
-                    className="p-4 flex items-center justify-between gap-4 hover:bg-muted/20 transition-colors cursor-pointer"
-                    onClick={() => setExpandedBooking(isExpanded ? null : booking.id)}
-                  >
-                    <div className="flex items-center gap-4 min-w-0">
-                      <div className="flex-shrink-0 w-12 h-12 rounded-lg bg-muted flex flex-col items-center justify-center">
-                        <span className="text-xs text-muted-foreground leading-none">
-                          {format(parseISO(booking.scheduled_date), "MMM", { locale: ptBR })}
-                        </span>
-                        <span className="text-lg font-semibold text-foreground leading-tight">
-                          {format(parseISO(booking.scheduled_date), "dd")}
-                        </span>
-                      </div>
-                      <div className="min-w-0">
-                        {!coverUrl && (
-                          <p className="text-sm font-medium text-foreground truncate">
-                            {sessionMap[booking.session_id] || "Sessão"}
-                          </p>
-                        )}
-                        <p className="text-xs text-muted-foreground truncate">
-                          com {shortName(mentorMap[booking.mentor_id] || "Mentor")}
-                        </p>
-                        <div className="flex items-center gap-2 mt-1">
-                          <span className="text-[10px] text-muted-foreground flex items-center gap-1">
-                            <Clock className="h-2.5 w-2.5" />
-                            {booking.start_time.slice(0, 5)} – {booking.end_time.slice(0, 5)}
-                          </span>
-                          {!coverUrl && <StatusBadge status={effectiveStatus} />}
-                          {bTasks.length > 0 && (
-                            <span className="text-[10px] px-2 py-0.5 rounded-full bg-muted text-muted-foreground">
-                              {completedTaskCount}/{bTasks.length} tarefas
-                            </span>
-                          )}
-                        </div>
-                      </div>
-                    </div>
-                    <div className="flex items-center gap-2 shrink-0">
-                      {effectiveStatus === "scheduled" && booking.zoom_join_url && (
-                        <a
-                          href={booking.zoom_join_url}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          onClick={(e) => e.stopPropagation()}
-                          className="btn-silver text-xs px-3 py-1.5 flex items-center gap-1.5"
-                        >
-                          <ExternalLink className="h-3 w-3" /> Zoom
-                        </a>
-                      )}
-                    </div>
-                  </div>
-
-                  {isExpanded && bTasks.length > 0 && (
-                    <div className="px-4 pb-4 border-t border-border pt-3">
-                      <p className="text-xs font-medium text-muted-foreground mb-2"><Target className="h-3.5 w-3.5 inline mr-1.5 -mt-0.5" />Tarefas</p>
-                      <TaskChecklist
-                        tasks={bTasks}
-                        bookingId={booking.id}
-                        role="liberty"
-                        invalidateKeys={[["member-agenda-tasks", bookingIds]]}
-                      />
-                    </div>
-                  )}
-                </div>
-              );
-            })
+                        <span>com {shortName(mentorMap[booking.mentor_id] || "Mentor")}</span>
+                        {bTasks.length > 0 && <span>{completedTaskCount}/{bTasks.length} tarefas</span>}
+                      </span>
+                    }
+                    trailing={
+                      <span title={statusHint} className="inline-flex">
+                        <StatusPill status={effectiveStatus} size="sm" />
+                      </span>
+                    }
+                  />
+                );
+              })}
+            </SectionCard>
           )}
         </motion.div>
       </motion.div>
+      </PageContainer>
+
+      {/* Detalhes da sessão */}
+      <BottomSheet
+        open={Boolean(selectedBooking)}
+        onOpenChange={(open) => { if (!open) setExpandedBooking(null); }}
+        title={selectedBooking ? sessionMap[selectedBooking.session_id] || "Sessão" : "Sessão"}
+        description={
+          selectedBooking
+            ? `${format(parseISO(selectedBooking.scheduled_date), "EEEE, dd 'de' MMMM", { locale: ptBR })} · ${selectedBooking.start_time.slice(0, 5)} às ${selectedBooking.end_time.slice(0, 5)}`
+            : undefined
+        }
+        footer={
+          selectedBooking && selectedStatus === "scheduled" && selectedBooking.zoom_join_url ? (
+            <Button asChild size="lg" className="w-full">
+              <a href={selectedBooking.zoom_join_url} target="_blank" rel="noopener noreferrer">
+                <ExternalLink className="h-4 w-4" aria-hidden /> Acessar Zoom
+              </a>
+            </Button>
+          ) : undefined
+        }
+      >
+        {selectedBooking && selectedStatus && (
+          <div className="space-y-4">
+            {selectedCover && (
+              <img src={selectedCover} alt="" className="w-full aspect-video object-cover rounded-ds-lg" />
+            )}
+            <div className="flex flex-wrap items-center gap-2">
+              <span title={selectedStatus === "pending_confirmation" ? PENDING_CONFIRMATION_HINT : undefined} className="inline-flex">
+                <StatusPill status={selectedStatus} size="md" />
+              </span>
+              <StatusPill tone="neutral" size="md" withDot={false}>
+                <User className="h-3 w-3" aria-hidden /> {shortName(mentorMap[selectedBooking.mentor_id] || "Mentor")}
+              </StatusPill>
+            </div>
+            {selectedStatus === "pending_confirmation" && (
+              <p className="text-sm text-muted-foreground">{PENDING_CONFIRMATION_HINT}</p>
+            )}
+            <div>
+              <p className="text-xs font-medium text-muted-foreground mb-2 inline-flex items-center gap-1.5">
+                <Target className="h-3.5 w-3.5" aria-hidden />Tarefas
+              </p>
+              {selectedTasks.length > 0 ? (
+                <TaskChecklist
+                  tasks={selectedTasks}
+                  bookingId={selectedBooking.id}
+                  role="liberty"
+                  invalidateKeys={[["member-agenda-tasks"]]}
+                />
+              ) : (
+                <p className="text-sm text-muted-foreground">Nenhuma tarefa atribuída para esta sessão.</p>
+              )}
+            </div>
+          </div>
+        )}
+      </BottomSheet>
     </AppLayout>
   );
 };

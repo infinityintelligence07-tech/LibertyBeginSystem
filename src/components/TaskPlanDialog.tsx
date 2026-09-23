@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import { Calendar as CalendarIcon, Save, X } from "lucide-react";
+import { Save, X } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { BottomSheet, TextField } from "@/components/ds";
 import { supabase } from "@/integrations/supabase/client";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
@@ -57,56 +58,39 @@ export const TaskPlanDialog = ({ task, onOpenChange, invalidateKeys = [] }: Prop
   });
 
   return (
-    <Dialog open={!!task} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-md">
-        <DialogHeader>
-          <DialogTitle>Definir prazo</DialogTitle>
-        </DialogHeader>
+    <BottomSheet
+      open={!!task}
+      onOpenChange={onOpenChange}
+      title="Definir prazo"
+      description="Só o prazo. O restante (quem vai fazer, status) é definido depois pelo aluno."
+      size="sm"
+      locked={save.isPending}
+      footer={
+        <Button onClick={() => save.mutate()} disabled={save.isPending} className="w-full sm:w-auto">
+          <Save className="h-4 w-4" /> {save.isPending ? "Salvando..." : "Salvar prazo"}
+        </Button>
+      }
+    >
+      {task && (
+        <div className="space-y-4">
+          <p className="text-sm text-foreground bg-muted/40 border border-border rounded-ds p-3">
+            {task.description}
+          </p>
 
-        {task && (
-          <div className="space-y-4">
-            <p className="text-sm text-foreground bg-muted/40 border border-border rounded-lg p-3">
-              {task.description}
-            </p>
-
-            <div>
-              <label className="text-xs text-muted-foreground mb-1 block font-medium flex items-center gap-1.5">
-                <CalendarIcon className="h-3 w-3" /> Prazo
-              </label>
-              <input
-                type="date"
-                value={dueDate}
-                onChange={(e) => setDueDate(e.target.value)}
-                className="w-full bg-card border border-border rounded-lg px-3 py-2 text-sm text-foreground focus:border-primary/40 focus:outline-none"
-              />
-              {dueDate && (
-                <div className="flex items-center justify-between mt-1.5">
-                  <p className="text-[11px] text-muted-foreground">
-                    {format(new Date(dueDate + "T00:00:00"), "EEEE, dd 'de' MMMM", { locale: ptBR })}
-                  </p>
-                  <button
-                    onClick={() => setDueDate("")}
-                    className="text-[11px] text-muted-foreground hover:text-foreground flex items-center gap-1"
-                  >
-                    <X className="h-3 w-3" /> Limpar
-                  </button>
-                </div>
-              )}
-              <p className="text-[11px] text-muted-foreground mt-2">
-                Só o prazo. O restante (quem vai fazer, status) é definido depois pelo aluno.
-              </p>
-            </div>
-
-            <button
-              onClick={() => save.mutate()}
-              disabled={save.isPending}
-              className="btn-silver w-full text-sm flex items-center justify-center gap-2 disabled:opacity-40"
-            >
-              <Save className="h-4 w-4" /> {save.isPending ? "Salvando..." : "Salvar prazo"}
-            </button>
-          </div>
-        )}
-      </DialogContent>
-    </Dialog>
+          <TextField
+            label="Prazo"
+            type="date"
+            value={dueDate}
+            onChange={(e) => setDueDate(e.target.value)}
+            hint={dueDate ? format(new Date(dueDate + "T00:00:00"), "EEEE, dd 'de' MMMM", { locale: ptBR }) : undefined}
+          />
+          {dueDate && (
+            <Button variant="ghost" size="sm" onClick={() => setDueDate("")} className="-mt-2">
+              <X className="h-3.5 w-3.5" /> Limpar prazo
+            </Button>
+          )}
+        </div>
+      )}
+    </BottomSheet>
   );
 };

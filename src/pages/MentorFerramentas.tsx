@@ -7,16 +7,29 @@ import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/hooks/useAuth";
 import { toast } from "sonner";
 import { staggerContainer, fadeUpItem } from "@/lib/animations";
-import { shortName, initials } from "@/lib/formatName";
+import { shortName } from "@/lib/formatName";
 import { DIAGNOSTICO_BEGIN_PILLARS, overallScore } from "@/lib/diagnosticoBegin";
-import { Radar as RadarIcon, Plus, Search, ChevronRight, Loader2, CheckCircle2, Clock, Wrench, Trash2 } from "lucide-react";
+import { Radar as RadarIcon, Plus, Search, ChevronRight, Loader2, Wrench, Trash2 } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { UserAvatar } from "@/components/UserAvatar";
 import {
-  AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
-  AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
-} from "@/components/ui/alert-dialog";
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { EmptyState } from "@/components/EmptyState";
+  BottomSheet,
+  Chip,
+  ConfirmDialog,
+  EmptyState,
+  IconButton,
+  ListRow,
+  LoadingState,
+  PageContainer,
+  PageHeader,
+  ProgressBar,
+  SectionCard,
+  SectionHeader,
+  SelectField,
+  Stat,
+  StatusPill,
+  TextField,
+} from "@/components/ds";
 
 
 
@@ -160,267 +173,240 @@ const MentorFerramentasPage = ({ role = "mentor" }: { role?: "mentor" | "admin" 
     setOpen(true);
   };
 
+  const statusFilters = [
+    { key: "all", label: "Todos", count: filtered.length },
+    { key: "completed", label: "Concluídos", count: filtered.filter((a: any) => a.status === "completed").length },
+    { key: "in_progress", label: "Em preenchimento", count: filtered.filter((a: any) => a.status !== "completed").length },
+  ] as const;
+
+  const totalApplications = grouped.reduce((acc, g) => acc + g.items.length, 0);
+
   return (
     <AppLayout role={role}>
-      <motion.div variants={staggerContainer} initial="hidden" animate="show" className="space-y-6">
-        <motion.div variants={fadeUpItem} className="flex flex-wrap items-end justify-between gap-3">
-          <div>
-            <h1 className="text-2xl font-semibold text-foreground">Ferramentas</h1>
-            <p className="text-muted-foreground text-sm">
-              {isAdmin
+      <PageContainer>
+      <motion.div variants={staggerContainer} initial="hidden" animate="show" className="space-y-6 lg:space-y-8">
+        <motion.div variants={fadeUpItem}>
+          <PageHeader
+            title="Ferramentas"
+            description={
+              isAdmin
                 ? "Acompanhe os diagnósticos aplicados pelos mentores."
-                : "Aplique uma ferramenta junto com o aluno durante a sessão."}
-            </p>
+                : "Aplique uma ferramenta junto com o aluno durante a sessão."
+            }
+            actions={
+              !isAdmin ? (
+                <Button onClick={openNew}>
+                  <Plus /> Aplicar ferramenta
+                </Button>
+              ) : undefined
+            }
+          />
+        </motion.div>
+
+        {/* Catálogo de ferramentas */}
+        <motion.section variants={fadeUpItem} className="space-y-3">
+          <SectionHeader title="Catálogo" description="Toque para ver o modelo completo e os pilares avaliados." />
+          <div className="grid gap-3">
+            {templates.map((t: any) => {
+              const count = applications.filter((a: any) => a.template_id === t.id).length;
+              const done = applications.filter((a: any) => a.template_id === t.id && a.status === "completed").length;
+              return (
+                <SectionCard
+                  key={t.id}
+                  as="button"
+                  interactive
+                  onClick={() => navigate(`${base}/modelo`)}
+                  className="text-left"
+                >
+                  <div className="flex flex-col sm:flex-row sm:items-center gap-4 sm:gap-5">
+                    <div className="h-12 w-12 rounded-[var(--ds-radius-md)] bg-primary/10 text-primary flex items-center justify-center shrink-0">
+                      <RadarIcon className="h-6 w-6" aria-hidden />
+                    </div>
+                    <div className="min-w-0 flex-1">
+                      <p className="text-xs font-medium text-primary mb-0.5">Ferramenta</p>
+                      <p className="text-base font-semibold text-foreground leading-tight">{t.name}</p>
+                      <p className="text-sm text-muted-foreground leading-snug mt-1 max-w-xl">{t.description}</p>
+                    </div>
+                    <div className="flex items-center gap-5 sm:gap-6 sm:border-l sm:border-border sm:pl-6 shrink-0">
+                      <Stat size="sm" label="Aplicações" value={count} />
+                      <Stat size="sm" label="Concluídas" value={done} tone="success" />
+                      <Stat size="sm" label="Pilares" value={DIAGNOSTICO_BEGIN_PILLARS.length} />
+                      <ChevronRight className="h-5 w-5 text-muted-foreground hidden sm:block" aria-hidden />
+                    </div>
+                  </div>
+                </SectionCard>
+              );
+            })}
           </div>
-          {!isAdmin && (
-            <button onClick={openNew} className="btn-primary text-sm px-4 py-2 flex items-center gap-2">
-              <Plus className="h-4 w-4" /> Aplicar ferramenta
-            </button>
-          )}
-        </motion.div>
+        </motion.section>
 
-        {/* Catálogo — capa destacada da ferramenta */}
-        <motion.div variants={fadeUpItem} className="grid gap-3">
-          {templates.map((t: any) => {
-            const count = applications.filter((a: any) => a.template_id === t.id).length;
-            const done = applications.filter((a: any) => a.template_id === t.id && a.status === "completed").length;
-            return (
-              <button
-                key={t.id}
-                onClick={() => navigate(`${base}/modelo`)}
-                className="relative overflow-hidden glass-card p-6 text-left hover:border-primary/40 transition-colors group"
-              >
-                <div className="absolute inset-0 bg-gradient-to-r from-primary/10 via-transparent to-transparent pointer-events-none" />
-                <div className="relative flex flex-col sm:flex-row sm:items-center gap-5">
-                  <div className="h-14 w-14 rounded-2xl bg-primary/15 flex items-center justify-center shrink-0">
-                    <RadarIcon className="h-7 w-7 text-primary" />
-                  </div>
-                  <div className="min-w-0 flex-1">
-                    <p className="text-[10px] uppercase tracking-[0.14em] text-primary font-semibold mb-1">Ferramenta</p>
-                    <p className="text-lg font-semibold text-foreground leading-tight">{t.name}</p>
-                    <p className="text-xs text-muted-foreground leading-snug mt-1 max-w-xl">{t.description}</p>
-                  </div>
-                  <div className="flex items-center gap-6 sm:border-l sm:border-border sm:pl-6 shrink-0">
-                    <div>
-                      <p className="text-2xl font-semibold text-foreground tabular-nums leading-none">{count}</p>
-                      <p className="text-[10px] uppercase tracking-wider text-muted-foreground mt-1">Aplicações</p>
-                    </div>
-                    <div>
-                      <p className="text-2xl font-semibold text-status-green tabular-nums leading-none">{done}</p>
-                      <p className="text-[10px] uppercase tracking-wider text-muted-foreground mt-1">Concluídas</p>
-                    </div>
-                    <div>
-                      <p className="text-2xl font-semibold text-foreground tabular-nums leading-none">{DIAGNOSTICO_BEGIN_PILLARS.length}</p>
-                      <p className="text-[10px] uppercase tracking-wider text-muted-foreground mt-1">Pilares</p>
-                    </div>
-                    <ChevronRight className="h-5 w-5 text-muted-foreground group-hover:translate-x-1 group-hover:text-primary transition-all" />
-                  </div>
-                </div>
-              </button>
-            );
-          })}
-
-        </motion.div>
-
-
-        {/* Aplicações agrupadas por aluno — grid, sem lista corrida */}
-        <motion.div variants={fadeUpItem} className="space-y-4">
-          <div className="flex flex-wrap items-center gap-2">
-            <div className="relative flex-1 min-w-[220px] max-w-sm">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-              <input
+        {/* Aplicações agrupadas por aluno */}
+        <motion.section variants={fadeUpItem} className="space-y-4">
+          <SectionHeader
+            title="Aplicações"
+            description={
+              totalApplications > 0
+                ? `${totalApplications} ${totalApplications === 1 ? "aplicação" : "aplicações"} em ${grouped.length} ${grouped.length === 1 ? "aluno" : "alunos"}`
+                : undefined
+            }
+          />
+          <div className="flex flex-col sm:flex-row sm:items-center gap-3">
+            <div className="relative w-full sm:max-w-sm">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground pointer-events-none" aria-hidden />
+              <TextField
+                type="search"
+                aria-label="Buscar por aluno ou empresa"
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
                 placeholder="Buscar por aluno ou empresa..."
-                className="w-full pl-9 pr-3 py-2 rounded-xl bg-card border border-border text-sm text-foreground placeholder:text-muted-foreground"
+                className="pl-10"
               />
             </div>
-            <div className="flex items-center gap-1">
-              {([
-                { key: "all", label: "Todos" },
-                { key: "completed", label: "Concluídos" },
-                { key: "in_progress", label: "Em preenchimento" },
-              ] as const).map((f) => (
-                <button
+            <div className="flex items-center gap-2 overflow-x-auto scrollbar-hide -mx-4 px-4 sm:mx-0 sm:px-0">
+              {statusFilters.map((f) => (
+                <Chip
                   key={f.key}
+                  active={statusFilter === f.key}
                   onClick={() => setStatusFilter(f.key)}
-                  className={`text-xs px-3 py-1.5 rounded-full border transition-colors ${
-                    statusFilter === f.key
-                      ? "bg-primary/10 text-primary border-primary/30"
-                      : "bg-card text-muted-foreground border-border hover:border-primary/20"
-                  }`}
+                  count={f.count}
                 >
                   {f.label}
-                </button>
+                </Chip>
               ))}
             </div>
           </div>
 
           {isLoading ? (
-            <div className="flex justify-center py-16">
-              <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
-            </div>
+            <LoadingState variant="list" rows={4} />
           ) : grouped.length === 0 ? (
             <EmptyState
               icon={Wrench}
-              title="Nenhuma aplicação por aqui"
-              description="Aplique uma ferramenta durante a sessão para o diagnóstico aparecer nesta área."
+              title={search || statusFilter !== "all" ? "Nenhuma aplicação com esses filtros" : "Nenhuma aplicação por aqui"}
+              description={
+                search || statusFilter !== "all"
+                  ? "Ajuste a busca ou o filtro para ver outras aplicações."
+                  : "Aplique uma ferramenta durante a sessão para o diagnóstico aparecer nesta área."
+              }
+              action={
+                search || statusFilter !== "all" ? (
+                  <Button variant="outline" size="sm" onClick={() => { setSearch(""); setStatusFilter("all"); }}>
+                    Limpar filtros
+                  </Button>
+                ) : !isAdmin ? (
+                  <Button size="sm" onClick={openNew}><Plus /> Aplicar ferramenta</Button>
+                ) : undefined
+              }
             />
           ) : (
-            <div className="glass-card divide-y divide-border overflow-hidden">
+            <div className="space-y-4">
               {grouped.map((g) => (
-                <div key={g.memberId} className="p-4 sm:p-5">
-                  <div className="flex items-center gap-3 mb-3">
-                    <div className="h-9 w-9 rounded-full bg-primary/15 text-primary text-[11px] font-bold flex items-center justify-center shrink-0">
-                      {initials(g.name)}
-                    </div>
+                <SectionCard key={g.memberId} padding="none" as="article">
+                  <header className="flex items-center gap-3 px-4 sm:px-5 py-3 border-b border-border">
+                    <UserAvatar name={g.name} size={36} />
                     <div className="min-w-0 flex-1">
                       <p className="text-sm font-semibold text-foreground truncate">{shortName(g.name)}</p>
-                      {g.company && (
-                        <p className="text-[11px] text-muted-foreground truncate">{g.company}</p>
-                      )}
+                      {g.company && <p className="text-xs text-muted-foreground truncate">{g.company}</p>}
                     </div>
-                    <span className="text-[10px] uppercase tracking-wider px-2 py-0.5 rounded-full bg-muted text-muted-foreground shrink-0">
+                    <StatusPill tone="neutral" withDot={false}>
                       {g.items.length} {g.items.length === 1 ? "aplicação" : "aplicações"}
-                    </span>
-                  </div>
-
-                  <div className="grid gap-2 sm:grid-cols-2">
-                    {g.items.map((a: any) => {
+                    </StatusPill>
+                  </header>
+                  <ul>
+                    {g.items.map((a: any, idx: number) => {
                       const done = a.status === "completed";
                       const total = overallScore(a.scores || {});
-                      const pct = Math.min(100, Math.round((total / 5) * 100));
                       return (
-                        <div
-                          key={a.id}
-                          className="rounded-xl border border-border bg-background/40 p-3"
-                        >
-                          <div className="flex items-center gap-2">
-                            <button
-                              onClick={() => navigate(`${base}/${a.id}`)}
-                              className="min-w-0 flex-1 text-left"
-                            >
-                              <p className="text-xs font-medium text-foreground truncate">
-                                {a.phase === "final" ? "Diagnóstico final" : "Diagnóstico inicial"}
-                              </p>
-                              <p className="text-[10px] text-muted-foreground">
-                                {new Date(a.created_at).toLocaleDateString("pt-BR")}
-                              </p>
-                            </button>
-                            {done ? (
-                              <span className="text-[10px] px-2 py-0.5 rounded-full bg-status-green/10 text-status-green flex items-center gap-1 shrink-0">
-                                <CheckCircle2 className="h-3 w-3" /> {total.toFixed(1)}/5
-                              </span>
-                            ) : (
-                              <span className="text-[10px] px-2 py-0.5 rounded-full bg-muted text-muted-foreground flex items-center gap-1 shrink-0">
-                                <Clock className="h-3 w-3" /> Preenchendo
-                              </span>
-                            )}
-                            <button
-                              onClick={() => setToDelete(a)}
-                              aria-label="Excluir aplicação"
-                              className="h-7 w-7 rounded-lg flex items-center justify-center text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-colors shrink-0"
-                            >
-                              <Trash2 className="h-3.5 w-3.5" />
-                            </button>
+                        <li key={a.id} className="flex items-center gap-1 pr-2">
+                          <div className="min-w-0 flex-1">
+                            <ListRow
+                              title={a.phase === "final" ? "Diagnóstico final" : "Diagnóstico inicial"}
+                              subtitle={
+                                <span className="flex flex-col gap-1.5">
+                                  <span>{new Date(a.created_at).toLocaleDateString("pt-BR")}</span>
+                                  {done && <ProgressBar value={total} max={5} tone="success" className="max-w-[160px]" />}
+                                </span>
+                              }
+                              trailing={
+                                done ? (
+                                  <StatusPill tone="success">Concluído · {total.toFixed(1)}/5</StatusPill>
+                                ) : (
+                                  <StatusPill tone="neutral">Em preenchimento</StatusPill>
+                                )
+                              }
+                              onPress={() => navigate(`${base}/${a.id}`)}
+                              last={idx === g.items.length - 1}
+                            />
                           </div>
-                          {done && (
-                            <div className="mt-2 h-1 rounded-full bg-muted overflow-hidden">
-                              <div className="h-full rounded-full bg-status-green" style={{ width: `${pct}%` }} />
-                            </div>
-                          )}
-                        </div>
+                          <IconButton
+                            aria-label="Excluir aplicação"
+                            size="sm"
+                            onClick={() => setToDelete(a)}
+                            className="shrink-0 hover:text-destructive hover:bg-destructive/10"
+                          >
+                            <Trash2 className="h-4 w-4" />
+                          </IconButton>
+                        </li>
                       );
                     })}
-                  </div>
-                </div>
+                  </ul>
+                </SectionCard>
               ))}
             </div>
-
           )}
-        </motion.div>
-
-
+        </motion.section>
       </motion.div>
-      <AlertDialog open={!!toDelete} onOpenChange={(o) => !o && setToDelete(null)}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>Excluir esta aplicação?</AlertDialogTitle>
-            <AlertDialogDescription>
-              Todas as respostas e o resultado serão apagados definitivamente e nada ficará visível
-              para o aluno.
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel>Cancelar</AlertDialogCancel>
-            <AlertDialogAction
-              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
-              onClick={(e) => {
-                e.preventDefault();
-                if (toDelete) remove.mutate(toDelete.id);
-              }}
-            >
-              {remove.isPending ? "Excluindo..." : "Excluir"}
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
+      </PageContainer>
 
+      <ConfirmDialog
+        open={!!toDelete}
+        onOpenChange={(o) => { if (!o && !remove.isPending) setToDelete(null); }}
+        title="Excluir esta aplicação?"
+        description="Todas as respostas e o resultado serão apagados definitivamente e nada ficará visível para o aluno."
+        confirmLabel="Excluir"
+        destructive
+        loading={remove.isPending}
+        onConfirm={() => { if (toDelete) remove.mutate(toDelete.id); }}
+      />
 
-      <Dialog open={open} onOpenChange={setOpen}>
-        <DialogContent className="max-w-md">
-          <DialogHeader>
-            <DialogTitle>Aplicar ferramenta</DialogTitle>
-          </DialogHeader>
-          <div className="space-y-4">
-            <div className="space-y-1.5">
-              <label className="text-xs text-muted-foreground">Ferramenta</label>
-              <Select value={templateId} onValueChange={setTemplateId}>
-                <SelectTrigger><SelectValue placeholder="Selecione" /></SelectTrigger>
-                <SelectContent>
-                  {templates.map((t: any) => (
-                    <SelectItem key={t.id} value={t.id}>{t.name}</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-            <div className="space-y-1.5">
-              <label className="text-xs text-muted-foreground">Aluno</label>
-              <Select value={memberId} onValueChange={setMemberId}>
-                <SelectTrigger><SelectValue placeholder="Selecione o aluno" /></SelectTrigger>
-                <SelectContent className="max-h-72">
-                  {members.map((m: any) => (
-                    <SelectItem key={m.id} value={m.id}>
-                      {shortName(m.full_name)}{m.company_name ? ` · ${m.company_name}` : ""}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-            <div className="space-y-1.5">
-              <label className="text-xs text-muted-foreground">Momento</label>
-              <Select value={phase} onValueChange={(v) => setPhase(v as any)}>
-                <SelectTrigger><SelectValue /></SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="inicial">Diagnóstico inicial (kickoff)</SelectItem>
-                  <SelectItem value="final">Diagnóstico final (encerramento)</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-          </div>
-          <DialogFooter>
-            <button
-              disabled={create.isPending}
-              onClick={() => create.mutate()}
-              className="btn-primary text-sm px-4 py-2 disabled:opacity-60"
-            >
+      <BottomSheet
+        open={open}
+        onOpenChange={setOpen}
+        title="Aplicar ferramenta"
+        description="Escolha a ferramenta, o aluno e o momento. O preenchimento abre em seguida."
+        size="sm"
+        locked={create.isPending}
+        footer={
+          <>
+            <Button variant="outline" onClick={() => setOpen(false)} disabled={create.isPending}>Cancelar</Button>
+            <Button disabled={create.isPending || !memberId || !templateId} onClick={() => create.mutate()}>
+              {create.isPending && <Loader2 className="animate-spin" />}
               {create.isPending ? "Iniciando..." : "Iniciar preenchimento"}
-            </button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+            </Button>
+          </>
+        }
+      >
+        <div className="space-y-4">
+          <SelectField label="Ferramenta" value={templateId} onChange={(e) => setTemplateId(e.target.value)} required>
+            <option value="" disabled>Selecione</option>
+            {templates.map((t: any) => (
+              <option key={t.id} value={t.id}>{t.name}</option>
+            ))}
+          </SelectField>
+          <SelectField label="Aluno" value={memberId} onChange={(e) => setMemberId(e.target.value)} required>
+            <option value="" disabled>Selecione o aluno</option>
+            {members.map((m: any) => (
+              <option key={m.id} value={m.id}>
+                {shortName(m.full_name)}{m.company_name ? ` · ${m.company_name}` : ""}
+              </option>
+            ))}
+          </SelectField>
+          <SelectField label="Momento" value={phase} onChange={(e) => setPhase(e.target.value as "inicial" | "final")}>
+            <option value="inicial">Diagnóstico inicial (kickoff)</option>
+            <option value="final">Diagnóstico final (encerramento)</option>
+          </SelectField>
+        </div>
+      </BottomSheet>
     </AppLayout>
-
   );
 };
 

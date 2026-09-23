@@ -1,5 +1,8 @@
 project_id = "roddclbsxqrlgmxvjsqr"
 
+# Todas as funções validam o JWT internamente via _shared/auth.ts (requireRole),
+# por isso verify_jwt = false: assim a resposta 401/403 sai com CORS e JSON { error }.
+
 [functions.google-oauth-callback]
 verify_jwt = false
 
@@ -12,19 +15,10 @@ verify_jwt = false
 [functions.admin-set-user-active]
 verify_jwt = false
 
-[functions.bulk-import-members]
-verify_jwt = false
-
 [functions.bulk-upsert-members-full]
 verify_jwt = false
 
 [functions.reset-and-invite]
-verify_jwt = false
-
-[functions.seed-demo-members]
-verify_jwt = false
-
-[functions.seed-mentors]
 verify_jwt = false
 
 [functions.google-oauth-start]
@@ -36,6 +30,12 @@ verify_jwt = false
 [functions.organize-zoom-report]
 verify_jwt = false
 
+[functions.build-session-deliverable]
+verify_jwt = false
+
+[functions.pick-featured-case]
+verify_jwt = false
+
 [functions.send-push]
 verify_jwt = false
 
@@ -44,7 +44,3 @@ verify_jwt = false
 
 [functions.admin-merge-profiles]
 verify_jwt = false
-
-[functions.bulk-generate-access]
-verify_jwt = false
-

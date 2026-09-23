@@ -2,7 +2,8 @@ import { useState } from "react";
 import { Send, Copy, Check } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Button } from "@/components/ui/button";
+import { BottomSheet, IconButton, TextAreaField } from "@/components/ds";
 
 interface Props {
   libertyProfileId: string;
@@ -81,69 +82,54 @@ Obrigado! 🙏`;
 
   return (
     <>
-      <button
+      <Button
+        size="sm"
+        variant="secondary"
         onClick={send}
         disabled={sending}
         title="Enviar pesquisa de NPS ao aluno e gerar link direto"
-        className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-primary/10 border border-primary/20 text-primary text-[11px] font-semibold hover:bg-primary/15 transition-colors disabled:opacity-50"
       >
-        <Send className="h-3 w-3" /> {sending ? "Enviando..." : "Enviar NPS"}
-      </button>
+        <Send className="h-3.5 w-3.5" /> {sending ? "Enviando..." : "Enviar NPS"}
+      </Button>
 
-      <Dialog open={open} onOpenChange={setOpen}>
-        <DialogContent className="max-w-lg">
-          <DialogHeader>
-            <DialogTitle className="text-base">Link da pesquisa</DialogTitle>
-          </DialogHeader>
-          <div className="space-y-4">
-            <p className="text-xs text-muted-foreground">
-              A pesquisa já apareceu no app do aluno. Você também pode enviar o link direto abaixo.
-            </p>
-
-            <div className="flex items-center justify-between gap-2 p-2.5 rounded-lg bg-muted/30 border border-border">
-              <span className="font-mono text-xs text-foreground truncate">{link}</span>
-              <button
-                onClick={() => copy(link)}
-                className="shrink-0 p-1.5 rounded-md hover:bg-muted text-muted-foreground hover:text-primary transition-colors"
-                title="Copiar link"
-              >
-                {copied ? <Check className="h-3.5 w-3.5 text-status-green" /> : <Copy className="h-3.5 w-3.5" />}
-              </button>
-            </div>
-
-            <div>
-              <label className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider block mb-1.5">
-                Mensagem pronta
-              </label>
-              <textarea
-                readOnly
-                value={message}
-                onFocus={(e) => e.currentTarget.select()}
-                className="w-full h-32 bg-card border border-border rounded-lg p-3 text-xs text-foreground font-mono focus:outline-none resize-none"
-              />
-            </div>
-
-            <div className="flex items-center justify-end gap-2">
-              <button
-                onClick={() => copy(message)}
-                className="btn-silver text-xs px-4 py-2 flex items-center gap-2"
-              >
-                <Copy className="h-3.5 w-3.5" /> Copiar mensagem
-              </button>
-              {digits && (
-                <a
-                  href={`https://wa.me/${digits}?text=${encodeURIComponent(message)}`}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="text-xs font-semibold px-4 py-2 rounded-lg bg-status-green/10 border border-status-green/20 text-status-green"
-                >
+      <BottomSheet
+        open={open}
+        onOpenChange={setOpen}
+        title="Link da pesquisa"
+        description="A pesquisa já apareceu no app do aluno. Você também pode enviar o link direto abaixo."
+        footer={
+          <>
+            <Button variant="outline" onClick={() => copy(message)}>
+              <Copy className="h-4 w-4" /> Copiar mensagem
+            </Button>
+            {digits && (
+              <Button asChild>
+                <a href={`https://wa.me/${digits}?text=${encodeURIComponent(message)}`} target="_blank" rel="noopener noreferrer">
                   Enviar no WhatsApp
                 </a>
-              )}
-            </div>
+              </Button>
+            )}
+          </>
+        }
+      >
+        <div className="space-y-4">
+          <div className="flex items-center justify-between gap-2 pl-3 pr-1 py-1 rounded-ds bg-muted/30 border border-border min-h-[44px]">
+            <span className="font-mono text-xs text-foreground truncate">{link}</span>
+            <IconButton aria-label={copied ? "Link copiado" : "Copiar link"} size="sm" onClick={() => copy(link)}>
+              {copied ? <Check className="h-4 w-4 text-status-green" /> : <Copy className="h-4 w-4" />}
+            </IconButton>
           </div>
-        </DialogContent>
-      </Dialog>
+
+          <TextAreaField
+            label="Mensagem pronta"
+            hint="Toque no campo para selecionar tudo."
+            readOnly
+            value={message}
+            onFocus={(e) => e.currentTarget.select()}
+            className="h-32 text-xs font-mono resize-none"
+          />
+        </div>
+      </BottomSheet>
     </>
   );
 };

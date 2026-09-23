@@ -3,6 +3,8 @@ import { Bell, BellOff, Check, Loader2 } from "lucide-react";
 import { toast } from "sonner";
 import { enablePushNotifications } from "@/lib/pushRegistration";
 import { supabase } from "@/integrations/supabase/client";
+import { Button } from "@/components/ui/button";
+import { SectionCard, SectionHeader, StatusPill } from "@/components/ds";
 
 export const NotificationSettingsCard = () => {
   const [state, setState] = useState<NotificationPermission | "unsupported">(
@@ -108,21 +110,18 @@ export const NotificationSettingsCard = () => {
   const isUnsupported = state === "unsupported";
 
   return (
-    <div className="glass-card p-6 space-y-4">
-      <h2 className="text-sm font-semibold text-foreground flex items-center gap-2">
-        <Bell className="h-4 w-4 text-primary" />
-        Notificações
-      </h2>
+    <SectionCard className="space-y-4">
+      <SectionHeader as="h3" title="Notificações" />
 
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 p-4 rounded-lg border border-border bg-background/50">
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
         <div className="flex items-center gap-3 min-w-0 flex-1">
-          <div className="w-10 h-10 rounded-lg bg-muted flex items-center justify-center shrink-0">
+          <div className="w-10 h-10 rounded-ds bg-muted flex items-center justify-center shrink-0">
             {isOn ? (
-              <Check className="h-5 w-5 text-status-green" />
+              <Check className="h-5 w-5 text-status-green" aria-hidden />
             ) : isDenied ? (
-              <BellOff className="h-5 w-5 text-destructive" />
+              <BellOff className="h-5 w-5 text-destructive" aria-hidden />
             ) : (
-              <Bell className="h-5 w-5 text-primary" />
+              <Bell className="h-5 w-5 text-primary" aria-hidden />
             )}
           </div>
           <div className="min-w-0 flex-1">
@@ -138,40 +137,31 @@ export const NotificationSettingsCard = () => {
             </p>
           </div>
         </div>
-        <button
-          onClick={handleEnable}
-          disabled={loading || isOn || isDenied || isUnsupported}
-          className={`text-xs px-4 py-2 rounded-lg border transition-colors shrink-0 self-start sm:self-auto flex items-center gap-2 ${
-            isOn
-              ? "border-status-green/40 text-status-green cursor-default"
-              : isDenied || isUnsupported
-              ? "border-border text-muted-foreground cursor-not-allowed opacity-60"
-              : "btn-silver"
-          }`}
-        >
-          {loading && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
-          {isOn ? "Ativadas" : isDenied ? "Bloqueadas" : "Ativar"}
-        </button>
+        {isOn ? (
+          <StatusPill tone="success" size="md" className="self-start sm:self-auto">Ativadas</StatusPill>
+        ) : isDenied ? (
+          <StatusPill tone="danger" size="md" className="self-start sm:self-auto">Bloqueadas</StatusPill>
+        ) : isUnsupported ? (
+          <StatusPill tone="neutral" size="md" className="self-start sm:self-auto">Indisponível</StatusPill>
+        ) : (
+          <Button onClick={handleEnable} disabled={loading} className="shrink-0 self-start sm:self-auto">
+            {loading && <Loader2 className="h-4 w-4 animate-spin" />}
+            Ativar
+          </Button>
+        )}
       </div>
 
       {isOn && (
-        <div className="flex flex-col sm:flex-row gap-2">
-          <button
-            onClick={handleEnable}
-            disabled={loading}
-            className="text-xs px-4 py-2 rounded-lg border border-primary/40 text-primary hover:bg-primary/10 transition-colors w-full sm:w-auto flex items-center justify-center gap-2"
-          >
-            {loading && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
+        <div className="flex flex-col sm:flex-row gap-2 pt-1">
+          <Button variant="outline" onClick={handleEnable} disabled={loading} className="w-full sm:w-auto">
+            {loading && <Loader2 className="h-4 w-4 animate-spin" />}
             Registrar este dispositivo
-          </button>
-          <button
-            onClick={showLocalWelcome}
-            className="text-xs px-4 py-2 rounded-lg border border-border text-muted-foreground hover:text-foreground hover:border-primary/40 transition-colors w-full sm:w-auto"
-          >
+          </Button>
+          <Button variant="ghost" onClick={showLocalWelcome} className="w-full sm:w-auto">
             Enviar notificação de teste
-          </button>
+          </Button>
         </div>
       )}
-    </div>
+    </SectionCard>
   );
 };

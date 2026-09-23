@@ -1,5 +1,7 @@
 import { Component, Fragment, ReactNode } from "react";
+import { AlertTriangle } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { PageContainer, SectionCard } from "@/components/ds";
 import { clearReloadLock, reloadAppSafely } from "@/lib/appReload";
 
 interface Props {
@@ -86,20 +88,26 @@ export class ErrorBoundary extends Component<Props, State> {
 
 
     return (
-      <div className="min-h-screen bg-background flex items-center justify-center px-6">
-        <div className="max-w-sm w-full text-center space-y-4">
-          <h1 className="text-xl font-semibold text-foreground">Algo travou por aqui</h1>
-          <p className="text-sm text-muted-foreground leading-relaxed">
-            Seus dados foram guardados. Recarregue a tela para continuar de onde parou.
-          </p>
-          <p className="text-[11px] text-muted-foreground/70">
-            Se estiver com a tradução automática do navegador ligada nesta página, desative-a — ela
-            costuma travar a tela.
-          </p>
-          <Button type="button" onClick={this.handleReload} className="w-full">
-            Recarregar
-          </Button>
-        </div>
+      <div className="min-h-[100dvh] bg-background flex items-center justify-center py-10">
+        <PageContainer variant="narrow">
+          <SectionCard role="alert" className="max-w-sm mx-auto text-center space-y-4">
+            <div className="mx-auto h-12 w-12 rounded-full bg-destructive/10 flex items-center justify-center">
+              <AlertTriangle className="h-6 w-6 text-destructive" aria-hidden />
+            </div>
+            <div className="space-y-2">
+              <h1 className="text-[22px] font-semibold text-foreground">Algo travou por aqui</h1>
+              <p className="text-sm text-muted-foreground leading-relaxed">
+                Seus dados foram guardados. Recarregue a tela para continuar de onde parou.
+              </p>
+              <p className="text-xs text-muted-foreground leading-relaxed">
+                Se a tradução automática do navegador estiver ligada nesta página, desative-a: ela costuma travar a tela.
+              </p>
+            </div>
+            <Button type="button" size="lg" onClick={this.handleReload} className="w-full">
+              Recarregar
+            </Button>
+          </SectionCard>
+        </PageContainer>
       </div>
     );
   }

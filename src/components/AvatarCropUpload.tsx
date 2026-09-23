@@ -5,9 +5,10 @@ import { useAuth } from "@/hooks/useAuth";
 import { useQueryClient } from "@tanstack/react-query";
 import { Camera, Loader2, Trash2, ZoomIn, RotateCcw } from "lucide-react";
 import { toast } from "sonner";
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { Slider } from "@/components/ui/slider";
+import { Button } from "@/components/ui/button";
 import { UserAvatar } from "@/components/UserAvatar";
+import { BottomSheet, ConfirmDialog } from "@/components/ds";
 
 interface Props {
   profileId: string;
@@ -49,6 +50,7 @@ export const AvatarCropUpload = ({ profileId, fullName, avatarUrl, size = 96 }: 
   const [areaPx, setAreaPx] = useState<Area | null>(null);
   const [saving, setSaving] = useState(false);
   const [removing, setRemoving] = useState(false);
+  const [confirmRemove, setConfirmRemove] = useState(false);
 
   const onSelect = (file: File) => {
     if (!file.type.startsWith("image/")) return toast.error("Selecione uma imagem");
@@ -91,7 +93,7 @@ export const AvatarCropUpload = ({ profileId, fullName, avatarUrl, size = 96 }: 
   };
 
   const handleRemove = async () => {
-    if (!confirm("Remover foto de perfil?")) return;
+    setConfirmRemove(false);
     setRemoving(true);
     try {
       const { error } = await supabase.from("profiles").update({ avatar_url: null }).eq("id", profileId);
@@ -113,35 +115,43 @@ export const AvatarCropUpload = ({ profileId, fullName, avatarUrl, size = 96 }: 
         <button
           type="button"
           onClick={() => inputRef.current?.click()}
-          className="relative group rounded-full overflow-hidden shrink-0"
+          className="relative group rounded-full overflow-hidden shrink-0 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 ring-offset-background"
           style={{ width: size, height: size }}
           aria-label="Trocar foto de perfil"
         >
           <UserAvatar name={fullName} avatarUrl={avatarUrl} size={size} />
-          <div className="absolute inset-0 bg-background/60 opacity-0 group-hover:opacity-100 flex items-center justify-center transition-opacity">
-            <Camera className="h-5 w-5 text-foreground" />
+          <div className="absolute inset-0 bg-background/60 opacity-0 group-hover:opacity-100 group-focus-visible:opacity-100 flex items-center justify-center transition-opacity duration-ds-1">
+            <Camera className="h-5 w-5 text-foreground" aria-hidden />
           </div>
         </button>
-        <div className="flex flex-col gap-1.5">
-          <button
-            type="button"
-            onClick={() => inputRef.current?.click()}
-            className="text-xs px-3 py-1.5 rounded-lg border border-border hover:bg-muted text-foreground flex items-center gap-1.5"
-          >
+        <div className="flex flex-col items-start gap-2">
+          <Button type="button" variant="outline" size="sm" onClick={() => inputRef.current?.click()}>
             <Camera className="h-3.5 w-3.5" />
             {avatarUrl ? "Trocar foto" : "Adicionar foto"}
-          </button>
+          </Button>
           {avatarUrl && (
-            <button
+            <Button
               type="button"
+              variant="ghost"
+              size="sm"
               disabled={removing}
-              onClick={handleRemove}
-              className="text-xs px-3 py-1.5 rounded-lg text-muted-foreground hover:text-destructive flex items-center gap-1.5 disabled:opacity-50"
+              onClick={() => setConfirmRemove(true)}
+              className="text-muted-foreground hover:text-destructive"
             >
               <Trash2 className="h-3.5 w-3.5" /> Remover
-            </button>
+            </Button>
           )}
         </div>
+        <ConfirmDialog
+          open={confirmRemove}
+          onOpenChange={setConfirmRemove}
+          title="Remover foto de perfil?"
+          description="A foto atual será apagada e o avatar voltará a mostrar as iniciais."
+          confirmLabel="Remover"
+          destructive
+          loading={removing}
+          onConfirm={handleRemove}
+        />
         <input
           ref={inputRef}
           type="file"
@@ -155,63 +165,52 @@ export const AvatarCropUpload = ({ profileId, fullName, avatarUrl, size = 96 }: 
         />
       </div>
 
-      <Dialog open={!!src} onOpenChange={(o) => !o && !saving && setSrc(null)}>
-        <DialogContent className="max-w-md">
-          <DialogHeader>
-            <DialogTitle>Ajustar foto de perfil</DialogTitle>
-          </DialogHeader>
-          {src && (
-            <div className="space-y-4">
-              <div className="relative w-full h-72 bg-black rounded-lg overflow-hidden">
-                <Cropper
-                  image={src}
-                  crop={crop}
-                  zoom={zoom}
-                  rotation={rotation}
-                  aspect={1}
-                  cropShape="round"
-                  showGrid={false}
-                  onCropChange={setCrop}
-                  onZoomChange={setZoom}
-                  onCropComplete={onCropComplete}
-                />
-              </div>
-              <div className="space-y-3">
-                <div className="flex items-center gap-3">
-                  <ZoomIn className="h-4 w-4 text-muted-foreground shrink-0" />
-                  <Slider value={[zoom]} min={1} max={4} step={0.05} onValueChange={(v) => setZoom(v[0])} />
-                </div>
-                <button
-                  type="button"
-                  onClick={() => setRotation((r) => (r + 90) % 360)}
-                  className="text-xs px-3 py-1.5 rounded-lg border border-border hover:bg-muted text-foreground flex items-center gap-1.5"
-                >
-                  <RotateCcw className="h-3.5 w-3.5" /> Girar 90°
-                </button>
-              </div>
-            </div>
-          )}
-          <DialogFooter>
-            <button
-              type="button"
-              disabled={saving}
-              onClick={() => setSrc(null)}
-              className="text-sm px-4 py-2 rounded-lg border border-border hover:bg-muted text-foreground"
-            >
+      <BottomSheet
+        open={!!src}
+        onOpenChange={(o) => !o && !saving && setSrc(null)}
+        title="Ajustar foto de perfil"
+        size="sm"
+        locked={saving}
+        footer={
+          <>
+            <Button type="button" variant="outline" disabled={saving} onClick={() => setSrc(null)}>
               Cancelar
-            </button>
-            <button
-              type="button"
-              disabled={saving}
-              onClick={handleSave}
-              className="btn-silver text-sm flex items-center gap-2 disabled:opacity-60"
-            >
+            </Button>
+            <Button type="button" disabled={saving} onClick={handleSave}>
               {saving && <Loader2 className="h-4 w-4 animate-spin" />}
               {saving ? "Salvando..." : "Salvar"}
-            </button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+            </Button>
+          </>
+        }
+      >
+        {src && (
+          <div className="space-y-4">
+            <div className="relative w-full h-72 bg-muted rounded-ds overflow-hidden">
+              <Cropper
+                image={src}
+                crop={crop}
+                zoom={zoom}
+                rotation={rotation}
+                aspect={1}
+                cropShape="round"
+                showGrid={false}
+                onCropChange={setCrop}
+                onZoomChange={setZoom}
+                onCropComplete={onCropComplete}
+              />
+            </div>
+            <div className="space-y-3">
+              <div className="flex items-center gap-3">
+                <ZoomIn className="h-4 w-4 text-muted-foreground shrink-0" aria-hidden />
+                <Slider aria-label="Zoom" value={[zoom]} min={1} max={4} step={0.05} onValueChange={(v) => setZoom(v[0])} />
+              </div>
+              <Button type="button" variant="outline" size="sm" onClick={() => setRotation((r) => (r + 90) % 360)}>
+                <RotateCcw className="h-3.5 w-3.5" /> Girar 90°
+              </Button>
+            </div>
+          </div>
+        )}
+      </BottomSheet>
     </>
   );
 };

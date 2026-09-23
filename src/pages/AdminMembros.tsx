@@ -1,26 +1,31 @@
-import { useState, useMemo, useRef, useEffect } from "react";
+import { useState, useMemo, useRef, useEffect, Fragment } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import * as XLSX from "xlsx";
-import { motion, AnimatePresence } from "framer-motion";
+import { motion } from "framer-motion";
 import { AppLayout } from "@/components/AppLayout";
 import { AdminMonthFilter } from "@/components/AdminMonthFilter";
 import { useAdminFilter } from "@/contexts/AdminFilterContext";
 import { useMembers, useSessionCatalog } from "@/hooks/useAdminData";
 import { staggerContainer, fadeUpItem } from "@/lib/animations";
-import { initials, toTitleCase, shortName, normalizeText, matchesSearch } from "@/lib/formatName";
-import { Search, ChevronDown, ChevronUp, Users, Target, CheckCircle2, AlertTriangle, Plus, Edit, Trash2, Upload, Download, KeyRound, Loader2, AlertCircle, UserCog, Send, Power, ListTodo, Copy, GitMerge } from "lucide-react";
-import { EmptyState } from "@/components/EmptyState";
+import { toTitleCase, shortName, normalizeText, matchesSearch } from "@/lib/formatName";
+import {
+  Search, ChevronDown, ChevronRight, Users, CheckCircle2, AlertTriangle, Plus, Edit, Trash2, Upload, Download, KeyRound,
+  Loader2, AlertCircle, UserCog, Send, Power, ListTodo, GitMerge, Clock, FileText,
+} from "lucide-react";
+import { PENDING_CONFIRMATION_HINT } from "@/lib/bookingStatus";
 import { MemberSessionEditor } from "@/components/MemberSessionEditor";
 import { AdminMemberNote } from "@/components/AdminMemberNote";
 import { LibertyMark } from "@/components/LibertyMark";
-import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
+import { UserAvatar } from "@/components/UserAvatar";
 import { AvatarUpload } from "@/components/AvatarUpload";
 import { AccessCredentialsDialog, AccessCredentialsData } from "@/components/AccessCredentialsDialog";
-import { Progress } from "@/components/ui/progress";
 import { supabase } from "@/integrations/supabase/client";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
+import {
+  BottomSheet, Callout, Chip, ConfirmDialog, EmptyState, ErrorState, IconButton, ListRow, LoadingState,
+  PageContainer, PageHeader, ProgressBar, SectionCard, SectionHeader, SelectField, StatusPill, TextField,
+} from "@/components/ds";
 import { toast } from "sonner";
 
 interface MemberForm {
@@ -42,6 +47,16 @@ const emptyForm: MemberForm = {
   program_end_date: "",
   member_tier: "begin",
 };
+
+interface ConfirmRequest {
+  title: string;
+  description?: string;
+  confirmLabel?: string;
+  destructive?: boolean;
+  onConfirm: () => void | Promise<void>;
+}
+
+type MemberFilter = "all" | "on_track" | "behind" | "zero" | "no_bookings";
 
 interface ImportResult {
   email: string;
@@ -212,14 +227,14 @@ const cleanImportedValue = (field: string, value: unknown) => {
 };
 
 const AdminMembrosPage = () => {
-  const { data: members, isLoading } = useMembers();
+  const { data: members, isLoading, isError, refetch } = useMembers();
   const { data: sessions } = useSessionCatalog();
   const { mode, monthKey } = useAdminFilter();
   const queryClient = useQueryClient();
   const [searchParams] = useSearchParams();
   const [search, setSearch] = useState("");
   const [expandedId, setExpandedId] = useState<string | null>(null);
-  const [filter, setFilter] = useState<"all" | "on_track" | "behind" | "zero" | "no_bookings">("all");
+  const [filter, setFilter] = useState<MemberFilter>("all");
   const [sortMode, setSortMode] = useState<"name" | "priority">("name");
   const [tierTab, setTierTab] = useState<"begin" | "liberty" | "inactive">("begin");
   const [reportModal, setReportModal] = useState<{ booking_id: string; session_name: string } | null>(null);
@@ -240,6 +255,10 @@ const AdminMembrosPage = () => {
   const [editingMemberId, setEditingMemberId] = useState<string | null>(null);
   const [form, setForm] = useState<MemberForm>(emptyForm);
   const [saving, setSaving] = useState(false);
+
+  // Confirmações (substituem window.confirm): a ação só roda depois do "Confirmar".
+  const [confirmState, setConfirmState] = useState<ConfirmRequest | null>(null);
+  const askConfirm = (req: ConfirmRequest) => setConfirmState(req);
 
   // Translate common backend errors to Portuguese for friendly display
   const translateErrorToPt = (msg: string): string => {
@@ -325,12 +344,12 @@ const AdminMembrosPage = () => {
     const headers = [
       "Nome", "Empresa", "E-mail", "Telefone", "Tipo",
       "Início do programa", "Encerramento previsto",
-      "Sessões realizadas", "Sessões agendadas", "Progresso (12)",
+      "Sessões realizadas", "Sessões agendadas", "A confirmar", "Progresso (12)",
       "Próxima sessão", "Última sessão", "Tarefas pendentes",
     ];
     const cols = [
       { wch: 30 }, { wch: 28 }, { wch: 30 }, { wch: 18 }, { wch: 10 },
-      { wch: 18 }, { wch: 20 }, { wch: 18 }, { wch: 18 }, { wch: 14 },
+      { wch: 18 }, { wch: 20 }, { wch: 18 }, { wch: 18 }, { wch: 12 }, { wch: 14 },
       { wch: 16 }, { wch: 16 }, { wch: 16 },
     ];
 
@@ -344,6 +363,7 @@ const AdminMembrosPage = () => {
       fmtDate(m.program_end_date),
       m.total_completed,
       m.total_scheduled,
+      m.total_pending_confirmation ?? 0,
       `${Math.min(100, Math.round((m.total_completed / 12) * 100))}%`,
       m.has_next_session ? "Sim" : "Não",
       fmtDate(m.last_session_date),
@@ -376,10 +396,11 @@ const AdminMembrosPage = () => {
       ["Membros Liberty", liberty.length],
       ["Sessões realizadas (total)", active.reduce((s, m) => s + m.total_completed, 0)],
       ["Sessões agendadas (total)", active.reduce((s, m) => s + m.total_scheduled, 0)],
+      ["Sessões a confirmar (passaram sem confirmação do mentor)", active.reduce((s, m) => s + (m.total_pending_confirmation ?? 0), 0)],
       ["Jornadas completas (12 sessões)", active.filter((m) => m.total_completed >= 12).length],
       ["Sem nenhuma sessão realizada", active.filter((m) => m.total_completed === 0).length],
     ]);
-    resumo["!cols"] = [{ wch: 34 }, { wch: 24 }];
+    resumo["!cols"] = [{ wch: 52 }, { wch: 24 }];
     XLSX.utils.book_append_sheet(wb, resumo, "Resumo");
 
     XLSX.writeFile(wb, `membros_ativos_${new Date().toISOString().slice(0, 10)}.xlsx`);
@@ -525,7 +546,7 @@ const AdminMembrosPage = () => {
         setEditOpen(false);
       } else {
         // Create new member.
-        //  - With email -> cria conta de acesso (senha padrão).
+        //  - With email -> cria conta de acesso com senha aleatória (devolvida em data.password).
         //  - Sem email  -> cria só o cadastro; o acesso pode ser gerado depois.
         const { data, error } = await supabase.functions.invoke("create-user", {
           body: {
@@ -565,7 +586,13 @@ const AdminMembrosPage = () => {
         }
         if (data?.error) throw new Error(translateErrorToPt(data.error));
         if (data?.password) {
-          toast.success(`Membro criado! Senha: ${data.password}`);
+          toast.success("Membro criado com acesso");
+          setCredentialsDialog({
+            full_name: form.full_name.trim(),
+            email: data.email || form.email.trim().toLowerCase(),
+            password: data.password,
+            role: "liberty",
+          });
         } else {
           toast.success("Membro criado sem acesso. Adicione um e-mail depois para gerar a senha.");
         }
@@ -581,8 +608,15 @@ const AdminMembrosPage = () => {
     }
   };
 
-  const handleDelete = async (id: string, name: string) => {
-    if (!confirm(`Excluir DEFINITIVAMENTE o membro "${name}"?\n\nIsso remove o acesso, todas as sessões, tarefas, relatórios e notificações associados. Esta ação não pode ser desfeita.`)) return;
+  const handleDelete = (id: string, name: string) => askConfirm({
+    title: `Excluir definitivamente "${name}"?`,
+    description: "Isso remove o acesso, todas as sessões, tarefas, relatórios e notificações associados. Esta ação não pode ser desfeita.",
+    confirmLabel: "Excluir",
+    destructive: true,
+    onConfirm: () => performDelete(id),
+  });
+
+  const performDelete = async (id: string) => {
     try {
       const { data, error } = await supabase.functions.invoke("admin-delete-user", {
         body: { profile_id: id },
@@ -599,8 +633,15 @@ const AdminMembrosPage = () => {
     }
   };
 
-  const handleRemoveBooking = async (bookingId: string, sessionName: string) => {
-    if (!confirm(`Remover a sessão "${sessionName}"? Esta ação apaga o agendamento, tarefas e relatório associados.`)) return;
+  const handleRemoveBooking = (bookingId: string, sessionName: string) => askConfirm({
+    title: `Remover a sessão "${sessionName}"?`,
+    description: "Esta ação apaga o agendamento, as tarefas e o relatório associados.",
+    confirmLabel: "Remover",
+    destructive: true,
+    onConfirm: () => performRemoveBooking(bookingId),
+  });
+
+  const performRemoveBooking = async (bookingId: string) => {
     try {
       await supabase.from("session_tasks").delete().eq("booking_id", bookingId);
       await supabase.from("booking_reports").delete().eq("booking_id", bookingId);
@@ -615,10 +656,17 @@ const AdminMembrosPage = () => {
 
   const [invitingId, setInvitingId] = useState<string | null>(null);
   const [credentialsDialog, setCredentialsDialog] = useState<AccessCredentialsData | null>(null);
-  const handleInvite = async (member: any) => {
+  const handleInvite = (member: any) => {
     if (!member.email) { toast.error("Membro sem e-mail cadastrado"); return; }
-    const ok = confirm(`Gerar acesso para ${member.full_name}?\n\nIsso vai redefinir a senha para a padrão e abrir uma janela com a mensagem pronta para copiar.`);
-    if (!ok) return;
+    askConfirm({
+      title: `Gerar acesso para ${shortName(member.full_name)}?`,
+      description: "Uma nova senha temporária aleatória será gerada (a senha atual deixa de valer) e a mensagem pronta para enviar aparece em seguida.",
+      confirmLabel: "Gerar acesso",
+      onConfirm: () => performInvite(member),
+    });
+  };
+
+  const performInvite = async (member: any) => {
     setInvitingId(member.id);
     try {
       const { data, error } = await supabase.functions.invoke("reset-and-invite", {
@@ -643,11 +691,20 @@ const AdminMembrosPage = () => {
   };
 
   const [togglingActiveId, setTogglingActiveId] = useState<string | null>(null);
-  const handleToggleActive = async (member: any) => {
+  const handleToggleActive = (member: any) => {
     const nextActive = !member.is_active;
-    const verb = nextActive ? "reativar" : "inativar";
-    const extra = !nextActive ? "\n\nSessões futuras agendadas serão canceladas automaticamente." : "";
-    if (!confirm(`Deseja ${verb} o membro "${member.full_name}"?${extra}`)) return;
+    askConfirm({
+      title: nextActive ? `Reativar ${shortName(member.full_name)}?` : `Inativar ${shortName(member.full_name)}?`,
+      description: nextActive
+        ? "O membro volta a acessar a plataforma e a agendar sessões."
+        : "Sessões futuras agendadas serão canceladas automaticamente.",
+      confirmLabel: nextActive ? "Reativar" : "Inativar",
+      destructive: !nextActive,
+      onConfirm: () => performToggleActive(member, nextActive),
+    });
+  };
+
+  const performToggleActive = async (member: any, nextActive: boolean) => {
     setTogglingActiveId(member.id);
     try {
       const { data, error } = await supabase.functions.invoke("admin-set-user-active", {
@@ -757,8 +814,14 @@ const AdminMembrosPage = () => {
     }
   };
 
-  const undoMerge = async (logId: string) => {
-    if (!confirm("Desfazer esta mesclagem? O perfil removido será restaurado com os dados e sessões que tinha antes.")) return;
+  const undoMerge = (logId: string) => askConfirm({
+    title: "Desfazer esta mesclagem?",
+    description: "O perfil removido será restaurado com os dados e sessões que tinha antes.",
+    confirmLabel: "Desfazer",
+    onConfirm: () => performUndoMerge(logId),
+  });
+
+  const performUndoMerge = async (logId: string) => {
     setMergeBusy(true);
     try {
       const { data, error } = await supabase.functions.invoke("admin-merge-profiles", {
@@ -818,18 +881,6 @@ const AdminMembrosPage = () => {
     return list;
   }, [members, search, filter, filterKey, tierTab, sortMode]);
 
-  const getMonthColor = (count: number) => {
-    if (count >= 2) return "bg-status-green text-status-green";
-    if (count === 1) return "bg-status-yellow text-status-yellow";
-    return "bg-destructive text-destructive";
-  };
-
-  const getMonthBadgeBg = (count: number) => {
-    if (count >= 2) return "bg-status-green/15 border-border";
-    if (count === 1) return "bg-status-yellow/15 border-status-yellow/30";
-    return "bg-destructive/15 border-border";
-  };
-
   const monthColumns = useMemo(() => {
     const year = new Date().getFullYear();
     return Array.from({ length: 12 }, (_, i) =>
@@ -847,866 +898,905 @@ const AdminMembrosPage = () => {
 
   const isOverview = mode === "overview";
 
+  const tierCounts = {
+    begin: members?.filter((m) => m.member_tier === "begin" && m.is_active !== false).length ?? 0,
+    liberty: members?.filter((m) => m.member_tier === "liberty" && m.is_active !== false).length ?? 0,
+    inactive: members?.filter((m) => m.is_active === false).length ?? 0,
+  };
+
+  // Base da aba atual (tier + busca), usada só para os contadores dos chips de filtro.
+  const baseList = useMemo(() => {
+    if (!members) return [];
+    let list = tierTab === "inactive"
+      ? members.filter((m) => m.is_active === false)
+      : members.filter((m) => m.member_tier === tierTab && m.is_active !== false);
+    if (search) {
+      list = list.filter(
+        (m) => matchesSearch(m.full_name, search) || matchesSearch(m.company_name || "", search) || matchesSearch(m.email || "", search)
+      );
+    }
+    return list;
+  }, [members, tierTab, search]);
+
+  const matchesFilter = (m: NonNullable<typeof members>[number], key: MemberFilter) => {
+    if (key === "all") return true;
+    if (key === "no_bookings") return !m.has_next_session;
+    if (filterKey) {
+      const c = m.monthly_counts[filterKey] || 0;
+      if (key === "on_track") return c >= 2;
+      if (key === "behind") return c === 1;
+      return c === 0;
+    }
+    if (key === "on_track") return m.total_completed >= 12;
+    if (key === "behind") return m.total_completed > 0 && m.total_completed < 12;
+    return m.total_completed === 0;
+  };
+
+  const filterOptions: { key: MemberFilter; label: string }[] = [
+    { key: "all", label: "Todos" },
+    { key: "on_track", label: filterKey ? "No ritmo" : "Jornada completa" },
+    { key: "behind", label: filterKey ? "Parcial" : "Em andamento" },
+    { key: "zero", label: "Sem sessão" },
+    { key: "no_bookings", label: "Sem próxima sessão" },
+  ];
+
+  const monthTone = (count: number): "success" | "warning" | "danger" => (count >= 2 ? "success" : count === 1 ? "warning" : "danger");
+  const monthCellClass = (count: number) => {
+    const tone = monthTone(count);
+    if (tone === "success") return "bg-status-green/15 text-status-green";
+    if (tone === "warning") return "bg-status-yellow/15 text-status-yellow";
+    return "bg-destructive/10 text-destructive";
+  };
+  const monthStatusLabel = (count: number) => (count >= 2 ? "No ritmo" : count === 1 ? "Parcial" : "Sem sessão");
+
+  const openImport = () => {
+    setImportResults(null);
+    setImportSummary(null);
+    setImportTier(tierTab === "inactive" ? "begin" : tierTab);
+    setImportOpen(true);
+  };
+
+  const pageTitle = tierTab === "liberty" ? "Membros Liberty" : tierTab === "inactive" ? "Membros encerrados" : "Membros Begin";
+  const pageDescription = tierTab === "inactive"
+    ? `${tierCounts.inactive} membros encerrados · sem acesso a agendamentos`
+    : `${tierCounts[tierTab]} membros · Meta: 2 sessões por mês · 12 sessões = jornada completa`;
+
   const renderMemberForm = () => (
     <div className="space-y-4">
       {editingMemberId && (
         <div className="pb-4 border-b border-border">
-          <label className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider block mb-2">Foto de perfil</label>
+          <p className="text-sm font-medium text-foreground mb-2">Foto de perfil</p>
           <AvatarUpload
             profileId={editingMemberId}
             fullName={form.full_name || "Membro"}
-            avatarUrl={members?.find(m => m.id === editingMemberId)?.avatar_url ?? null}
+            avatarUrl={members?.find((m) => m.id === editingMemberId)?.avatar_url ?? null}
             size={72}
           />
         </div>
       )}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-        <div>
-          <label className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider block mb-1.5">Nome completo *</label>
-          <input value={form.full_name} onChange={e => setForm(f => ({ ...f, full_name: e.target.value }))} className="input-begin text-sm h-10 w-full" placeholder="Nome completo" />
-        </div>
-        <div>
-          <label className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider block mb-1.5">Telefone *</label>
-          <input value={form.phone} onChange={e => setForm(f => ({ ...f, phone: e.target.value }))} className="input-begin text-sm h-10 w-full" placeholder="+55 11 99999-9999" />
-        </div>
-        <div className="lg:col-span-2">
-          <label className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider block mb-1.5">Email (opcional, pode preencher depois)</label>
-          <input type="email" value={form.email} onChange={e => setForm(f => ({ ...f, email: e.target.value }))} className="input-begin text-sm h-10 w-full" placeholder="email@exemplo.com (gera o acesso)" disabled={!!editingMemberId} />
-        </div>
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+        <TextField
+          label="Nome completo *"
+          value={form.full_name}
+          onChange={(e) => setForm((f) => ({ ...f, full_name: e.target.value }))}
+          placeholder="Nome completo"
+          autoComplete="off"
+        />
+        <TextField
+          label="Telefone *"
+          value={form.phone}
+          onChange={(e) => setForm((f) => ({ ...f, phone: e.target.value }))}
+          placeholder="+55 11 99999-9999"
+          inputMode="tel"
+        />
+        <TextField
+          containerClassName="sm:col-span-2"
+          label="E-mail"
+          hint={editingMemberId ? "O e-mail é alterado em Editar cadastro completo." : "Opcional. Com e-mail, o acesso é criado automaticamente."}
+          type="email"
+          value={form.email}
+          onChange={(e) => setForm((f) => ({ ...f, email: e.target.value }))}
+          placeholder="email@exemplo.com"
+          disabled={!!editingMemberId}
+        />
         {!editingMemberId && (
-          <div className="lg:col-span-2 text-[10px] text-muted-foreground bg-muted/40 rounded-lg p-3">
-            <KeyRound className="inline h-3 w-3 mr-1" />
-            Com e-mail: criamos a conta automaticamente com a senha padrão <strong>Liberty@2026</strong>. Sem e-mail: salvamos só o cadastro. Depois, é só adicionar o e-mail e clicar em <strong>Gerar acesso</strong>.
+          <div className="sm:col-span-2">
+            <Callout tone="info" icon={KeyRound}>
+              Com e-mail: criamos a conta com uma senha temporária aleatória, exibida em seguida para você enviar por WhatsApp.
+              Sem e-mail: salvamos só o cadastro. Depois, é só adicionar o e-mail e usar Gerar acesso.
+            </Callout>
           </div>
         )}
-        <div>
-          <label className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider block mb-1.5">Empresa</label>
-          <input value={form.company_name} onChange={e => setForm(f => ({ ...f, company_name: e.target.value }))} className="input-begin text-sm h-10 w-full" placeholder="Nome da empresa" />
-        </div>
-        <div>
-          <label className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider block mb-1.5">Início do programa</label>
-          <input type="date" value={form.program_start_date} onChange={e => setForm(f => ({ ...f, program_start_date: e.target.value }))} className="input-begin text-sm h-10 w-full" />
-        </div>
-        <div>
-          <label className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider block mb-1.5">Fim do programa</label>
-          <input type="date" value={form.program_end_date} onChange={e => setForm(f => ({ ...f, program_end_date: e.target.value }))} className="input-begin text-sm h-10 w-full" />
-        </div>
-        <div className="lg:col-span-2">
-          <label className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider block mb-1.5">Tipo de membro *</label>
-          <div className="flex gap-2">
-            {(["begin", "liberty"] as const).map((t) => {
-              const active = form.member_tier === t;
-              const isLib = t === "liberty";
-              return (
-                <button
-                  key={t}
-                  type="button"
-                  onClick={() => setForm(f => ({ ...f, member_tier: t }))}
-                  className={`flex-1 px-3 py-2 rounded-lg text-xs font-semibold border transition-colors ${
-                    active
-                      ? isLib
-                        ? "bg-amber-500/15 border-amber-500/60 text-amber-400"
-                        : "bg-primary/15 border-primary/50 text-primary"
-                      : "border-border text-muted-foreground hover:text-foreground"
-                  }`}
-                >
-                  {isLib ? (<span className="inline-flex items-center gap-1.5"><LibertyMark size={14} /> Liberty (premium)</span>) : "Begin"}
-                </button>
-              );
-            })}
-          </div>
-        </div>
+        <TextField
+          label="Empresa"
+          value={form.company_name}
+          onChange={(e) => setForm((f) => ({ ...f, company_name: e.target.value }))}
+          placeholder="Nome da empresa"
+        />
+        <SelectField
+          label="Tipo de membro *"
+          value={form.member_tier}
+          onChange={(e) => setForm((f) => ({ ...f, member_tier: e.target.value as "begin" | "liberty" }))}
+        >
+          <option value="begin">Begin</option>
+          <option value="liberty">Liberty (premium)</option>
+        </SelectField>
+        <TextField
+          label="Início do programa"
+          type="date"
+          value={form.program_start_date}
+          onChange={(e) => setForm((f) => ({ ...f, program_start_date: e.target.value }))}
+        />
+        <TextField
+          label="Fim do programa"
+          type="date"
+          value={form.program_end_date}
+          onChange={(e) => setForm((f) => ({ ...f, program_end_date: e.target.value }))}
+        />
       </div>
     </div>
   );
 
-  return (
-    <AppLayout role="admin">
-      <motion.div variants={staggerContainer} initial="hidden" animate="show" className="space-y-6">
-        <motion.div variants={fadeUpItem} className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
-          <div>
-            <h1 className="text-2xl font-semibold text-foreground">
-              Membros {tierTab === "liberty" ? <span className="text-amber-400">Liberty</span> : tierTab === "inactive" ? <span className="text-muted-foreground">Encerrados</span> : <span>Begin</span>}
-            </h1>
-            <p className="text-muted-foreground text-sm mt-1">
-              {tierTab === "inactive"
-                ? `${(members?.filter(m => m.is_active === false).length ?? 0)} membros encerrados · sem acesso a agendamentos`
-                : `${(members?.filter(m => m.member_tier === tierTab && m.is_active !== false).length ?? 0)} membros · Meta: 2 sessões/mês · 12 sessões = jornada completa`}
-            </p>
-          </div>
-                       <div className="flex items-center gap-3 min-w-0 flex-wrap">
-           {duplicateGroups.length > 0 && (
-             <button onClick={() => setDupOpen(true)} className="text-xs px-4 py-2.5 flex items-center gap-1.5 h-10 rounded-lg border border-status-yellow/40 bg-status-yellow/10 text-status-yellow hover:bg-status-yellow/20 transition-colors">
-               <GitMerge className="h-3.5 w-3.5" /> {duplicateGroups.length} duplicata{duplicateGroups.length > 1 ? "s" : ""}
-             </button>
-           )}
-           <button onClick={exportActiveMembers} className="text-xs px-4 py-2.5 flex items-center gap-1.5 h-10 rounded-lg border border-border text-foreground hover:bg-muted transition-colors">
-             <Download className="h-3.5 w-3.5" /> Exportar planilha
-           </button>
-           <button onClick={() => { setImportResults(null); setImportSummary(null); setImportTier(tierTab === "inactive" ? "begin" : tierTab); setImportOpen(true); }} className="text-xs px-4 py-2.5 flex items-center gap-1.5 h-10 rounded-lg border border-border text-foreground hover:bg-muted transition-colors">
-             <Upload className="h-3.5 w-3.5" /> Importar planilha
-           </button>
+  type MemberRow = NonNullable<typeof members>[number];
 
-           <button onClick={openAdd} className="btn-silver text-xs px-4 py-2.5 flex items-center gap-1.5 h-10 rounded-lg">
-             <Plus className="h-3.5 w-3.5" /> Novo membro
-           </button>
-           <AdminMonthFilter />
-          </div>
-        </motion.div>
+  const renderActions = (member: MemberRow) => (
+    <div className="flex items-center gap-0.5" onClick={(e) => e.stopPropagation()}>
+      <IconButton
+        aria-label={`Gerar acesso e mensagem de convite para ${shortName(member.full_name)}`}
+        title="Gerar acesso (e-mail e senha)"
+        size="sm"
+        disabled={invitingId === member.id}
+        onClick={() => handleInvite(member)}
+      >
+        {invitingId === member.id ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
+      </IconButton>
+      <Link
+        to={`/admin/membros/${member.id}/editar`}
+        aria-label={`Editar cadastro completo de ${shortName(member.full_name)}`}
+        title="Editar cadastro completo"
+        className="btn-ghost btn-icon btn-sm h-8 w-8 hit-44 text-muted-foreground hover:text-foreground"
+      >
+        <UserCog className="h-4 w-4" />
+      </Link>
+      <IconButton
+        aria-label={`Editar dados básicos de ${shortName(member.full_name)}`}
+        title="Editar dados básicos"
+        size="sm"
+        onClick={() => openEdit(member)}
+      >
+        <Edit className="h-4 w-4" />
+      </IconButton>
+      <IconButton
+        aria-label={member.is_active ? `Inativar ${shortName(member.full_name)}` : `Reativar ${shortName(member.full_name)}`}
+        title={member.is_active ? "Inativar acesso do membro" : "Reativar acesso do membro"}
+        size="sm"
+        disabled={togglingActiveId === member.id}
+        onClick={() => handleToggleActive(member)}
+        className={member.is_active ? "" : "text-destructive hover:text-destructive"}
+      >
+        {togglingActiveId === member.id ? <Loader2 className="h-4 w-4 animate-spin" /> : <Power className="h-4 w-4" />}
+      </IconButton>
+      <IconButton
+        aria-label={`Excluir ${shortName(member.full_name)} permanentemente`}
+        title="Excluir membro permanentemente"
+        size="sm"
+        onClick={() => handleDelete(member.id, member.full_name)}
+        className="text-muted-foreground hover:text-destructive"
+      >
+        <Trash2 className="h-4 w-4" />
+      </IconButton>
+    </div>
+  );
 
-        {/* Tier tabs */}
-        <motion.div variants={fadeUpItem} className="flex gap-2 border-b border-border overflow-x-auto scrollbar-hide">
-          {([
-            { key: "begin", label: "Membros Begin", count: members?.filter(m => m.member_tier === "begin" && m.is_active !== false).length ?? 0 },
-            { key: "liberty", label: "Membros Liberty", count: members?.filter(m => m.member_tier === "liberty" && m.is_active !== false).length ?? 0 },
-            { key: "inactive", label: "Encerrados", count: members?.filter(m => m.is_active === false).length ?? 0 },
-          ] as const).map((t) => {
-            const active = tierTab === t.key;
-            const isLib = t.key === "liberty";
-            const isInactive = t.key === "inactive";
-            return (
-              <button
-                key={t.key}
-                onClick={() => setTierTab(t.key)}
-                className={`px-4 py-2.5 text-sm font-medium border-b-2 shrink-0 whitespace-nowrap -mb-px transition-colors flex items-center gap-2 ${
-                  active
-                    ? isLib
-                      ? "border-amber-500 text-amber-400"
-                      : isInactive
-                        ? "border-muted-foreground text-foreground"
-                        : "border-primary/20 text-primary"
-                    : "border-transparent text-muted-foreground hover:text-foreground"
-                }`}
-              >
-                {isLib && <LibertyMark size={14} />}
-                {t.label}
-                <span className={`text-[10px] px-1.5 py-0.5 rounded-full ${
-                  active ? (isLib ? "bg-amber-500/20" : isInactive ? "bg-muted" : "bg-primary/20") : "bg-muted"
-                }`}>{t.count}</span>
-              </button>
-            );
-          })}
-        </motion.div>
-
-        {/* Filters */}
-        <motion.div variants={fadeUpItem} className="flex flex-col sm:flex-row gap-3">
-          <div className="relative flex-1 max-w-sm">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-            <input
-              type="text"
-              placeholder="Buscar membro ou empresa..."
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              className="input-begin w-full pl-10 text-sm"
-            />
-          </div>
-          <div className="flex gap-2 flex-wrap">
-            {[
-              { key: "all", label: "Todos", icon: Users },
-              { key: "on_track", label: "No ritmo", icon: CheckCircle2 },
-              { key: "behind", label: "Parcial", icon: Target },
-              { key: "zero", label: "Sem sessão", icon: AlertTriangle },
-              { key: "no_bookings", label: "Sem próxima sessão", icon: AlertTriangle },
-            ].map((f) => (
-              <button
-                key={f.key}
-                onClick={() => setFilter(f.key as any)}
-                className={`text-[11px] px-3 py-1.5 rounded-full border transition-colors font-medium flex items-center gap-1.5 ${
-                  filter === f.key
-                    ? "bg-primary text-primary-foreground border-primary/20"
-                    : "border-border text-muted-foreground hover:text-foreground"
-                }`}
-              >
-                <f.icon className="h-3 w-3" />
-                {f.label}
-              </button>
-            ))}
-            <button
-              onClick={() => setSortMode(sortMode === "priority" ? "name" : "priority")}
-              title="Priorizar membros sem sessões / menor progresso no topo"
-              className={`text-[11px] px-3 py-1.5 rounded-full border transition-colors font-medium flex items-center gap-1.5 ${
-                sortMode === "priority"
-                  ? "bg-status-yellow text-background border-status-yellow"
-                  : "border-border text-muted-foreground hover:text-foreground"
-              }`}
+  const renderIdentity = (member: MemberRow, pendingConfirmationCount: number) => {
+    const isComplete = member.total_completed >= 12;
+    return (
+      <div className="flex items-center gap-3 min-w-0">
+        <UserAvatar name={member.full_name} avatarUrl={member.avatar_url} size={36} className={isComplete ? "border-status-green/40" : undefined} />
+        <div className="min-w-0 flex-1">
+          <div className="flex flex-wrap items-center gap-x-2 gap-y-1 min-w-0">
+            <Link
+              to={`/admin/membros/${member.id}`}
+              onClick={(e) => e.stopPropagation()}
+              className="text-sm font-medium text-foreground leading-tight hover:text-primary transition-colors truncate"
             >
-              <AlertTriangle className="h-3 w-3" />
-              {sortMode === "priority" ? "Pendentes no topo ✓" : "Priorizar pendentes"}
-            </button>
+              {shortName(member.full_name)}
+            </Link>
+            {member.member_tier === "liberty" && (
+              <StatusPill tone="brand" size="sm" withDot={false}><LibertyMark size={10} /> Liberty</StatusPill>
+            )}
+            {member.is_active === false && <StatusPill tone="neutral" size="sm" withDot={false}>Inativo</StatusPill>}
+            {!member.email && <StatusPill tone="warning" size="sm" withDot={false}>Sem e-mail</StatusPill>}
           </div>
-        </motion.div>
+          <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 mt-0.5 text-xs text-muted-foreground">
+            {member.company_name && <span className="truncate">{toTitleCase(member.company_name)}</span>}
+            {member.pending_tasks_count > 0 && (
+              <span className="inline-flex items-center gap-1 text-status-yellow shrink-0">
+                <ListTodo className="h-3 w-3" aria-hidden /> {member.pending_tasks_count} tarefa{member.pending_tasks_count > 1 ? "s" : ""}
+              </span>
+            )}
+            {pendingConfirmationCount > 0 && (
+              <span className="inline-flex items-center gap-1 text-status-orange shrink-0" title={PENDING_CONFIRMATION_HINT}>
+                <Clock className="h-3 w-3" aria-hidden /> {pendingConfirmationCount} a confirmar
+              </span>
+            )}
+          </div>
+        </div>
+      </div>
+    );
+  };
 
-        {/* Members table */}
-        {isLoading ? (
-          <div className="space-y-2">
-            {Array.from({ length: 8 }).map((_, i) => (
-              <div key={i} className="glass-card p-4 animate-pulse h-16" />
+  const renderExpanded = (member: MemberRow) => (
+    <div className="space-y-5">
+      <dl className="grid grid-cols-2 lg:grid-cols-4 gap-3 text-xs">
+        {[
+          ["Nome completo", member.full_name],
+          ["E-mail", member.email || "Sem dados"],
+          ["Empresa", member.company_name || "Sem dados"],
+          ["Telefone", member.phone || "Sem dados"],
+          ["Início do programa", member.program_start_date ? new Date(member.program_start_date + "T12:00:00").toLocaleDateString("pt-BR") : "Sem dados"],
+          ["Fim previsto", member.program_end_date ? new Date(member.program_end_date + "T12:00:00").toLocaleDateString("pt-BR") : "Sem dados"],
+          ["Sessões realizadas", `${member.total_completed} de 12`],
+          ["Faltam", `${Math.max(0, 12 - member.total_completed)} sessões`],
+          ["Última sessão", formatShortDate(member.last_session_date)],
+        ].map(([label, value]) => (
+          <div key={label} className="min-w-0">
+            <dt className="text-muted-foreground">{label}</dt>
+            <dd className="text-foreground font-medium truncate">{value}</dd>
+          </div>
+        ))}
+      </dl>
+
+      {(member.pending_confirmation_sessions?.length ?? 0) > 0 && (
+        <div className="space-y-2">
+          <SectionHeader
+            as="h3"
+            title={
+              <span className="inline-flex items-center gap-2 text-status-orange">
+                <Clock className="h-4 w-4" aria-hidden /> A confirmar ({member.pending_confirmation_sessions!.length})
+              </span>
+            }
+            description={PENDING_CONFIRMATION_HINT}
+          />
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
+            {member.pending_confirmation_sessions!.map((ps) => (
+              <Link
+                key={ps.booking_id}
+                to={`/admin/agenda?booking=${ps.booking_id}`}
+                onClick={(e) => e.stopPropagation()}
+                title="Confirmar na agenda"
+                className="flex items-center gap-2 rounded-ds text-sm px-3 min-h-[40px] bg-status-orange/10 border border-status-orange/20 text-foreground hover:bg-status-orange/15 transition-colors min-w-0"
+              >
+                <Clock className="h-4 w-4 shrink-0 text-status-orange" aria-hidden />
+                <span className="truncate">{ps.session_name}</span>
+                <span className="ml-auto text-xs text-muted-foreground tabular-nums shrink-0">{formatShortDate(ps.date)}</span>
+              </Link>
             ))}
           </div>
-        ) : (
-          <motion.div variants={fadeUpItem} className="space-y-2">
-            {/* Header row */}
-            <div className={`hidden lg:grid ${isOverview ? "grid-cols-[minmax(320px,2fr),minmax(120px,1fr),repeat(12,36px)]" : "grid-cols-[minmax(320px,2fr),minmax(120px,1fr),1fr,1fr]"} gap-2 px-4 py-2 text-[10px] font-semibold text-muted-foreground uppercase tracking-wider`}>
-              <span>Membro</span>
-              <span>Progresso</span>
-              {isOverview ? (
-                monthColumns.map((mc) => (
-                  <span key={mc} className="text-center">{formatMonthShort(mc)}</span>
-                ))
-              ) : (
-                <>
-                  <span>Sessões no mês</span>
-                  <span>Status</span>
-                </>
-              )}
-            </div>
+        </div>
+      )}
 
-            {filtered.map((member) => {
-              const progress = (member.total_completed / 12) * 100;
-              const monthCount = filterKey ? (member.monthly_counts[filterKey] || 0) : member.total_completed;
-              const isExpanded = expandedId === member.id;
-              const isComplete = member.total_completed >= 12;
+      {member.completed_sessions.length > 0 && (
+        <div className="space-y-2">
+          <SectionHeader as="h3" title={`Relatórios das sessões realizadas (${member.completed_sessions.length})`} />
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
+            {member.completed_sessions.map((cs) => (
+              <div
+                key={cs.booking_id}
+                className="flex items-center gap-1 rounded-ds text-sm bg-status-green/10 border border-border text-foreground min-h-[40px] pr-1"
+              >
+                <Link
+                  to={`/admin/sessoes/${cs.booking_id}/relatorio`}
+                  onClick={(e) => e.stopPropagation()}
+                  className="flex items-center gap-2 px-3 py-2 flex-1 min-w-0 hover:text-primary transition-colors"
+                  title="Ver detalhes da sessão"
+                >
+                  <CheckCircle2 className="h-4 w-4 text-status-green shrink-0" aria-hidden />
+                  <span className="truncate">{cs.session_name}</span>
+                </Link>
+                <IconButton
+                  aria-label={`Remover sessão ${cs.session_name}`}
+                  title="Remover esta sessão"
+                  size="sm"
+                  className="text-muted-foreground hover:text-destructive"
+                  onClick={(e) => { e.stopPropagation(); handleRemoveBooking(cs.booking_id, cs.session_name); }}
+                >
+                  <Trash2 className="h-4 w-4" />
+                </IconButton>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
+      <MemberSessionEditor
+        member={member}
+        sessions={sessions || []}
+        mentors={mentorsList || []}
+        filterKey={filterKey}
+        onReportClick={(booking_id, session_name) => setReportModal({ booking_id, session_name })}
+      />
+
+      {isOverview && (
+        <div className="lg:hidden pt-4 border-t border-border space-y-2">
+          <h3 className="text-sm font-semibold text-foreground">Sessões por mês</h3>
+          <div className="flex gap-2 flex-wrap">
+            {monthColumns.map((mc) => {
+              const c = member.monthly_counts[mc] || 0;
               return (
-                <div key={member.id}>
-                  <div
-                    role="button"
-                    tabIndex={0}
-                    onClick={() => setExpandedId(isExpanded ? null : member.id)}
-                    onKeyDown={(e) => {
-                      if (e.key === "Enter" || e.key === " ") {
-                        e.preventDefault();
-                        setExpandedId(isExpanded ? null : member.id);
-                      }
-                    }}
-                    className={`glass-card p-4 w-full text-left cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50 ${
-                      isComplete
-                        ? "ring-1 ring-status-green/40 bg-status-green/5"
-                        : member.member_tier === "liberty"
-                          ? "ring-1 ring-amber-500/40 bg-amber-500/5"
-                          : ""
-                    }`}
-                  >
-                    <div className={`lg:grid ${isOverview ? "lg:grid-cols-[minmax(320px,2fr),minmax(120px,1fr),repeat(12,36px)]" : "lg:grid-cols-[minmax(320px,2fr),minmax(120px,1fr),1fr,1fr]"} lg:gap-2 lg:items-center flex flex-col gap-3`}>
-                      {/* Name */}
-                      <div className="flex items-center gap-3">
-                        <div className={`w-9 h-9 rounded-full flex items-center justify-center text-xs font-bold shrink-0 overflow-hidden ${isComplete ? "bg-status-green text-background" : "bg-muted text-foreground"}`}>
-                          {member.avatar_url ? (
-                            <img src={member.avatar_url} alt={member.full_name} className="w-full h-full object-cover" />
-                          ) : initials(member.full_name)}
-                        </div>
-                         <div className="min-w-0 flex-1">
-                            <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 min-w-0">
-                              <Link
-                                to={`/admin/membros/${member.id}`}
-                                onClick={(e) => e.stopPropagation()}
-                                className="text-sm font-medium text-foreground leading-tight hover:text-primary transition-colors"
-                              >
-                               {shortName(member.full_name)}
-                               {member.is_active === false && (
-                                 <span className="ml-2 text-[9px] uppercase tracking-wider px-1.5 py-0.5 rounded bg-destructive/15 text-destructive border border-destructive/30">Inativo</span>
-                               )}
-                             </Link>
-                             <span className="inline-flex items-center gap-1 text-[10px] text-muted-foreground/90 tabular-nums shrink-0 leading-tight">
-                               <span>{formatShortDate(member.program_start_date)}</span>
-                               <span className="text-muted-foreground/50">→</span>
-                               <span>{formatShortDate(member.program_end_date)}</span>
-                             </span>
-                           </div>
-                          <div className="flex items-center gap-2 mt-0.5">
-                            {member.company_name && (
-                              <p className="text-[10px] text-muted-foreground truncate leading-tight">{toTitleCase(member.company_name)}</p>
-                            )}
-                            {member.pending_tasks_count > 0 && (
-                              <span className="inline-flex items-center gap-1 text-[10px] text-status-yellow shrink-0">
-                                <ListTodo className="h-3 w-3" />
-                                {member.pending_tasks_count} pend.
-                              </span>
-                            )}
-                            {member.last_session_date && (
-                              <span className="text-[10px] text-muted-foreground shrink-0">
-                                · Última: {new Date(member.last_session_date).toLocaleDateString("pt-BR", { day: "2-digit", month: "2-digit" })}
-                              </span>
-                            )}
-                          </div>
-                        </div>
-                        <TooltipProvider delayDuration={150}>
-                          <div className="flex items-center gap-1 ml-auto">
-                            <Tooltip>
-                              <TooltipTrigger asChild>
-                                <button
-                                  type="button"
-                                  onClick={(e) => { e.stopPropagation(); handleInvite(member); }}
-                                  disabled={invitingId === member.id}
-                                  aria-label="Enviar convite por WhatsApp"
-                                  className="p-1.5 rounded-lg hover:bg-status-green/10 text-muted-foreground hover:text-status-green transition-colors disabled:opacity-50"
-                                >
-                                  {invitingId === member.id ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Send className="h-3.5 w-3.5" />}
-                                </button>
-                              </TooltipTrigger>
-                              <TooltipContent side="top">Enviar convite por WhatsApp (e-mail e senha)</TooltipContent>
-                            </Tooltip>
-                            <Tooltip>
-                              <TooltipTrigger asChild>
-                                <Link
-                                  to={`/admin/membros/${member.id}/editar`}
-                                  onClick={(e) => e.stopPropagation()}
-                                  aria-label="Editar cadastro completo"
-                                  className="p-1.5 rounded-lg hover:bg-muted text-muted-foreground hover:text-foreground transition-colors"
-                                >
-                                  <UserCog className="h-3.5 w-3.5" />
-                                </Link>
-                              </TooltipTrigger>
-                              <TooltipContent side="top">Editar cadastro completo</TooltipContent>
-                            </Tooltip>
-                            <Tooltip>
-                              <TooltipTrigger asChild>
-                                <button
-                                  type="button"
-                                  onClick={(e) => { e.stopPropagation(); openEdit(member); }}
-                                  aria-label="Editar dados básicos"
-                                  className="p-1.5 rounded-lg hover:bg-muted text-muted-foreground hover:text-foreground transition-colors"
-                                >
-                                  <Edit className="h-3.5 w-3.5" />
-                                </button>
-                              </TooltipTrigger>
-                              <TooltipContent side="top">Editar dados básicos</TooltipContent>
-                            </Tooltip>
-                            <Tooltip>
-                              <TooltipTrigger asChild>
-                                <button
-                                  type="button"
-                                  onClick={(e) => { e.stopPropagation(); handleToggleActive(member); }}
-                                  disabled={togglingActiveId === member.id}
-                                  aria-label={member.is_active ? "Inativar membro" : "Reativar membro"}
-                                  className={`p-1.5 rounded-lg transition-colors disabled:opacity-50 ${member.is_active ? "hover:bg-status-yellow/10 text-muted-foreground hover:text-status-yellow" : "bg-destructive/10 text-destructive hover:bg-destructive/20"}`}
-                                >
-                                  {togglingActiveId === member.id ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Power className="h-3.5 w-3.5" />}
-                                </button>
-                              </TooltipTrigger>
-                              <TooltipContent side="top">{member.is_active ? "Inativar acesso do membro" : "Reativar acesso do membro"}</TooltipContent>
-                            </Tooltip>
-                            <Tooltip>
-                              <TooltipTrigger asChild>
-                                <button
-                                  type="button"
-                                  onClick={(e) => { e.stopPropagation(); handleDelete(member.id, member.full_name); }}
-                                  aria-label="Excluir membro"
-                                  className="p-1.5 rounded-lg hover:bg-destructive/10 text-muted-foreground hover:text-destructive transition-colors"
-                                >
-                                  <Trash2 className="h-3.5 w-3.5" />
-                                </button>
-                              </TooltipTrigger>
-                              <TooltipContent side="top">Excluir membro permanentemente</TooltipContent>
-                            </Tooltip>
-                            {isExpanded ? <ChevronUp className="h-4 w-4 text-muted-foreground lg:hidden" /> : <ChevronDown className="h-4 w-4 text-muted-foreground lg:hidden" />}
-                          </div>
-                        </TooltipProvider>
-                      </div>
-
-                      {/* Progress */}
-                      <div className="flex items-center gap-2">
-                        <div className="h-1.5 flex-1 max-w-[120px] rounded-full bg-muted overflow-hidden">
-                          <div
-                            className={`h-full rounded-full transition-all ${isComplete ? "bg-status-green" : "bg-primary"}`}
-                            style={{ width: `${progress}%` }}
-                          />
-                        </div>
-                        <span className={`text-xs tabular-nums whitespace-nowrap ${isComplete ? "text-status-green font-semibold" : "text-muted-foreground"}`}>
-                          {isComplete ? "✓ 12/12" : `${member.total_completed}/12`}
-                        </span>
-                      </div>
-
-                      {isOverview ? (
-                        <div className="hidden lg:contents">
-                          {monthColumns.map((mc) => {
-                            const c = member.monthly_counts[mc] || 0;
-                            return (
-                              <div key={mc} className="flex justify-center">
-                                <span className={`w-8 h-8 rounded-lg flex items-center justify-center text-xs font-bold border ${getMonthBadgeBg(c)}`}>
-                                  <span className={getMonthColor(c).split(" ")[1]}>{c}</span>
-                                </span>
-                              </div>
-                            );
-                          })}
-                        </div>
-                      ) : (
-                        <>
-                          <div>
-                            <span className="text-lg font-semibold text-foreground tabular-nums">{monthCount}</span>
-                            <span className="text-xs text-muted-foreground ml-1">de 2</span>
-                          </div>
-                          <div>
-                            <span className={`inline-flex items-center gap-1 text-[10px] font-semibold px-2.5 py-1 rounded-full border ${getMonthBadgeBg(monthCount)}`}>
-                              <span className={`w-1.5 h-1.5 rounded-full ${getMonthColor(monthCount).split(" ")[0]}`} />
-                              <span className={getMonthColor(monthCount).split(" ")[1]}>
-                                {monthCount >= 2 ? "No ritmo" : monthCount === 1 ? "Parcial" : "Sem sessão"}
-                              </span>
-                            </span>
-                          </div>
-                        </>
-                      )}
-                    </div>
-                  </div>
-
-                  <AdminMemberNote memberId={member.id} initialNote={member.admin_note} />
-
-
-
-                  {/* Expanded detail */}
-                  <AnimatePresence>
-                    {isExpanded && (
-                      <motion.div
-                        initial={{ height: 0, opacity: 0 }}
-                        animate={{ height: "auto", opacity: 1 }}
-                        exit={{ height: 0, opacity: 0 }}
-                        className="overflow-hidden"
-                      >
-                        <div className="glass-card p-5 mt-1 border-primary/20">
-                          <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-4 text-xs text-muted-foreground">
-                            <div>
-                              <span className="font-semibold text-foreground block">Nome completo</span>
-                              {member.full_name}
-                            </div>
-                            <div>
-                              <span className="font-semibold text-foreground block">Email</span>
-                              {member.email || "Sem dados"}
-                            </div>
-                            <div>
-                              <span className="font-semibold text-foreground block">Empresa</span>
-                              {member.company_name || "Sem dados"}
-                            </div>
-                            <div>
-                              <span className="font-semibold text-foreground block">Telefone</span>
-                              {member.phone || "Sem dados"}
-                            </div>
-                            <div>
-                              <span className="font-semibold text-foreground block">Início do programa</span>
-                              {member.program_start_date ? new Date(member.program_start_date + "T12:00:00").toLocaleDateString("pt-BR") : "Sem dados"}
-                            </div>
-                            <div>
-                              <span className="font-semibold text-foreground block">Fim previsto</span>
-                              {member.program_end_date ? new Date(member.program_end_date + "T12:00:00").toLocaleDateString("pt-BR") : "Sem dados"}
-                            </div>
-                            <div>
-                              <span className="font-semibold text-foreground block">Sessões realizadas</span>
-                              <span className="text-status-green font-semibold">{member.total_completed}</span> de 12
-                            </div>
-                            <div>
-                              <span className="font-semibold text-foreground block">Faltam</span>
-                              {Math.max(0, 12 - member.total_completed)} sessões
-                            </div>
-                          </div>
-
-                          {member.completed_sessions.length > 0 && (
-                            <div className="mb-4">
-                              <span className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider block mb-2">
-                                Sessões realizadas ({member.completed_sessions.length})
-                              </span>
-                              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-1.5">
-                                {member.completed_sessions.map((cs) => (
-                                  <div
-                                    key={cs.booking_id}
-                                    className="group relative flex items-center gap-2 rounded-lg text-xs bg-status-green/10 border border-border text-status-green hover:bg-status-green/20 transition-colors"
-                                  >
-                                    <Link
-                                      to={`/admin/sessoes/${cs.booking_id}/relatorio`}
-                                      onClick={(e) => e.stopPropagation()}
-                                      className="flex items-center gap-2 px-3 py-2 flex-1 min-w-0"
-                                      title="Ver detalhes da sessão"
-                                    >
-                                      <span className="w-4 h-4 rounded-full bg-status-green text-background flex items-center justify-center text-[8px] font-bold shrink-0">
-                                        ✓
-                                      </span>
-                                      <span className="truncate">{cs.session_name}</span>
-                                    </Link>
-                                    <button
-                                      onClick={(e) => { e.stopPropagation(); handleRemoveBooking(cs.booking_id, cs.session_name); }}
-                                      title="Remover esta sessão"
-                                      aria-label={`Remover sessão ${cs.session_name}`}
-                                      className="shrink-0 p-1.5 mr-1 rounded-md text-status-green/70 hover:text-destructive hover:bg-destructive/10 transition-all opacity-100 lg:opacity-0 lg:group-hover:opacity-100 focus:opacity-100"
-                                    >
-                                      <Trash2 className="h-3.5 w-3.5" />
-                                    </button>
-                                  </div>
-                                ))}
-                              </div>
-                            </div>
-                          )}
-
-                          <MemberSessionEditor
-                            member={member}
-                            sessions={sessions || []}
-                            mentors={mentorsList || []}
-                            filterKey={filterKey}
-                            onReportClick={(booking_id, session_name) => setReportModal({ booking_id, session_name })}
-                          />
-
-                          {isOverview && (
-                            <div className="lg:hidden mt-4 pt-4 border-t border-border">
-                              <h4 className="text-xs font-semibold text-foreground mb-2">Sessões por mês</h4>
-                              <div className="flex gap-2 flex-wrap">
-                                {monthColumns.map((mc) => {
-                                  const c = member.monthly_counts[mc] || 0;
-                                  return (
-                                    <div key={mc} className="text-center">
-                                      <span className={`w-9 h-9 rounded-lg flex items-center justify-center text-xs font-bold border ${getMonthBadgeBg(c)}`}>
-                                        <span className={getMonthColor(c).split(" ")[1]}>{c}</span>
-                                      </span>
-                                      <span className="text-[9px] text-muted-foreground mt-0.5 block">{formatMonthShort(mc)}</span>
-                                    </div>
-                                  );
-                                })}
-                              </div>
-                            </div>
-                          )}
-
-                          <div className="mt-4 pt-4 border-t border-border flex justify-end">
-                            <Link
-                              to={`/admin/membros/${member.id}`}
-                              className="inline-flex items-center gap-2 px-3 py-2 rounded-lg bg-primary/10 border border-primary/30 text-primary text-xs font-semibold hover:bg-primary/15 transition-colors"
-                            >
-                              Ver mais informações sobre o membro →
-                            </Link>
-                          </div>
-                        </div>
-                      </motion.div>
-                    )}
-                  </AnimatePresence>
+                <div key={mc} className="text-center">
+                  <span className={`w-9 h-9 rounded-ds flex items-center justify-center text-xs font-semibold tabular-nums ${monthCellClass(c)}`}>{c}</span>
+                  <span className="text-[11px] text-muted-foreground mt-0.5 block">{formatMonthShort(mc)}</span>
                 </div>
               );
             })}
+          </div>
+        </div>
+      )}
 
-            {filtered.length === 0 && (
-              <EmptyState
-                icon={Users}
-                title="Nenhum membro neste período"
-                description="Ajuste o filtro de mês ou cadastre um novo membro."
-              />
+      <div className="pt-4 border-t border-border flex justify-end">
+        <Button variant="outline" size="sm" asChild>
+          <Link to={`/admin/membros/${member.id}`}>Ver perfil completo <ChevronRight className="h-4 w-4" /></Link>
+        </Button>
+      </div>
+    </div>
+  );
+
+  const renderTable = () => (
+    <SectionCard padding="none" className="hidden lg:block overflow-x-auto">
+      <table className="w-full text-sm">
+        <thead>
+          <tr className="text-left text-xs font-medium text-muted-foreground border-b border-border">
+            <th scope="col" className="h-10 px-4 font-medium">Membro</th>
+            <th scope="col" className="h-10 px-3 font-medium whitespace-nowrap">Programa</th>
+            <th scope="col" className="h-10 px-3 font-medium">Progresso</th>
+            {isOverview ? (
+              monthColumns.map((mc) => (
+                <th key={mc} scope="col" className="h-10 px-1 font-medium text-center w-10">{formatMonthShort(mc)}</th>
+              ))
+            ) : (
+              <>
+                <th scope="col" className="h-10 px-3 font-medium whitespace-nowrap">Sessões no mês</th>
+                <th scope="col" className="h-10 px-3 font-medium">Ritmo</th>
+              </>
             )}
-          </motion.div>
-        )}
-      </motion.div>
+            <th scope="col" className="h-10 px-3 font-medium text-right">
+              <span className="sr-only">Ações</span>
+            </th>
+          </tr>
+        </thead>
+        <tbody>
+          {filtered.map((member) => {
+            const monthCount = filterKey ? (member.monthly_counts[filterKey] || 0) : member.total_completed;
+            const pendingConfirmationCount = filterKey
+              ? (member.monthly_pending_confirmation_counts?.[filterKey] || 0)
+              : (member.total_pending_confirmation || 0);
+            const isExpanded = expandedId === member.id;
+            const isComplete = member.total_completed >= 12;
+            const colSpan = 4 + (isOverview ? 12 : 2);
+            return (
+              <Fragment key={member.id}>
+                <tr
+                  onClick={() => setExpandedId(isExpanded ? null : member.id)}
+                  onKeyDown={(e) => {
+                    if (e.target !== e.currentTarget) return;
+                    if (e.key === "Enter" || e.key === " ") { e.preventDefault(); setExpandedId(isExpanded ? null : member.id); }
+                  }}
+                  tabIndex={0}
+                  aria-expanded={isExpanded}
+                  className={`h-[52px] border-b border-border cursor-pointer transition-colors duration-ds-1 hover:bg-accent/40 focus-visible:outline-none focus-visible:bg-accent/40 ${isExpanded ? "bg-accent/30" : ""}`}
+                >
+                  <td className="px-4 py-2 align-middle min-w-[280px]">{renderIdentity(member, pendingConfirmationCount)}</td>
+                  <td className="px-3 py-2 align-middle text-xs text-muted-foreground tabular-nums whitespace-nowrap">
+                    {formatShortDate(member.program_start_date)} a {formatShortDate(member.program_end_date)}
+                  </td>
+                  <td className="px-3 py-2 align-middle min-w-[140px]">
+                    <div className="flex items-center gap-2">
+                      <ProgressBar value={member.total_completed} max={12} tone={isComplete ? "success" : "brand"} className="flex-1 max-w-[110px]" label={`${member.total_completed} de 12 sessões`} />
+                      <span className={`text-xs tabular-nums whitespace-nowrap ${isComplete ? "text-status-green font-semibold" : "text-muted-foreground"}`}>
+                        {member.total_completed}/12
+                      </span>
+                    </div>
+                  </td>
+                  {isOverview ? (
+                    monthColumns.map((mc) => {
+                      const c = member.monthly_counts[mc] || 0;
+                      return (
+                        <td key={mc} className="px-1 py-2 align-middle text-center">
+                          <span
+                            className={`inline-flex w-8 h-8 rounded-ds items-center justify-center text-xs font-semibold tabular-nums ${monthCellClass(c)}`}
+                            title={`${formatMonthShort(mc)}: ${c} sessão${c === 1 ? "" : "ões"}`}
+                          >
+                            {c}
+                          </span>
+                        </td>
+                      );
+                    })
+                  ) : (
+                    <>
+                      <td className="px-3 py-2 align-middle whitespace-nowrap">
+                        <span className="text-base font-semibold text-foreground tabular-nums">{monthCount}</span>
+                        <span className="text-xs text-muted-foreground ml-1">de 2</span>
+                      </td>
+                      <td className="px-3 py-2 align-middle">
+                        <StatusPill tone={monthTone(monthCount)} size="sm">{monthStatusLabel(monthCount)}</StatusPill>
+                      </td>
+                    </>
+                  )}
+                  <td className="px-3 py-2 align-middle">
+                    <div className="flex items-center justify-end gap-1">
+                      {renderActions(member)}
+                      <ChevronDown className={`h-4 w-4 text-muted-foreground transition-transform duration-ds-1 ${isExpanded ? "rotate-180" : ""}`} aria-hidden />
+                    </div>
+                  </td>
+                </tr>
+                <tr className="border-b border-border">
+                  <td colSpan={colSpan} className="p-0">
+                    <div className="px-4 py-2">
+                      <AdminMemberNote memberId={member.id} initialNote={member.admin_note} />
+                    </div>
+                    {isExpanded && (
+                      <div className="px-4 pb-5 pt-2 border-t border-border bg-background/30">
+                        {renderExpanded(member)}
+                      </div>
+                    )}
+                  </td>
+                </tr>
+              </Fragment>
+            );
+          })}
+        </tbody>
+      </table>
+    </SectionCard>
+  );
 
-      {/* Add Member Dialog */}
-      <Dialog open={addOpen} onOpenChange={setAddOpen}>
-        <DialogContent className="max-w-lg">
-          <DialogHeader>
-            <DialogTitle className="text-lg">Novo membro</DialogTitle>
-          </DialogHeader>
-          {renderMemberForm()}
-          <DialogFooter>
-            <Button variant="ghost" size="sm" onClick={() => setAddOpen(false)}>Cancelar</Button>
-            <Button size="sm" onClick={handleSave} disabled={saving}>
-              {saving ? "Salvando..." : "Adicionar"}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-
-      {/* Edit Member Dialog */}
-      <Dialog open={editOpen} onOpenChange={setEditOpen}>
-        <DialogContent className="max-w-lg">
-          <DialogHeader>
-            <DialogTitle className="text-lg">Editar membro</DialogTitle>
-          </DialogHeader>
-          {renderMemberForm()}
-          <DialogFooter>
-            <Button variant="ghost" size="sm" onClick={() => setEditOpen(false)}>Cancelar</Button>
-            <Button size="sm" onClick={handleSave} disabled={saving}>
-              {saving ? "Salvando..." : "Salvar"}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-
-      {/* Import Members Dialog */}
-      <Dialog open={importOpen} onOpenChange={setImportOpen}>
-        <DialogContent className="max-w-2xl">
-          <DialogHeader>
-            <DialogTitle className="text-lg">Importar membros via planilha</DialogTitle>
-          </DialogHeader>
-          <div className="space-y-4">
-            <p className="text-sm text-muted-foreground">
-              Suba <strong className="text-foreground">qualquer planilha sua</strong> (.xlsx, .xls ou .csv). Reconhecemos os cabeçalhos automaticamente. Só Nome e E-mail são obrigatórios. Se o e-mail já existir, o perfil é atualizado; caso contrário, criamos o membro com senha temporária. Datas em AAAA-MM-DD ou DD/MM/AAAA.
-            </p>
-            <div className="rounded-lg border border-border p-3 space-y-2">
-              <p className="text-xs font-medium text-foreground">Tipo de membro desta planilha</p>
-              <div className="flex gap-2">
-                {(["begin", "liberty"] as const).map((t) => {
-                  const active = importTier === t;
-                  const isLib = t === "liberty";
-                  return (
-                    <button
-                      key={t}
-                      type="button"
-                      onClick={() => setImportTier(t)}
-                      disabled={importing}
-                      className={`flex-1 px-3 py-2 rounded-lg text-sm border transition-colors ${active ? (isLib ? "border-amber-400 bg-amber-400/10 text-amber-300" : "border-primary/20 bg-primary/10 text-foreground") : "border-border text-muted-foreground hover:bg-muted"}`}
-                    >
-                      {isLib ? (<span className="inline-flex items-center gap-1.5"><LibertyMark size={14} /> Liberty (premium)</span>) : "Begin"}
-                    </button>
-                  );
-                })}
+  const renderMobileList = () => (
+    <SectionCard padding="none" className="lg:hidden">
+      {filtered.map((member, i) => {
+        const monthCount = filterKey ? (member.monthly_counts[filterKey] || 0) : member.total_completed;
+        const pendingConfirmationCount = filterKey
+          ? (member.monthly_pending_confirmation_counts?.[filterKey] || 0)
+          : (member.total_pending_confirmation || 0);
+        const isExpanded = expandedId === member.id;
+        const isComplete = member.total_completed >= 12;
+        const last = i === filtered.length - 1;
+        return (
+          <div key={member.id} className={last && !isExpanded ? "" : "border-b border-border"}>
+            <ListRow
+              last
+              onPress={() => setExpandedId(isExpanded ? null : member.id)}
+              aria-expanded={isExpanded}
+              leading={<UserAvatar name={member.full_name} avatarUrl={member.avatar_url} size={40} />}
+              title={
+                <span className="inline-flex items-center gap-2 flex-wrap">
+                  {shortName(member.full_name)}
+                  {member.member_tier === "liberty" && <StatusPill tone="brand" size="sm" withDot={false}>Liberty</StatusPill>}
+                  {member.is_active === false && <StatusPill tone="neutral" size="sm" withDot={false}>Inativo</StatusPill>}
+                  {!member.email && <StatusPill tone="warning" size="sm" withDot={false}>Sem e-mail</StatusPill>}
+                </span>
+              }
+              subtitle={
+                <span className="inline-flex items-center gap-2 flex-wrap">
+                  {member.company_name && <span className="truncate">{toTitleCase(member.company_name)}</span>}
+                  <span className={`tabular-nums ${isComplete ? "text-status-green font-semibold" : ""}`}>{member.total_completed}/12</span>
+                  {pendingConfirmationCount > 0 && (
+                    <span className="inline-flex items-center gap-1 text-status-orange"><Clock className="h-3 w-3" aria-hidden /> {pendingConfirmationCount} a confirmar</span>
+                  )}
+                </span>
+              }
+              trailing={
+                <>
+                  {!isOverview && <StatusPill tone={monthTone(monthCount)} size="sm">{monthStatusLabel(monthCount)}</StatusPill>}
+                  <ChevronDown className={`h-4 w-4 text-muted-foreground transition-transform duration-ds-1 ${isExpanded ? "rotate-180" : ""}`} aria-hidden />
+                </>
+              }
+            />
+            {isExpanded && (
+              <div className="px-4 pb-5 space-y-4 bg-background/30">
+                <div className="flex items-center justify-between gap-2 flex-wrap pt-2">
+                  <ProgressBar value={member.total_completed} max={12} tone={isComplete ? "success" : "brand"} className="flex-1 min-w-[120px]" label={`${member.total_completed} de 12 sessões`} />
+                  {renderActions(member)}
+                </div>
+                <AdminMemberNote memberId={member.id} initialNote={member.admin_note} />
+                {renderExpanded(member)}
               </div>
-              <p className="text-[11px] text-muted-foreground">
-                Aplicado a todas as linhas sem a coluna “Tipo de Membro”. Linhas com “Liberty” na planilha sempre viram Liberty.
-              </p>
-            </div>
+            )}
+          </div>
+        );
+      })}
+    </SectionCard>
+  );
 
-            <div className="grid sm:grid-cols-2 gap-3">
-              <Button onClick={downloadFullTemplate} variant="outline" className="w-full">
-                <Download className="size-4 mr-2" /> Baixar modelo (opcional)
-              </Button>
-              <input ref={fileRef} type="file" accept=".xlsx,.xls,.csv" onChange={handleImportFile} disabled={importing} className="hidden" />
-              <Button onClick={() => fileRef.current?.click()} disabled={importing} className="w-full">
-                {importing ? <><Loader2 className="size-4 mr-2 animate-spin" />Processando…</> : <><Upload className="size-4 mr-2" />Selecionar arquivo</>}
-              </Button>
-            </div>
+  const importStatusPill = (status: ImportResult["status"]) => {
+    switch (status) {
+      case "created": return <StatusPill tone="success" size="sm">Criado</StatusPill>;
+      case "updated": return <StatusPill tone="info" size="sm">Atualizado</StatusPill>;
+      case "skipped": return <StatusPill tone="warning" size="sm">Ignorado</StatusPill>;
+      case "error": return <StatusPill tone="danger" size="sm">Erro</StatusPill>;
+      default: {
+        const _exhaustive: never = status;
+        return _exhaustive;
+      }
+    }
+  };
 
-            {importSummary && importResults && (
-              <div className="rounded-lg border border-border p-4 space-y-3">
-                <div className="flex items-center justify-between gap-3">
-                  <p className="text-sm text-muted-foreground">
-                    {importSummary.created} criados
-                    {importSummary.updated !== undefined && ` · ${importSummary.updated} atualizados`}
-                    {importSummary.skipped !== undefined && ` · ${importSummary.skipped} ignorados`}
-                    {` · ${importSummary.errors} erros`}
-                  </p>
-                  {importSummary.created > 0 && (
-                    <Button size="sm" onClick={downloadCredentials}>
-                      <KeyRound className="size-4 mr-2" /> Baixar senhas
+  return (
+    <AppLayout role="admin">
+      <PageContainer variant="wide">
+        <motion.div variants={staggerContainer} initial="hidden" animate="show" className="space-y-6">
+          <motion.div variants={fadeUpItem}>
+            <PageHeader
+              eyebrow="Admin"
+              title={pageTitle}
+              description={pageDescription}
+              actions={
+                <>
+                  {duplicateGroups.length > 0 && (
+                    <Button variant="outline" size="sm" onClick={() => setDupOpen(true)} className="text-status-yellow">
+                      <GitMerge className="h-4 w-4" /> {duplicateGroups.length} duplicata{duplicateGroups.length > 1 ? "s" : ""}
                     </Button>
                   )}
-                </div>
-                <div className="max-h-64 overflow-auto rounded border border-border">
-                  <table className="w-full text-xs">
-                    <thead className="bg-muted/50 text-muted-foreground sticky top-0">
-                      <tr>
-                        <th className="text-left p-2">Status</th>
-                        <th className="text-left p-2">Nome</th>
-                        <th className="text-left p-2">E-mail</th>
-                        <th className="text-left p-2">Senha / Mensagem</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {importResults.map((r, i) => (
-                        <tr key={i} className="border-t border-border">
-                          <td className="p-2">
-                            {r.status === "created" && <span className="inline-flex items-center gap-1 text-emerald-500"><CheckCircle2 className="size-3" /> Criado</span>}
-                            {r.status === "updated" && <span className="inline-flex items-center gap-1 text-primary"><CheckCircle2 className="size-3" /> Atualizado</span>}
-                            {r.status === "skipped" && <span className="inline-flex items-center gap-1 text-amber-500"><AlertCircle className="size-3" /> Ignorado</span>}
-                            {r.status === "error" && <span className="inline-flex items-center gap-1 text-destructive"><AlertCircle className="size-3" /> Erro</span>}
-                          </td>
-                          <td className="p-2">{r.full_name}</td>
-                          <td className="p-2 text-muted-foreground">{r.email}</td>
-                          <td className="p-2 font-mono">{r.status === "created" ? r.password : r.message}</td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
+                  <Button variant="outline" size="sm" onClick={exportActiveMembers}>
+                    <Download className="h-4 w-4" /> Exportar
+                  </Button>
+                  <Button variant="outline" size="sm" onClick={openImport}>
+                    <Upload className="h-4 w-4" /> Importar
+                  </Button>
+                  <Button size="sm" onClick={openAdd}>
+                    <Plus className="h-4 w-4" /> Novo membro
+                  </Button>
+                </>
+              }
+            />
+          </motion.div>
+
+          {/* Barra de filtros */}
+          <motion.div variants={fadeUpItem} className="space-y-3">
+            <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-3">
+              <div className="flex items-center gap-2 flex-wrap" role="tablist" aria-label="Tipo de membro">
+                <Chip active={tierTab === "begin"} onClick={() => setTierTab("begin")} count={tierCounts.begin}>Begin</Chip>
+                <Chip active={tierTab === "liberty"} onClick={() => setTierTab("liberty")} count={tierCounts.liberty}>
+                  <LibertyMark size={12} /> Liberty
+                </Chip>
+                <Chip active={tierTab === "inactive"} onClick={() => setTierTab("inactive")} count={tierCounts.inactive}>Encerrados</Chip>
               </div>
-            )}
-          </div>
-          <DialogFooter>
-            <Button variant="ghost" size="sm" onClick={() => setImportOpen(false)}>Fechar</Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-
-      {/* Report Modal */}
-      <Dialog open={!!reportModal} onOpenChange={() => setReportModal(null)}>
-        <DialogContent className="max-w-lg">
-          <DialogHeader>
-            <DialogTitle className="text-lg">Relatório: {reportModal?.session_name}</DialogTitle>
-          </DialogHeader>
-          {report ? (
-            <div className="space-y-4 text-sm">
-              {report.summary && (
-                <div>
-                  <h4 className="font-semibold text-foreground mb-1">Resumo</h4>
-                  <p className="text-muted-foreground whitespace-pre-wrap">{report.summary}</p>
-                </div>
-              )}
-              {report.goals && (
-                <div>
-                  <h4 className="font-semibold text-foreground mb-1">Metas</h4>
-                  <p className="text-muted-foreground whitespace-pre-wrap">{report.goals}</p>
-                </div>
-              )}
-              {report.action_plan && (
-                <div>
-                  <h4 className="font-semibold text-foreground mb-1">Plano de ação</h4>
-                  <p className="text-muted-foreground whitespace-pre-wrap">{report.action_plan}</p>
-                </div>
-              )}
-              {report.mentor_impressions && (
-                <div>
-                  <h4 className="font-semibold text-foreground mb-1">Impressões do mentor</h4>
-                  <p className="text-muted-foreground whitespace-pre-wrap">{report.mentor_impressions}</p>
-                </div>
-              )}
-              {!report.summary && !report.goals && !report.action_plan && !report.mentor_impressions && (
-                <p className="text-muted-foreground text-center py-4">Relatório ainda não preenchido</p>
-              )}
+              <AdminMonthFilter />
             </div>
-          ) : (
-            <p className="text-muted-foreground text-center py-8 text-sm">Nenhum relatório encontrado para esta sessão</p>
-          )}
-        </DialogContent>
-      </Dialog>
-      <AccessCredentialsDialog data={credentialsDialog} onClose={() => setCredentialsDialog(null)} />
 
-      {/* Duplicates Dialog */}
-      <Dialog open={dupOpen} onOpenChange={setDupOpen}>
-        <DialogContent className="max-w-2xl max-h-[85vh] overflow-y-auto">
-          <DialogHeader>
-            <DialogTitle className="text-lg flex items-center gap-2">
-              <GitMerge className="h-5 w-5 text-status-yellow" /> Perfis duplicados
-            </DialogTitle>
-          </DialogHeader>
-          <p className="text-xs text-muted-foreground -mt-2 mb-3">
-            Detectamos {duplicateGroups.length} grupo(s) de possíveis duplicatas (mesmo primeiro e último nome).
-            Escolha qual perfil manter. O outro será mesclado no principal e removido.
+            <div className="flex flex-col sm:flex-row sm:items-center gap-3">
+              <div className="relative flex-1 sm:max-w-sm">
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground pointer-events-none" aria-hidden />
+                <TextField
+                  type="search"
+                  aria-label="Buscar membro, empresa ou e-mail"
+                  placeholder="Buscar membro, empresa ou e-mail"
+                  value={search}
+                  onChange={(e) => setSearch(e.target.value)}
+                  className="pl-10"
+                />
+              </div>
+              <div className="flex gap-2 flex-wrap">
+                {filterOptions.map((f) => (
+                  <Chip
+                    key={f.key}
+                    active={filter === f.key}
+                    onClick={() => setFilter(f.key)}
+                    count={baseList.filter((m) => matchesFilter(m, f.key)).length}
+                  >
+                    {f.label}
+                  </Chip>
+                ))}
+                <Chip
+                  active={sortMode === "priority"}
+                  onClick={() => setSortMode(sortMode === "priority" ? "name" : "priority")}
+                  className={sortMode === "priority" ? "" : "text-status-yellow"}
+                >
+                  <AlertTriangle className="h-3.5 w-3.5" aria-hidden /> Pendentes no topo
+                </Chip>
+              </div>
+            </div>
+          </motion.div>
+
+          {/* Lista */}
+          {isLoading ? (
+            <LoadingState variant="list" rows={8} />
+          ) : isError ? (
+            <ErrorState title="Não foi possível carregar os membros" onRetry={() => refetch()} />
+          ) : filtered.length === 0 ? (
+            <EmptyState
+              icon={Users}
+              title={search ? "Nenhum membro encontrado" : "Nenhum membro neste filtro"}
+              description={search ? "Tente outro nome, empresa ou e-mail." : "Ajuste o filtro de mês ou cadastre um novo membro."}
+              action={!search ? <Button size="sm" onClick={openAdd}><Plus className="h-4 w-4" /> Novo membro</Button> : undefined}
+            />
+          ) : (
+            <motion.div variants={fadeUpItem}>
+              {renderTable()}
+              {renderMobileList()}
+            </motion.div>
+          )}
+        </motion.div>
+      </PageContainer>
+
+      {/* Novo membro */}
+      <BottomSheet
+        open={addOpen}
+        onOpenChange={setAddOpen}
+        title="Novo membro"
+        description="Nome e telefone são obrigatórios. O e-mail cria o acesso."
+        locked={saving}
+        footer={
+          <>
+            <Button variant="ghost" onClick={() => setAddOpen(false)} disabled={saving}>Cancelar</Button>
+            <Button onClick={handleSave} disabled={saving}>{saving ? "Salvando" : "Adicionar"}</Button>
+          </>
+        }
+      >
+        {renderMemberForm()}
+      </BottomSheet>
+
+      {/* Editar membro */}
+      <BottomSheet
+        open={editOpen}
+        onOpenChange={setEditOpen}
+        title="Editar membro"
+        description="Dados básicos. Para o cadastro completo, use Editar cadastro completo."
+        locked={saving}
+        footer={
+          <>
+            <Button variant="ghost" onClick={() => setEditOpen(false)} disabled={saving}>Cancelar</Button>
+            <Button onClick={handleSave} disabled={saving}>{saving ? "Salvando" : "Salvar"}</Button>
+          </>
+        }
+      >
+        {renderMemberForm()}
+      </BottomSheet>
+
+      {/* Importar planilha */}
+      <BottomSheet
+        open={importOpen}
+        onOpenChange={setImportOpen}
+        title="Importar membros via planilha"
+        description="Aceita .xlsx, .xls ou .csv. Reconhecemos os cabeçalhos automaticamente; só Nome e E-mail são obrigatórios."
+        size="lg"
+        locked={importing}
+        footer={<Button variant="ghost" onClick={() => setImportOpen(false)} disabled={importing}>Fechar</Button>}
+      >
+        <div className="space-y-4">
+          <p className="text-sm text-muted-foreground">
+            Se o e-mail já existir, o perfil é atualizado; caso contrário, criamos o membro com senha temporária. Datas em AAAA-MM-DD ou DD/MM/AAAA.
           </p>
-          <div className="space-y-4">
-            {duplicateGroups.map((g) => (
-              <div key={g.key} className="rounded-lg border border-border p-3 space-y-2">
-                <div className="text-xs font-semibold text-foreground uppercase tracking-wider">
-                  {g.profiles[0].full_name}
-                </div>
-                <div className="grid gap-2">
-                  {g.profiles.map((p) => (
-                    <div key={p.id} className="rounded-md bg-background/40 border border-border p-3 text-xs">
-                      <div className="flex items-center justify-between gap-2 flex-wrap">
-                        <div className="min-w-0">
-                          <div className="text-foreground font-medium">{toTitleCase(p.full_name)}</div>
-                          <div className="text-muted-foreground truncate">
-                            {p.email || "sem e-mail"} · {p.phone || "sem telefone"} · {p.member_tier}
-                          </div>
-                          <div className="text-muted-foreground">
-                            {p.total_completed} realizadas · {p.total_scheduled} agendadas
-                          </div>
-                        </div>
-                        <div className="flex gap-1.5 flex-wrap">
-                          {g.profiles.filter((o) => o.id !== p.id).map((other) => {
-                            const busy = mergingKey === g.key + p.id + other.id;
-                            return (
-                              <button
-                                key={other.id}
-                                onClick={() => openMergeConfirm(p, other, g.key)}
-                                disabled={!!mergingKey}
-                                className="text-[10px] px-2 py-1 rounded border border-primary/40 bg-primary/10 text-primary hover:bg-primary/20 disabled:opacity-50 inline-flex items-center gap-1"
-                              >
-                                {busy ? <Loader2 className="h-3 w-3 animate-spin" /> : <GitMerge className="h-3 w-3" />}
-                                Manter este e mesclar
-                              </button>
-                            );
-                          })}
-                        </div>
-                      </div>
-                    </div>
-                  ))}
-                </div>
+          <SectionCard padding="compact" className="space-y-2">
+            <p className="text-sm font-medium text-foreground">Tipo de membro desta planilha</p>
+            <div className="flex gap-2">
+              <Chip active={importTier === "begin"} onClick={() => setImportTier("begin")} disabled={importing}>Begin</Chip>
+              <Chip active={importTier === "liberty"} onClick={() => setImportTier("liberty")} disabled={importing}>
+                <LibertyMark size={12} /> Liberty (premium)
+              </Chip>
+            </div>
+            <p className="text-xs text-muted-foreground">
+              Aplicado a todas as linhas sem a coluna “Tipo de Membro”. Linhas com “Liberty” na planilha sempre viram Liberty.
+            </p>
+          </SectionCard>
+
+          <div className="grid sm:grid-cols-2 gap-3">
+            <Button onClick={downloadFullTemplate} variant="outline" className="w-full">
+              <Download className="h-4 w-4" /> Baixar modelo (opcional)
+            </Button>
+            <input ref={fileRef} type="file" accept=".xlsx,.xls,.csv" onChange={handleImportFile} disabled={importing} className="hidden" aria-label="Selecionar planilha" />
+            <Button onClick={() => fileRef.current?.click()} disabled={importing} className="w-full">
+              {importing ? <><Loader2 className="h-4 w-4 animate-spin" /> Processando</> : <><Upload className="h-4 w-4" /> Selecionar arquivo</>}
+            </Button>
+          </div>
+
+          {importSummary && importResults && (
+            <SectionCard padding="compact" className="space-y-3">
+              <div className="flex items-center justify-between gap-3 flex-wrap">
+                <p className="text-sm text-muted-foreground">
+                  {importSummary.created} criados
+                  {importSummary.updated !== undefined && ` · ${importSummary.updated} atualizados`}
+                  {importSummary.skipped !== undefined && ` · ${importSummary.skipped} ignorados`}
+                  {` · ${importSummary.errors} erros`}
+                </p>
+                {importSummary.created > 0 && (
+                  <Button size="sm" onClick={downloadCredentials}>
+                    <KeyRound className="h-4 w-4" /> Baixar senhas
+                  </Button>
+                )}
+              </div>
+              <div className="max-h-64 overflow-auto rounded-ds border border-border">
+                <table className="w-full text-xs">
+                  <thead className="bg-muted/50 text-muted-foreground sticky top-0">
+                    <tr>
+                      <th scope="col" className="text-left p-2 font-medium">Status</th>
+                      <th scope="col" className="text-left p-2 font-medium">Nome</th>
+                      <th scope="col" className="text-left p-2 font-medium">E-mail</th>
+                      <th scope="col" className="text-left p-2 font-medium">Senha / Mensagem</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {importResults.map((r, i) => (
+                      <tr key={i} className="border-t border-border">
+                        <td className="p-2">{importStatusPill(r.status)}</td>
+                        <td className="p-2">{r.full_name}</td>
+                        <td className="p-2 text-muted-foreground">{r.email}</td>
+                        <td className="p-2 font-mono">{r.status === "created" ? r.password : r.message}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </SectionCard>
+          )}
+        </div>
+      </BottomSheet>
+
+      {/* Relatório */}
+      <BottomSheet
+        open={!!reportModal}
+        onOpenChange={(o) => !o && setReportModal(null)}
+        title={`Relatório: ${reportModal?.session_name ?? ""}`}
+        size="sm"
+      >
+        {report ? (
+          <div className="space-y-4 text-sm">
+            {[
+              ["Resumo", report.summary],
+              ["Metas", report.goals],
+              ["Plano de ação", report.action_plan],
+              ["Impressões do mentor", report.mentor_impressions],
+            ].filter(([, v]) => v).map(([label, value]) => (
+              <div key={label}>
+                <h3 className="text-sm font-semibold text-foreground mb-1">{label}</h3>
+                <p className="text-muted-foreground whitespace-pre-wrap">{value}</p>
               </div>
             ))}
-            {duplicateGroups.length === 0 && (
-              <p className="text-center text-sm text-muted-foreground py-6">
-                Nenhuma duplicata detectada 🎉
-              </p>
+            {!report.summary && !report.goals && !report.action_plan && !report.mentor_impressions && (
+              <EmptyState compact icon={FileText} title="Relatório ainda não preenchido" />
             )}
           </div>
+        ) : (
+          <EmptyState compact icon={FileText} title="Nenhum relatório encontrado para esta sessão" />
+        )}
+      </BottomSheet>
 
-          {mergeLog && mergeLog.length > 0 && (
-            <div className="mt-4 rounded-lg border border-border p-3">
-              <div className="text-xs font-semibold text-foreground uppercase tracking-wider mb-2">
-                Últimas mesclagens
-              </div>
-              <div className="space-y-2">
-                {mergeLog.map((l: any) => (
-                  <div key={l.id} className="flex items-center justify-between gap-2 text-xs">
-                    <div className="min-w-0">
-                      <div className="text-foreground truncate">
-                        {toTitleCase(l.loser_name || "")} → {toTitleCase(l.winner_name || "")}
+      <AccessCredentialsDialog data={credentialsDialog} onClose={() => setCredentialsDialog(null)} />
+
+      {/* Duplicatas */}
+      <BottomSheet
+        open={dupOpen}
+        onOpenChange={setDupOpen}
+        title={<span className="inline-flex items-center gap-2"><GitMerge className="h-4 w-4 text-status-yellow" aria-hidden /> Perfis duplicados</span>}
+        description={`Detectamos ${duplicateGroups.length} grupo(s) de possíveis duplicatas (mesmo primeiro e último nome). Escolha qual perfil manter; o outro será mesclado no principal e removido.`}
+        size="lg"
+        footer={<Button variant="ghost" onClick={() => setDupOpen(false)}>Fechar</Button>}
+      >
+        <div className="space-y-4">
+          {duplicateGroups.map((g) => (
+            <SectionCard key={g.key} padding="compact" className="space-y-2">
+              <SectionHeader as="h3" title={toTitleCase(g.profiles[0].full_name)} />
+              <div className="grid gap-2">
+                {g.profiles.map((p) => (
+                  <div key={p.id} className="rounded-ds bg-background/40 border border-border p-3 text-xs">
+                    <div className="flex items-center justify-between gap-2 flex-wrap">
+                      <div className="min-w-0">
+                        <div className="text-sm text-foreground font-medium">{toTitleCase(p.full_name)}</div>
+                        <div className="text-muted-foreground truncate">
+                          {p.email || "sem e-mail"} · {p.phone || "sem telefone"} · {p.member_tier}
+                        </div>
+                        <div className="text-muted-foreground tabular-nums">
+                          {p.total_completed} realizadas · {p.total_scheduled} agendadas
+                        </div>
                       </div>
-                      <div className="text-muted-foreground">
-                        {new Date(l.created_at).toLocaleString("pt-BR")}
-                        {l.undone_at ? " · desfeita" : ""}
+                      <div className="flex gap-1.5 flex-wrap">
+                        {g.profiles.filter((o) => o.id !== p.id).map((other) => {
+                          const busy = mergingKey === g.key + p.id + other.id;
+                          return (
+                            <Button
+                              key={other.id}
+                              variant="outline"
+                              size="sm"
+                              onClick={() => openMergeConfirm(p, other, g.key)}
+                              disabled={!!mergingKey}
+                            >
+                              {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <GitMerge className="h-4 w-4" />}
+                              Manter este e mesclar
+                            </Button>
+                          );
+                        })}
                       </div>
                     </div>
-                    {!l.undone_at && (
-                      <Button size="sm" variant="outline" disabled={mergeBusy} onClick={() => undoMerge(l.id)}>
-                        Desfazer
-                      </Button>
-                    )}
                   </div>
                 ))}
               </div>
-            </div>
+            </SectionCard>
+          ))}
+          {duplicateGroups.length === 0 && (
+            <EmptyState compact icon={CheckCircle2} title="Nenhuma duplicata detectada" />
           )}
 
-          <DialogFooter>
-            <Button variant="ghost" size="sm" onClick={() => setDupOpen(false)}>Fechar</Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-
-      {/* Merge confirmation */}
-      <Dialog open={!!mergeTarget} onOpenChange={(o) => { if (!o) setMergeTarget(null); }}>
-        <DialogContent className="max-w-lg">
-          <DialogHeader>
-            <DialogTitle className="text-lg flex items-center gap-2">
-              <AlertTriangle className="h-5 w-5 text-status-yellow" /> Confirmar mesclagem
-            </DialogTitle>
-          </DialogHeader>
-          {mergeTarget && (
-            <div className="space-y-3 text-xs">
-              <div className="rounded-md border border-primary/40 bg-primary/5 p-3">
-                <div className="text-[10px] uppercase tracking-wider text-primary mb-1">Perfil que será mantido</div>
-                <div className="text-foreground font-medium">{toTitleCase(mergeTarget.winner.full_name)}</div>
-                <div className="text-muted-foreground">{mergeTarget.winner.email || "sem e-mail"} · {mergeTarget.winner.member_tier}</div>
+          {mergeLog && mergeLog.length > 0 && (
+            <SectionCard padding="none">
+              <div className="px-4 pt-3 pb-1">
+                <SectionHeader as="h3" title="Últimas mesclagens" />
               </div>
-              <div className="rounded-md border border-destructive/40 bg-destructive/5 p-3">
-                <div className="text-[10px] uppercase tracking-wider text-destructive mb-1">Perfil que será removido</div>
-                <div className="text-foreground font-medium">{toTitleCase(mergeTarget.loser.full_name)}</div>
-                <div className="text-muted-foreground">{mergeTarget.loser.email || "sem e-mail"} · {mergeTarget.loser.member_tier}</div>
-                <div className="text-muted-foreground">{mergeTarget.loser.total_completed} realizadas · {mergeTarget.loser.total_scheduled} agendadas</div>
-              </div>
-              <p className="text-muted-foreground">
-                As sessões, relatórios e o acesso do perfil removido passam para o perfil mantido.
-                A mesclagem fica guardada em “Últimas mesclagens” e pode ser desfeita.
-              </p>
-
-              {mergeBlockers.length > 0 && (
-                <div className="rounded-md border border-destructive/50 bg-destructive/10 p-3 space-y-2">
-                  <div className="text-destructive font-semibold flex items-center gap-1">
-                    <AlertCircle className="h-3.5 w-3.5" /> Parece que são pessoas diferentes
-                  </div>
-                  <ul className="list-disc pl-4 text-muted-foreground space-y-0.5">
-                    {mergeBlockers.map((b, i) => <li key={i}>{b}</li>)}
-                  </ul>
-                  <p className="text-muted-foreground">
-                    A mesclagem foi bloqueada e não pode ser forçada. Corrija os cadastros separadamente.
-                  </p>
-                </div>
-              )}
-            </div>
+              {mergeLog.map((l: any, i: number) => (
+                <ListRow
+                  key={l.id}
+                  last={i === mergeLog.length - 1}
+                  title={`${toTitleCase(l.loser_name || "")} → ${toTitleCase(l.winner_name || "")}`}
+                  subtitle={`${new Date(l.created_at).toLocaleString("pt-BR")}${l.undone_at ? " · desfeita" : ""}`}
+                  trailing={
+                    !l.undone_at ? (
+                      <Button size="sm" variant="outline" disabled={mergeBusy} onClick={() => undoMerge(l.id)}>Desfazer</Button>
+                    ) : (
+                      <StatusPill tone="neutral" size="sm" withDot={false}>Desfeita</StatusPill>
+                    )
+                  }
+                />
+              ))}
+            </SectionCard>
           )}
-          <DialogFooter>
-            <Button variant="ghost" size="sm" onClick={() => setMergeTarget(null)}>Cancelar</Button>
-            <Button
-              size="sm"
-              disabled={mergeBusy || mergeBlockers.length > 0}
-              onClick={runMerge}
-            >
-              {mergeBusy ? <Loader2 className="h-3.5 w-3.5 animate-spin mr-1" /> : <GitMerge className="h-3.5 w-3.5 mr-1" />}
+        </div>
+      </BottomSheet>
+
+      {/* Confirmar mesclagem */}
+      <BottomSheet
+        open={!!mergeTarget}
+        onOpenChange={(o) => { if (!o) setMergeTarget(null); }}
+        title={<span className="inline-flex items-center gap-2"><AlertTriangle className="h-4 w-4 text-status-yellow" aria-hidden /> Confirmar mesclagem</span>}
+        description="As sessões, relatórios e o acesso do perfil removido passam para o perfil mantido. A mesclagem fica em Últimas mesclagens e pode ser desfeita."
+        size="sm"
+        locked={mergeBusy}
+        footer={
+          <>
+            <Button variant="ghost" onClick={() => setMergeTarget(null)} disabled={mergeBusy}>Cancelar</Button>
+            <Button disabled={mergeBusy || mergeBlockers.length > 0} onClick={runMerge}>
+              {mergeBusy ? <Loader2 className="h-4 w-4 animate-spin" /> : <GitMerge className="h-4 w-4" />}
               Mesclar perfis
             </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+          </>
+        }
+      >
+        {mergeTarget && (
+          <div className="space-y-3 text-sm">
+            <SectionCard tone="brand" padding="compact">
+              <p className="ds-kicker mb-1">Perfil que será mantido</p>
+              <p className="text-foreground font-medium">{toTitleCase(mergeTarget.winner.full_name)}</p>
+              <p className="text-xs text-muted-foreground">{mergeTarget.winner.email || "sem e-mail"} · {mergeTarget.winner.member_tier}</p>
+            </SectionCard>
+            <SectionCard tone="danger" padding="compact">
+              <p className="ds-kicker mb-1">Perfil que será removido</p>
+              <p className="text-foreground font-medium">{toTitleCase(mergeTarget.loser.full_name)}</p>
+              <p className="text-xs text-muted-foreground">{mergeTarget.loser.email || "sem e-mail"} · {mergeTarget.loser.member_tier}</p>
+              <p className="text-xs text-muted-foreground tabular-nums">{mergeTarget.loser.total_completed} realizadas · {mergeTarget.loser.total_scheduled} agendadas</p>
+            </SectionCard>
 
+            {mergeBlockers.length > 0 && (
+              <Callout tone="danger" icon={AlertCircle} title="Parece que são pessoas diferentes">
+                <ul className="list-disc pl-4 space-y-0.5">
+                  {mergeBlockers.map((b, i) => <li key={i}>{b}</li>)}
+                </ul>
+                <p className="mt-2">A mesclagem foi bloqueada e não pode ser forçada. Corrija os cadastros separadamente.</p>
+              </Callout>
+            )}
+          </div>
+        )}
+      </BottomSheet>
+
+      <ConfirmDialog
+        open={!!confirmState}
+        onOpenChange={(o) => !o && setConfirmState(null)}
+        title={confirmState?.title ?? ""}
+        description={confirmState?.description}
+        confirmLabel={confirmState?.confirmLabel}
+        destructive={confirmState?.destructive}
+        onConfirm={async () => {
+          const req = confirmState;
+          setConfirmState(null);
+          if (req) await req.onConfirm();
+        }}
+      />
     </AppLayout>
   );
 };

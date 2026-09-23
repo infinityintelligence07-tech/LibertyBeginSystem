@@ -2,6 +2,8 @@ import { useEffect, useState } from "react";
 import { motion } from "framer-motion";
 import { ArrowLeft, ArrowRight, Check, Gift } from "lucide-react";
 import { type Answers } from "@/lib/diagnosticoBegin";
+import { Button } from "@/components/ui/button";
+import { SectionCard } from "@/components/ds";
 
 interface Props {
   answers: Answers;
@@ -28,16 +30,14 @@ export const NextStepsTrail = ({ onBack, onNext, accentFor }: Props) => {
 
   return (
     <div className="space-y-4">
-      <div className="glass-card p-5">
-        <span className="text-[10px] uppercase tracking-[0.22em] font-semibold text-muted-foreground">
-          Sua jornada
-        </span>
-        <h2 className="text-xl font-semibold text-foreground mt-1 leading-tight">As 12 sessões pela frente</h2>
+      <SectionCard padding="compact">
+        <span className="ds-kicker">Sua jornada</span>
+        <h2 className="text-[22px] font-semibold text-foreground mt-1 leading-tight">As 12 sessões pela frente</h2>
         <p className="text-xs text-muted-foreground mt-1 leading-relaxed max-w-3xl">
           O mapeamento de hoje abre a jornada. A partir daqui são 12 encontros com mentores especialistas, cada um
           recebendo o estado atual e o destino que você definiu. Ao concluir, a 13ª é um presente.
         </p>
-      </div>
+      </SectionCard>
 
       <div className="rounded-2xl border border-border bg-card/40 p-4 sm:p-6 overflow-x-auto">
         <div className="relative min-w-[900px] pt-2 pb-1">
@@ -78,7 +78,7 @@ export const NextStepsTrail = ({ onBack, onNext, accentFor }: Props) => {
                     animate={{ opacity: 1, y: 0 }}
                     transition={{ delay: stepDelay(i) + 0.05, duration: 0.35 }}
                   >
-                    <p className="text-[10px] font-semibold text-foreground leading-tight">Sessão</p>
+                    <p className="text-xs font-semibold text-foreground leading-tight">Sessão</p>
                     <p className="text-base font-semibold tabular-nums leading-none mt-0.5 text-foreground">
                       {i + 1}
                     </p>
@@ -126,7 +126,7 @@ export const NextStepsTrail = ({ onBack, onNext, accentFor }: Props) => {
                 }}
                 transition={{ delay: stepDelay(stops - 1), duration: 1.4 }}
               >
-                <p className="text-[10px] font-semibold leading-tight" style={{ color: GOLD }}>
+                <p className="text-xs font-semibold leading-tight" style={{ color: GOLD }}>
                   Presente
                 </p>
                 <p className="text-base font-semibold tabular-nums leading-none mt-0.5" style={{ color: GOLD }}>
@@ -139,12 +139,12 @@ export const NextStepsTrail = ({ onBack, onNext, accentFor }: Props) => {
       </div>
 
       <div className="flex flex-col sm:flex-row-reverse gap-2">
-        <button onClick={onNext} className="btn-primary flex-1 text-sm py-3 flex items-center justify-center gap-2">
-          Próxima etapa <ArrowRight className="h-4 w-4" />
-        </button>
-        <button onClick={onBack} className="btn-silver sm:w-52 text-sm py-2.5 flex items-center justify-center gap-1.5">
-          <ArrowLeft className="h-4 w-4" /> Voltar ao mapa
-        </button>
+        <Button size="lg" className="flex-1" onClick={onNext}>
+          Próxima etapa <ArrowRight className="h-4 w-4" aria-hidden />
+        </Button>
+        <Button variant="outline" size="lg" className="sm:w-52" onClick={onBack}>
+          <ArrowLeft className="h-4 w-4" aria-hidden /> Voltar ao mapa
+        </Button>
       </div>
     </div>
   );
