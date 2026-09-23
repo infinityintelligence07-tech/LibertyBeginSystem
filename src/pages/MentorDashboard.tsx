@@ -250,9 +250,9 @@ const MentorDashboardPage = () => {
 
   const greeting = (() => {
     const h = new Date().getHours();
-    if (h < 12) return "Bom dia";
-    if (h < 18) return "Boa tarde";
-    return "Boa noite";
+    if (h < 12) return "Faça um bom dia";
+    if (h < 18) return "Faça uma boa tarde";
+    return "Faça uma boa noite";
   })();
 
   const money = (v: number) => `R$ ${v.toLocaleString("pt-BR", { minimumFractionDigits: 2 })}`;

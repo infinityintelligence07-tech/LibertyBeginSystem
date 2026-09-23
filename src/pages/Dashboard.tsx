@@ -34,7 +34,7 @@ const DashboardPage = () => {
   const { profile } = useAuth();
   const firstName = profile?.full_name?.split(" ")[0] ?? "...";
   const hour = new Date().getHours();
-  const greeting = hour < 12 ? "Bom dia" : hour < 18 ? "Boa tarde" : "Boa noite";
+  const greeting = hour < 12 ? "Faça um bom dia" : hour < 18 ? "Faça uma boa tarde" : "Faça uma boa noite";
 
   const {
     demoEnabled,
