@@ -36,8 +36,15 @@ type BookingTiming = {
   report_required?: boolean | null;
 };
 
-const requiresReport = (booking: BookingTiming) =>
-  !booking.is_retroactive && booking.report_required !== false;
+/** Sessões gravadas antes desta data (migração para o app) não exigem relatório do mentor. */
+export const REPORTS_REQUIRED_SINCE = "2026-08-01";
+
+const requiresReport = (booking: BookingTiming) => {
+  if (booking.is_retroactive) return false;
+  // Histórico pré-migração: conta na jornada, mas não fica como "falta relatório".
+  if (booking.scheduled_date && booking.scheduled_date < REPORTS_REQUIRED_SINCE) return false;
+  return booking.report_required !== false;
+};
 
 /** Sessões de mapeamento (3h) e registros retroativos não exigem relatório do mentor. */
 export const bookingRequiresReport = (booking: BookingTiming) => requiresReport(booking);

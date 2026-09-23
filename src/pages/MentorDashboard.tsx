@@ -41,6 +41,7 @@ import { ResultsRanking } from "@/components/ResultsRanking";
 import { TaskChecklist } from "@/components/TaskChecklist";
 import { useDemoData } from "@/contexts/DemoDataContext";
 import { demoBookingsForMentor, demoTasksForBookings, demoReportsForBookings, demoLibertyProfiles } from "@/lib/demoForUser";
+import { BEGIN_JOURNEY_SESSIONS, buildSessionProgress } from "@/lib/sessionProgress";
 import {
   getEffectiveBookingStatus,
   getMentorPendingAction,
@@ -54,7 +55,7 @@ import {
 
 type ViewMode = "month" | "overview";
 
-type SessionInfo = { id: string; name: string; is_kickoff?: boolean | null; duration_minutes?: number | null };
+type SessionInfo = { id: string; name: string; order?: number | null; is_kickoff?: boolean | null; duration_minutes?: number | null };
 
 const MentorDashboardPage = () => {
   const { profile } = useAuth();
@@ -130,10 +131,49 @@ const MentorDashboardPage = () => {
   const { data: sessions = [] } = useQuery({
     queryKey: ["dash-sessions"],
     queryFn: async () => {
-      const { data, error } = await supabase.from("sessions").select("id, name, is_kickoff, duration_minutes").order("order");
+      const { data, error } = await supabase.from("sessions").select("id, name, order, is_kickoff, duration_minutes").order("order");
       if (error) throw error;
       return (data || []) as SessionInfo[];
     },
+  });
+
+  // Jornada completa de cada aluno (todas as sessões, qualquer mentor) — para o progresso  X/12
+  const { data: journeyBookings = [] } = useQuery({
+    queryKey: ["mentor-dash-journey-bookings", libertyIds],
+    queryFn: async () => {
+      if (!libertyIds.length) return [] as Array<{
+        liberty_id: string | null;
+        session_id: string;
+        status: string | null;
+        scheduled_date: string | null;
+        start_time: string | null;
+        end_time: string | null;
+        is_retroactive: boolean | null;
+        report_required: boolean | null;
+      }>;
+      const chunkSize = 100;
+      const rows: Array<{
+        liberty_id: string | null;
+        session_id: string;
+        status: string | null;
+        scheduled_date: string | null;
+        start_time: string | null;
+        end_time: string | null;
+        is_retroactive: boolean | null;
+        report_required: boolean | null;
+      }> = [];
+      for (let i = 0; i < libertyIds.length; i += chunkSize) {
+        const chunk = libertyIds.slice(i, i + chunkSize);
+        const { data, error } = await supabase
+          .from("bookings")
+          .select("liberty_id, session_id, status, scheduled_date, start_time, end_time, is_retroactive, report_required")
+          .in("liberty_id", chunk);
+        if (error) throw error;
+        rows.push(...(data || []));
+      }
+      return rows;
+    },
+    enabled: libertyIds.length > 0,
   });
 
   // Relatórios de todas as sessões do mentor (via join), independente do mês exibido
@@ -292,43 +332,56 @@ const MentorDashboardPage = () => {
       .sort((a, b) => a.daysLeft - b.daysLeft);
   }, [allVisible, libertyProfileMap]);
 
-  // Alunos ativos deste mentor: jornada em curso, perfil ativo e programa vigente.
-  // Não lista quem já concluiu as 12 sessões nem quem só tem histórico antigo.
+  // Alunos ativos deste mentor: progresso da JORNADA do membro (todas as sessões, qualquer mentor).
+  // Contar só as sessões com este mentor gerava 1/12 falso para quem já avançou com outros.
   const activeStudents: ActiveStudent[] = useMemo(() => {
     const byStudent = new Map<string, ActiveStudent>();
     const nextIso = new Map<string, string>();
     const today = todayPlatformDate();
+    const journeyByLiberty = new Map<string, typeof journeyBookings>();
+    journeyBookings.forEach((b) => {
+      if (!b.liberty_id) return;
+      const list = journeyByLiberty.get(b.liberty_id) ?? [];
+      list.push(b);
+      journeyByLiberty.set(b.liberty_id, list);
+    });
+
     allVisible.forEach((b) => {
       if (!b.liberty_id) return;
       const p = libertyProfileMap[b.liberty_id];
       if (!p || p.is_active === false) return;
       if (p.program_end_date && p.program_end_date < today) return;
-      const entry = byStudent.get(b.liberty_id) ?? {
-        id: b.liberty_id,
-        full_name: p.full_name || "Membro",
-        avatar_url: p.avatar_url,
-        tier: p.member_tier,
-        completedCount: 0,
-        nextDate: null,
-      };
-      if (isRealizedSessionBooking(b)) entry.completedCount += 1;
+
+      if (!byStudent.has(b.liberty_id)) {
+        const progress = buildSessionProgress(sessions, journeyByLiberty.get(b.liberty_id) || []);
+        byStudent.set(b.liberty_id, {
+          id: b.liberty_id,
+          full_name: p.full_name || "Membro",
+          avatar_url: p.avatar_url,
+          tier: p.member_tier,
+          completedCount: progress.completedCount,
+          nextDate: null,
+        });
+      }
+
       if (isFutureScheduledBooking(b)) {
         const current = nextIso.get(b.liberty_id);
         if (!current || b.scheduled_date < current) {
           nextIso.set(b.liberty_id, b.scheduled_date);
-          entry.nextDate = format(parseISO(b.scheduled_date), "dd/MM");
+          const entry = byStudent.get(b.liberty_id);
+          if (entry) entry.nextDate = format(parseISO(b.scheduled_date), "dd/MM");
         }
       }
-      byStudent.set(b.liberty_id, entry);
     });
+
     return [...byStudent.values()]
-      .filter((s) => s.completedCount < 12)
+      .filter((s) => s.completedCount < BEGIN_JOURNEY_SESSIONS)
       .sort((a, b) => {
         if (a.nextDate && !b.nextDate) return -1;
         if (!a.nextDate && b.nextDate) return 1;
         return b.completedCount - a.completedCount;
       });
-  }, [allVisible, libertyProfileMap]);
+  }, [allVisible, libertyProfileMap, journeyBookings, sessions]);
 
   const firstName = (profile?.full_name || "").split(" ")[0] || "mentor";
   const periodLabel = viewMode === "month" ? format(currentMonth, "MMMM yyyy", { locale: ptBR }) : "Todos os períodos";

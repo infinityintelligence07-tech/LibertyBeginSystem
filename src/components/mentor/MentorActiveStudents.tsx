@@ -3,6 +3,7 @@ import { useNavigate } from "react-router-dom";
 import { shortName } from "@/lib/formatName";
 import { UserAvatar } from "@/components/UserAvatar";
 import { EmptyState, ListRow, ProgressBar, SectionCard, SectionHeader, StatusPill } from "@/components/ds";
+import { BEGIN_JOURNEY_SESSIONS } from "@/lib/sessionProgress";
 
 export interface ActiveStudent {
   id: string;
@@ -21,7 +22,7 @@ const tierLabel = (tier?: string | null) => (tier === "liberty" ? "Liberty" : ti
 
 export const MentorActiveStudents = ({ students }: Props) => {
   const navigate = useNavigate();
-  const total = 12;
+  const total = BEGIN_JOURNEY_SESSIONS;
 
   return (
     <section className="space-y-3">
