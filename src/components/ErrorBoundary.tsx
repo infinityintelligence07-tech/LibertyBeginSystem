@@ -1,4 +1,5 @@
 import { Component, Fragment, ReactNode } from "react";
+import { RefreshCw } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Logo } from "@/components/Logo";
 import { PageContainer, SectionCard } from "@/components/ds";
@@ -96,14 +97,15 @@ export class ErrorBoundary extends Component<Props, State> {
         <PageContainer variant="narrow">
           <SectionCard role="status" className="max-w-sm mx-auto text-center space-y-5">
             <Logo size="sm" className="mx-auto" />
+            <RefreshCw className="mx-auto h-5 w-5 text-muted-foreground" aria-hidden />
             <div className="space-y-2">
-              <h1 className="text-[22px] font-semibold text-foreground">Continuando</h1>
+              <h1 className="text-[22px] font-semibold text-foreground">Nova versão disponível</h1>
               <p className="text-sm text-muted-foreground leading-relaxed">
-                A página segue de onde você parou.
+                Atualize para ver as novidades.
               </p>
             </div>
             <Button type="button" size="lg" onClick={this.handleReload} className="w-full">
-              Continuar
+              Atualizar
             </Button>
           </SectionCard>
         </PageContainer>
