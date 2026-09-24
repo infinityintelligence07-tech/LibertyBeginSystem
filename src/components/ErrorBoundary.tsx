@@ -1,6 +1,6 @@
 import { Component, Fragment, ReactNode } from "react";
-import { AlertTriangle } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { Logo } from "@/components/Logo";
 import { PageContainer, SectionCard } from "@/components/ds";
 import { clearReloadLock, reloadAppSafely } from "@/lib/appReload";
 
@@ -94,19 +94,16 @@ export class ErrorBoundary extends Component<Props, State> {
     return (
       <div className="min-h-[100dvh] bg-background flex items-center justify-center py-10">
         <PageContainer variant="narrow">
-          <SectionCard role="alert" className="max-w-sm mx-auto text-center space-y-4">
-            <AlertTriangle className="mx-auto h-6 w-6 text-destructive" aria-hidden />
+          <SectionCard role="status" className="max-w-sm mx-auto text-center space-y-5">
+            <Logo size="sm" className="mx-auto" />
             <div className="space-y-2">
-              <h1 className="text-[22px] font-semibold text-foreground">Algo travou por aqui</h1>
+              <h1 className="text-[22px] font-semibold text-foreground">Continuando</h1>
               <p className="text-sm text-muted-foreground leading-relaxed">
-                Seus dados foram guardados. Recarregue a tela para continuar de onde parou.
+                A página segue de onde você parou.
               </p>
-              {this.state.error?.message && (
-                <p className="text-[11px] text-muted-foreground break-words">{this.state.error.message}</p>
-              )}
             </div>
             <Button type="button" size="lg" onClick={this.handleReload} className="w-full">
-              Recarregar
+              Continuar
             </Button>
           </SectionCard>
         </PageContainer>
