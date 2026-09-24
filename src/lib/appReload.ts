@@ -15,11 +15,11 @@ export const clearAppCaches = async () => {
   }
 };
 
-export const reloadAppSafely = async ({ bustCache = false } = {}) => {
+export const reloadAppSafely = async ({ bustCache = false, force = false } = {}) => {
   if (typeof window === "undefined" || navigator.onLine === false) return false;
 
   const lastReload = Number(sessionStorage.getItem(RELOAD_LOCK) ?? 0);
-  if (Date.now() - lastReload < RELOAD_COOLDOWN_MS) return false;
+  if (!force && Date.now() - lastReload < RELOAD_COOLDOWN_MS) return false;
   sessionStorage.setItem(RELOAD_LOCK, String(Date.now()));
   await clearAppCaches();
 

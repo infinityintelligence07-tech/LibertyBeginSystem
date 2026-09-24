@@ -72,12 +72,16 @@ export class ErrorBoundary extends Component<Props, State> {
     try {
       sessionStorage.removeItem(RELOAD_FLAG);
       clearReloadLock();
+      if ("serviceWorker" in navigator) {
+        const regs = await navigator.serviceWorker.getRegistrations();
+        await Promise.all(regs.map((reg) => reg.unregister().catch(() => undefined)));
+      }
     } catch {
       /* noop */
     }
-    const reloaded = await reloadAppSafely({ bustCache: true });
-    if (!reloaded && navigator.onLine === false) {
-      this.setState({ error: null, retryKey: this.state.retryKey + 1 });
+    const reloaded = await reloadAppSafely({ bustCache: true, force: true });
+    if (!reloaded) {
+      window.location.reload();
     }
   };
 
@@ -100,6 +104,9 @@ export class ErrorBoundary extends Component<Props, State> {
               <p className="text-xs text-muted-foreground leading-relaxed">
                 Se a tradução automática do navegador estiver ligada nesta página, desative-a: ela costuma travar a tela.
               </p>
+              {this.state.error?.message && (
+                <p className="text-[11px] text-muted-foreground break-words">{this.state.error.message}</p>
+              )}
             </div>
             <Button type="button" size="lg" onClick={this.handleReload} className="w-full">
               Recarregar

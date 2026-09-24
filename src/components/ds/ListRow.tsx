@@ -67,7 +67,8 @@ const monthShort = ["jan", "fev", "mar", "abr", "mai", "jun", "jul", "ago", "set
 
 /** Bloco de data 40×40 (dia grande + mês) para o `leading` do `ListRow`. */
 export const DateBlock = ({ date, className, tone = "default" }: DateBlockProps) => {
-  const [, m, d] = date.slice(0, 10).split("-").map(Number);
+  const raw = typeof date === "string" ? date : "";
+  const [, m, d] = raw.slice(0, 10).split("-").map(Number);
   return (
     <div
       className={cn(
@@ -76,7 +77,7 @@ export const DateBlock = ({ date, className, tone = "default" }: DateBlockProps)
         className,
       )}
     >
-      <span className="text-[17px] font-semibold tabular-nums">{String(d).padStart(2, "0")}</span>
+      <span className="text-[17px] font-semibold tabular-nums">{Number.isFinite(d) ? String(d).padStart(2, "0") : "--"}</span>
       <span className="text-[11px] text-muted-foreground leading-none mt-0.5">{monthShort[(m || 1) - 1]}</span>
     </div>
   );

@@ -84,6 +84,7 @@ const AdminDashboardPage = () => {
       .filter((m) => m.is_active !== false)
       .forEach((m) => {
         (m.pending_confirmation_sessions || []).forEach((s) => {
+          if (!s.date || typeof s.date !== "string") return;
           if (filterKey && !s.date.startsWith(filterKey)) return;
           total++;
           const days = daysSinceBookingEnd({ scheduled_date: s.date, start_time: s.start_time, end_time: s.end_time });
@@ -115,7 +116,7 @@ const AdminDashboardPage = () => {
         // Meta mensal do membro: min(2, sessões restantes até 12). Onboarding não conta.
         const remaining = Math.max(0, 12 - m.total_completed);
         const memberTarget = Math.min(2, remaining);
-        const count = m.monthly_counts[filterKey] || 0;
+        const count = m.monthly_counts?.[filterKey] || 0;
         if (memberTarget === 0 || count >= memberTarget) onTrack++;
         else if (count >= 1) behind++;
         else { zero++; zeroList.push({ name: m.full_name, id: m.id }); }
@@ -138,7 +139,7 @@ const AdminDashboardPage = () => {
     let monthSessions = 0;
     let monthScheduled = 0;
     if (filterKey) {
-      monthSessions = monthMembers.reduce((sum, m) => sum + (m.monthly_counts[filterKey] || 0), 0);
+      monthSessions = monthMembers.reduce((sum, m) => sum + (m.monthly_counts?.[filterKey] || 0), 0);
       monthScheduled = monthMembers.reduce((sum, m) => sum + (m.monthly_scheduled_counts[filterKey] || 0), 0);
     }
     const goalSessions = Math.ceil(targetSessions * 0.9);
@@ -155,7 +156,7 @@ const AdminDashboardPage = () => {
 
   // Realizadas: SOMENTE membros Begin (Liberty tem faixa própria abaixo).
   const completedCount = useMemo(() => {
-    if (filterKey) return beginMembers.reduce((sum, m) => sum + (m.monthly_counts[filterKey] || 0), 0);
+    if (filterKey) return beginMembers.reduce((sum, m) => sum + (m.monthly_counts?.[filterKey] || 0), 0);
     return beginMembers.reduce((sum, m) => sum + m.total_completed, 0);
   }, [beginMembers, filterKey]);
 
@@ -165,7 +166,7 @@ const AdminDashboardPage = () => {
     [members]
   );
   const libertyCompleted = useMemo(() => {
-    if (filterKey) return libertyMembers.reduce((sum, m) => sum + (m.monthly_counts[filterKey] || 0), 0);
+    if (filterKey) return libertyMembers.reduce((sum, m) => sum + (m.monthly_counts?.[filterKey] || 0), 0);
     return libertyMembers.reduce((sum, m) => sum + m.total_completed, 0);
   }, [libertyMembers, filterKey]);
 
@@ -186,7 +187,7 @@ const AdminDashboardPage = () => {
       .filter((m) => m.is_active !== false)
       .flatMap((m) =>
         (m.scheduled_sessions || [])
-          .filter((s) => s.date >= todayKey && (!filterKey || s.date.startsWith(filterKey)))
+          .filter((s) => typeof s.date === "string" && s.date >= todayKey && (!filterKey || s.date.startsWith(filterKey)))
           .map((s) => ({ ...s, member_name: m.full_name, member_id: m.id })),
       )
       .sort((a, b) => `${a.date} ${a.start_time || ""}`.localeCompare(`${b.date} ${b.start_time || ""}`))

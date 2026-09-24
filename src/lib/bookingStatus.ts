@@ -77,9 +77,10 @@ const platformOffsetMs = (utcMs: number) => {
  * Evita depender do fuso do navegador do usuário (mentor/admin fora do Brasil, celular com fuso errado).
  */
 export const parsePlatformDateTime = (date?: string | null, time?: string | null) => {
-  if (!date) return null;
+  if (!date || typeof date !== "string") return null;
   const [y, m, d] = date.slice(0, 10).split("-").map(Number);
-  const [hh = 23, mm = 59, ss = 59] = (time || "23:59:59").slice(0, 8).split(":").map(Number);
+  const timeStr = typeof time === "string" && time ? time : "23:59:59";
+  const [hh = 23, mm = 59, ss = 59] = timeStr.slice(0, 8).split(":").map(Number);
   if ([y, m, d, hh, mm, ss].some((n) => Number.isNaN(n))) return null;
   const guess = Date.UTC(y, m - 1, d, hh, mm, ss);
   const parsed = new Date(guess - platformOffsetMs(guess));
