@@ -101,9 +101,6 @@ export class ErrorBoundary extends Component<Props, State> {
               <p className="text-sm text-muted-foreground leading-relaxed">
                 Seus dados foram guardados. Recarregue a tela para continuar de onde parou.
               </p>
-              <p className="text-xs text-muted-foreground leading-relaxed">
-                Se a tradução automática do navegador estiver ligada nesta página, desative-a: ela costuma travar a tela.
-              </p>
               {this.state.error?.message && (
                 <p className="text-[11px] text-muted-foreground break-words">{this.state.error.message}</p>
               )}

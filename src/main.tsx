@@ -4,6 +4,9 @@ import "./index.css";
 import { registerPushServiceWorker, initForegroundPush } from "@/lib/pushRegistration";
 import { toast } from "sonner";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
+import { tolerateBrowserTranslation } from "@/lib/tolerateBrowserTranslation";
+
+tolerateBrowserTranslation();
 
 const rootElement = document.getElementById("root");
 if (rootElement) {
