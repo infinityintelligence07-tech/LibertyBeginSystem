@@ -62,6 +62,13 @@ export class ErrorBoundary extends Component<Props, State> {
   componentDidCatch(error: Error, info: unknown) {
     console.error("[ErrorBoundary]", error, info);
 
+    const isTdz =
+      /before initialization|Cannot access .+ before/i.test(error?.message ?? "") ||
+      error?.name === "ReferenceError";
+
+    // TDZ / bug de código: NÃO auto-reload (gera loop). Só mostra a tela com ação clara.
+    if (isTdz) return;
+
     // Chunk antigo depois de um deploy: no máximo UMA recarga automática.
     if (isChunkError(error)) {
       const count = Number(sessionStorage.getItem(RELOAD_COUNT) ?? 0);

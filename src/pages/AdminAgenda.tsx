@@ -263,6 +263,7 @@ const AdminAgendaPage = () => {
   const [rejectTarget, setRejectTarget] = useState<BookingRow | null>(null);
   const [rejectReason, setRejectReason] = useState("Mentor indisponível");
   const [provisioningMeet, setProvisioningMeet] = useState(false);
+  const [showReminders, setShowReminders] = useState(false);
 
   /** Invalida todas as leituras de bookings (agenda + painéis admin) após uma mutação. */
   const invalidateBookings = () => {
@@ -450,6 +451,10 @@ const AdminAgendaPage = () => {
     enabled: visibleBookingIds.length > 0,
   });
   const reportedIds = useMemo(() => new Set(reportedIdList), [reportedIdList]);
+
+  /** Status efetivo (regra única), considerando se há relatório salvo. */
+  const displayStatus = (booking: BookingRow): SessionStatus =>
+    getEffectiveBookingStatus(booking, { hasReport: reportedIds.has(booking.id) }) as SessionStatus;
 
   const approvePending = async (bk: BookingRow) => {
     // `sync_availability_booked` (trigger) já marca a disponibilidade como ocupada.
@@ -723,10 +728,6 @@ const AdminAgendaPage = () => {
     const m = allMentors.find((m) => m.id === id);
     return m ? shortName(m.full_name) : "Sem dados";
   };
-
-  /** Status efetivo (regra única), considerando se há relatório salvo. */
-  const displayStatus = (booking: BookingRow): SessionStatus =>
-    getEffectiveBookingStatus(booking, { hasReport: reportedIds.has(booking.id) }) as SessionStatus;
 
   // Color per mentor (overrides status colors for visual identification)
   const mentorColorFor = (mentorId: string) => {
@@ -1005,8 +1006,6 @@ const AdminAgendaPage = () => {
     setShowManualModal(true);
   };
 
-  // Reminder link panel state
-  const [showReminders, setShowReminders] = useState(false);
   const reminderLink = `${window.location.origin}/mentor/disponibilidade`;
 
   const copyReminderLink = (mentorName?: string) => {
