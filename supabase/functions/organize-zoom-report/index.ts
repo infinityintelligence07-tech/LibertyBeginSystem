@@ -1,8 +1,14 @@
 // Organize a Zoom transcript/summary into a structured mentoring report
-// using Lovable AI Gateway. Returns: summary, delivered, next_steps,
+// via OpenAI ou Gemini (sem Lovable). Returns: summary, delivered, next_steps,
 // ai_insights, suggested_tasks[].
 import { corsHeaders, handleOptions } from "../_shared/cors.ts";
 import { requireRole, toResponse, STAFF_ROLES } from "../_shared/auth.ts";
+import {
+  AiConfigError,
+  chatCompletions,
+  missingAiKeyResponse,
+  resolveAiConfig,
+} from "../_shared/ai.ts";
 
 Deno.serve(async (req) => {
   const preflight = handleOptions(req);
@@ -21,12 +27,11 @@ Deno.serve(async (req) => {
       );
     }
 
-    const LOVABLE_API_KEY = Deno.env.get("LOVABLE_API_KEY");
-    if (!LOVABLE_API_KEY) {
-      return new Response(JSON.stringify({ error: "LOVABLE_API_KEY ausente" }), {
-        status: 500,
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
+    try {
+      await resolveAiConfig();
+    } catch (e) {
+      if (e instanceof AiConfigError) return missingAiKeyResponse(corsHeaders);
+      throw e;
     }
 
     const systemPrompt = `Você receberá a transcrição, recapitulação ou resumo automático de uma sessão de mentoria realizada pelo Zoom. Sua tarefa é transformar esse conteúdo em um registro curto, claro e estratégico para que o próximo mentor consiga entender rapidamente:
@@ -68,46 +73,38 @@ Antes de responder, analise silenciosamente: qual era o verdadeiro problema disc
 
     const userPrompt = `Sessão: ${session_name || "(sem nome)"}\nAluno: ${liberty_name || "(sem nome)"}\nDor principal do aluno: ${main_pain || "(não informada)"}\n\nResumo / transcrição do Zoom (bruto, pode estar desorganizado):\n${transcript.trim()}`;
 
-    const response = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${LOVABLE_API_KEY}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        model: "google/gemini-3.6-flash",
-        messages: [
-          { role: "system", content: systemPrompt },
-          { role: "user", content: userPrompt },
-        ],
-        tools: [
-          {
-            type: "function",
-            function: {
-              name: "build_report",
-              description: "Estrutura o relatório da sessão de mentoria.",
-              parameters: {
-                type: "object",
-                properties: {
-                  summary: { type: "string" },
-                  delivered: { type: "string" },
-                  next_steps: { type: "string" },
-                  ai_alert: { type: "string" },
-                  ai_strategy: { type: "string" },
-                  suggested_tasks: {
-                    type: "array",
-                    description: "Todas as tarefas únicas e acionáveis identificadas na conversa, já deduplicadas.",
-                    items: { type: "string" },
-                  },
+    const response = await chatCompletions({
+      messages: [
+        { role: "system", content: systemPrompt },
+        { role: "user", content: userPrompt },
+      ],
+      tools: [
+        {
+          type: "function",
+          function: {
+            name: "build_report",
+            description: "Estrutura o relatório da sessão de mentoria.",
+            parameters: {
+              type: "object",
+              properties: {
+                summary: { type: "string" },
+                delivered: { type: "string" },
+                next_steps: { type: "string" },
+                ai_alert: { type: "string" },
+                ai_strategy: { type: "string" },
+                suggested_tasks: {
+                  type: "array",
+                  description: "Todas as tarefas únicas e acionáveis identificadas na conversa, já deduplicadas.",
+                  items: { type: "string" },
                 },
-                required: ["summary", "delivered", "next_steps", "ai_alert", "ai_strategy", "suggested_tasks"],
-                additionalProperties: false,
               },
+              required: ["summary", "delivered", "next_steps", "ai_alert", "ai_strategy", "suggested_tasks"],
+              additionalProperties: false,
             },
           },
-        ],
-        tool_choice: { type: "function", function: { name: "build_report" } },
-      }),
+        },
+      ],
+      tool_choice: { type: "function", function: { name: "build_report" } },
     });
 
     if (response.status === 429) {
@@ -118,7 +115,7 @@ Antes de responder, analise silenciosamente: qual era o verdadeiro problema disc
     }
     if (response.status === 402) {
       return new Response(
-        JSON.stringify({ error: "Sem créditos de IA. Adicione créditos em Settings → Workspace → Usage." }),
+        JSON.stringify({ error: "Sem créditos de IA. Verifique o plano da chave OpenAI ou Gemini." }),
         { status: 402, headers: { ...corsHeaders, "Content-Type": "application/json" } },
       );
     }

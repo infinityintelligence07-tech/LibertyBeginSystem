@@ -1,9 +1,15 @@
-// Selects a "Case of the day" using Lovable AI Gateway based on recent
+// Selects a "Case of the day" using OpenAI/Gemini based on recent
 // booking_reports quantitative/qualitative results. Runs daily via cron.
 // Auth: aceita `Authorization: Bearer <SUPABASE_SERVICE_ROLE_KEY>` (cron) ou um
 // admin/super_admin autenticado.
 import { corsHeaders, handleOptions } from "../_shared/cors.ts";
 import { requireRole, toResponse, ADMIN_ROLES } from "../_shared/auth.ts";
+import {
+  AiConfigError,
+  chatCompletions,
+  missingAiKeyResponse,
+  resolveAiConfig,
+} from "../_shared/ai.ts";
 
 Deno.serve(async (req) => {
   const preflight = handleOptions(req);
@@ -12,11 +18,11 @@ Deno.serve(async (req) => {
     const ctx = await requireRole(req, ADMIN_ROLES, { allowServiceRole: true });
     const admin = ctx.supabaseAdmin;
 
-    const LOVABLE_API_KEY = Deno.env.get("LOVABLE_API_KEY");
-    if (!LOVABLE_API_KEY) {
-      return new Response(JSON.stringify({ error: "LOVABLE_API_KEY missing" }), {
-        status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
+    try {
+      await resolveAiConfig();
+    } catch (e) {
+      if (e instanceof AiConfigError) return missingAiKeyResponse(corsHeaders);
+      throw e;
     }
 
     const today = new Date().toISOString().slice(0, 10);
@@ -85,20 +91,12 @@ Deno.serve(async (req) => {
 Escolha o resultado mais impactante da lista (preferir quantitativos claros: faturamento, leads, clientes, %).
 Responda JSON puro: {"member_id":"uuid","headline":"máx 60 chars, impactante","summary":"2-3 frases, tom inspirador em pt-BR","metric_label":"ex: Faturamento","metric_value":"ex: +R$ 45.000/mês"}`;
 
-    const resp = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${LOVABLE_API_KEY}`,
-      },
-      body: JSON.stringify({
-        model: "google/gemini-2.5-flash",
-        messages: [
-          { role: "system", content: system },
-          { role: "user", content: JSON.stringify(enriched) },
-        ],
-        response_format: { type: "json_object" },
-      }),
+    const resp = await chatCompletions({
+      messages: [
+        { role: "system", content: system },
+        { role: "user", content: JSON.stringify(enriched) },
+      ],
+      response_format: { type: "json_object" },
     });
     if (!resp.ok) {
       const t = await resp.text();

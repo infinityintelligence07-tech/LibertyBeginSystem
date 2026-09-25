@@ -30,7 +30,10 @@ export const GoogleCalendarBanner = () => {
     setLoading(true);
     try {
       const { data, error } = await supabase.functions.invoke("google-oauth-start", {
-        body: { returnTo: window.location.pathname },
+        body: {
+          returnTo: window.location.pathname,
+          appOrigin: window.location.origin,
+        },
       });
       if (error) throw error;
       if (data?.url) window.location.href = data.url;

@@ -23,6 +23,7 @@ import { toast } from "sonner";
 import { format, startOfMonth, addMonths, subMonths, parseISO } from "date-fns";
 import { ptBR } from "date-fns/locale";
 import { shortName } from "@/lib/formatName";
+import { invokeProvisionMeeting } from "@/lib/meetingWhatsApp";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { TaskChecklist } from "@/components/TaskChecklist";
 import { UserAvatar } from "@/components/UserAvatar";
@@ -246,6 +247,11 @@ const MentorSessoesPage = () => {
     setActingId(null);
     if (error) { toast.error(translateBookingError(error, "Erro ao confirmar.")); return; }
     toast.success("Sessão confirmada! O membro foi notificado.");
+    void invokeProvisionMeeting(bookingId).then((r) => {
+      if (r && !r.ok) {
+        toast.warning(r.error || r.message || "Sala Meet não criada — a equipe pode tentar de novo.");
+      }
+    });
     supabase.functions
       .invoke("google-calendar-sync", { body: { booking_id: bookingId } })
       .catch((e) => console.error("Falha ao sincronizar com o Google Agenda", e));

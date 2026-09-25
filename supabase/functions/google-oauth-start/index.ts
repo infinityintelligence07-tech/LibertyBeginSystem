@@ -1,12 +1,19 @@
 import { createClient } from "npm:@supabase/supabase-js@2";
+import { resolveGoogleOAuthCredentials, googleOAuthRedirectUri } from "../_shared/googleOAuth.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
 };
 
+const DEFAULT_APP_ORIGIN = "https://begin.libertymentoria.com.br";
+
 const SCOPES = [
   "https://www.googleapis.com/auth/calendar.events",
+  "https://www.googleapis.com/auth/calendar",
+  "https://www.googleapis.com/auth/meetings.space.created",
+  "https://www.googleapis.com/auth/meetings.space.settings",
+  "https://www.googleapis.com/auth/meetings.space.readonly",
   "https://www.googleapis.com/auth/userinfo.email",
   "https://www.googleapis.com/auth/userinfo.profile",
   "openid",
@@ -24,6 +31,29 @@ async function hmac(data: string, secret: string) {
   return Array.from(new Uint8Array(sig)).map((b) => b.toString(16).padStart(2, "0")).join("");
 }
 
+/** Aceita só https?://host sem path; bloqueia accounts.google.com e supabase functions. */
+function sanitizeAppOrigin(raw: unknown): string {
+  if (typeof raw !== "string" || !raw.trim()) return DEFAULT_APP_ORIGIN;
+  try {
+    const u = new URL(raw.trim());
+    if (u.protocol !== "https:" && u.protocol !== "http:") return DEFAULT_APP_ORIGIN;
+    const host = u.hostname.toLowerCase();
+    if (
+      host === "accounts.google.com" ||
+      host.endsWith(".supabase.co") ||
+      host === "localhost" ||
+      host === "127.0.0.1"
+    ) {
+      // localhost ok em dev
+      if (host === "localhost" || host === "127.0.0.1") return u.origin;
+      if (host.endsWith(".supabase.co") || host === "accounts.google.com") return DEFAULT_APP_ORIGIN;
+    }
+    return u.origin;
+  } catch {
+    return DEFAULT_APP_ORIGIN;
+  }
+}
+
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
   try {
@@ -38,14 +68,25 @@ Deno.serve(async (req) => {
     if (!user) return new Response(JSON.stringify({ error: "Unauthorized" }), { status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" } });
 
     const body = await req.json().catch(() => ({}));
-    const returnTo = body.returnTo || "/mentor/dashboard";
+    const returnTo = typeof body.returnTo === "string" && body.returnTo.startsWith("/") && !body.returnTo.startsWith("//")
+      ? body.returnTo
+      : "/perfil";
 
-    const clientId = Deno.env.get("GOOGLE_OAUTH_CLIENT_ID")!;
-    const secret = Deno.env.get("GOOGLE_OAUTH_CLIENT_SECRET")!;
-    const redirectUri = `${Deno.env.get("SUPABASE_URL")}/functions/v1/google-oauth-callback`;
+    const appOrigin = sanitizeAppOrigin(
+      body.appOrigin || req.headers.get("origin") || Deno.env.get("APP_URL") || DEFAULT_APP_ORIGIN,
+    );
 
-    const statePayload = `${user.id}|${returnTo}|${Date.now()}`;
-    const sig = await hmac(statePayload, secret);
+    const admin = createClient(
+      Deno.env.get("SUPABASE_URL")!,
+      Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!,
+      { auth: { persistSession: false, autoRefreshToken: false } },
+    );
+    const { clientId, clientSecret } = await resolveGoogleOAuthCredentials(admin);
+    const redirectUri = googleOAuthRedirectUri();
+
+    // userId | returnTo | appOrigin | timestamp  (appOrigin sem '|')
+    const statePayload = `${user.id}|${returnTo}|${appOrigin}|${Date.now()}`;
+    const sig = await hmac(statePayload, clientSecret);
     const state = btoa(`${statePayload}|${sig}`);
 
     const url = new URL("https://accounts.google.com/o/oauth2/v2/auth");
@@ -60,6 +101,6 @@ Deno.serve(async (req) => {
     return new Response(JSON.stringify({ url: url.toString() }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
   } catch (e) {
     console.error(e);
-    return new Response(JSON.stringify({ error: String(e) }), { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+    return new Response(JSON.stringify({ error: e instanceof Error ? e.message : String(e) }), { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } });
   }
 });

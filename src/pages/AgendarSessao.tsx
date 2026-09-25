@@ -24,6 +24,7 @@ import { canScheduleKickoff, isJourneySession, KICKOFF_NOT_ALLOWED_MESSAGE } fro
 import { isMonthlyBookingLimitError, isJourneyBookingLimitError } from "@/lib/bookingRules";
 import { parsePlatformDateTime, PENDING_CONFIRMATION_HINT } from "@/lib/bookingStatus";
 import { invalidateMemberBookingQueries, useJourneyProgress, type JourneySession } from "@/hooks/useJourneyProgress";
+import { invokeProvisionMeeting } from "@/lib/meetingWhatsApp";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import {
@@ -109,9 +110,13 @@ const pillarLabels: Record<string, string> = {
   mentalidade: "Mentalidade",
   espiritual: "Espiritual",
 };
-const confirmSteps = [
-  { label: "Criando sala Zoom...", icon: Video, duration: 1400 },
-  { label: "Adicionando ao Google Agenda...", icon: CalendarIcon, duration: 1600 },
+const confirmStepsScheduled = [
+  { label: "Confirmando agendamento...", icon: CalendarIcon, duration: 1000 },
+  { label: "Criando sala Meet...", icon: Video, duration: 1600 },
+  { label: "Confirmado", icon: CheckCircle2, duration: 800 },
+];
+const confirmStepsPending = [
+  { label: "Confirmando agendamento...", icon: CalendarIcon, duration: 1400 },
   { label: "Confirmado", icon: CheckCircle2, duration: 800 },
 ];
 
@@ -128,6 +133,7 @@ const AgendarSessaoPage = () => {
   const [notes, setNotes] = useState("");
   const [isConfirming, setIsConfirming] = useState(false);
   const [confirmStep, setConfirmStep] = useState(0);
+  const [confirmSteps, setConfirmSteps] = useState(confirmStepsScheduled);
   const [confirmed, setConfirmed] = useState(false);
   const [showLimitModal, setShowLimitModal] = useState(false);
   const [showJourneyLimitModal, setShowJourneyLimitModal] = useState(false);
@@ -381,6 +387,7 @@ const AgendarSessaoPage = () => {
 
     setIsConfirming(true);
     setConfirmStep(0);
+    setConfirmSteps(isSameDayBooking ? confirmStepsPending : confirmStepsScheduled);
 
     // Disponibilidade correspondente: mesmo mentor da sessão, mesmo horário e tamanho compatível com a sessão.
     const matchingAvail = allAvailability.find((av) => {
@@ -455,9 +462,18 @@ const AgendarSessaoPage = () => {
       if (availError) console.error("Availability update error:", availError);
     }
 
-    // Confirmada automaticamente → já cria o evento no Google Agenda.
-    // Pendente de aprovação → sincroniza só depois do OK (AdminAgenda / MentorSessoes).
+    // Confirmada automaticamente → provisiona Meet + sincroniza Google Agenda.
+    // Pendente de aprovação → provisiona só depois do OK (AdminAgenda / MentorSessoes).
     if (!needsApproval && created?.id) {
+      const provision = await invokeProvisionMeeting(created.id);
+      if (!provision?.ok) {
+        toast.warning(
+          provision?.error ||
+            provision?.message ||
+            "Sala Meet não criada. O agendamento está confirmado — a equipe pode tentar de novo.",
+        );
+      }
+      // Backup: provision-meeting já tenta o calendário; mantém sync explícito.
       supabase.functions
         .invoke("google-calendar-sync", { body: { booking_id: created.id } })
         .catch(() => {});
@@ -479,7 +495,7 @@ const AgendarSessaoPage = () => {
       confirmSteps[confirmStep].duration
     );
     return () => clearTimeout(timer);
-  }, [isConfirming, confirmStep]);
+  }, [isConfirming, confirmStep, confirmSteps]);
 
   // Google Calendar link
   const googleCalendarUrl = useMemo(() => {
@@ -488,7 +504,7 @@ const AgendarSessaoPage = () => {
     const startStr = selectedSlot.startTime.replace(":", "") + "00";
     const endStr = selectedSlot.endTime.replace(":", "") + "00";
     const title = encodeURIComponent(`Sessão: ${selectedSession.name} · Liberty Begin`);
-    const details = encodeURIComponent("Sessão de mentoria Liberty Begin. O link do Zoom será enviado por e-mail.");
+    const details = encodeURIComponent("Sessão de mentoria Liberty Begin. O link do Google Meet será enviado por e-mail.");
     return `https://calendar.google.com/calendar/render?action=TEMPLATE&text=${title}&dates=${dateStr}T${startStr}/${dateStr}T${endStr}&details=${details}&ctz=America/Sao_Paulo`;
   }, [selectedSession, selectedDate, selectedSlot]);
 
@@ -597,7 +613,7 @@ const AgendarSessaoPage = () => {
                   description={
                     isSameDayBooking
                       ? "Como o horário começa em menos de 48 horas, a sessão aguarda a aprovação da equipe. Você será avisado assim que for confirmada."
-                      : "Seu horário está confirmado na agenda do mentor. O link do Zoom chega por e-mail e fica disponível na sua agenda."
+                      : "Seu horário está confirmado na agenda do mentor. O link do Google Meet chega por e-mail e fica disponível na sua agenda."
                   }
                   className="justify-center text-center"
                 />
@@ -628,7 +644,7 @@ const AgendarSessaoPage = () => {
                   <div className="border-t border-border" />
                   <div className="flex justify-between gap-4">
                     <dt className="text-muted-foreground">Formato</dt>
-                    <dd className="text-foreground font-medium">Online via Zoom</dd>
+                    <dd className="text-foreground font-medium">Online via Google Meet</dd>
                   </div>
                 </dl>
               </SectionCard>
@@ -837,7 +853,7 @@ const AgendarSessaoPage = () => {
           {!isConfirming && !confirmed && step === 3 && selectedDate && (
             <motion.div key="step3" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} transition={{ duration: 0.15 }} className="space-y-4">
               <p className="text-sm text-muted-foreground first-letter:uppercase">
-                {format(selectedDate, "EEEE, dd 'de' MMMM 'de' yyyy", { locale: ptBR })} · {durationLabel} · Zoom
+                {format(selectedDate, "EEEE, dd 'de' MMMM 'de' yyyy", { locale: ptBR })} · {durationLabel} · Meet
               </p>
 
               {slotsForDate.length > 0 ? (
@@ -884,7 +900,7 @@ const AgendarSessaoPage = () => {
               ) : (
                 <Callout tone="info" icon={Info} title="Confirmação automática">
                   Com 48 horas ou mais de antecedência, a sessão entra confirmada na sua agenda e na do mentor.
-                  O link do Zoom chega por e-mail.
+                  O link do Google Meet chega por e-mail.
                 </Callout>
               )}
 
@@ -913,7 +929,7 @@ const AgendarSessaoPage = () => {
                   <div className="border-t border-border" />
                   <div className="flex justify-between gap-4">
                     <dt className="text-muted-foreground">Formato</dt>
-                    <dd className="text-foreground font-medium">Online via Zoom</dd>
+                    <dd className="text-foreground font-medium">Online via Google Meet</dd>
                   </div>
                 </dl>
               </SectionCard>
@@ -930,8 +946,8 @@ const AgendarSessaoPage = () => {
 
               <p className="text-xs text-muted-foreground text-center">
                 {isSameDayBooking
-                  ? "Após enviar, a equipe aprova a sessão e você recebe o link do Zoom por e-mail."
-                  : "Após confirmar, a sessão entra na sua agenda e você recebe o link do Zoom por e-mail."}
+                  ? "Após enviar, a equipe aprova a sessão e você recebe o link do Google Meet por e-mail."
+                  : "Após confirmar, a sessão entra na sua agenda e você recebe o link do Google Meet por e-mail."}
               </p>
 
               {/* Ações: fixas na base no mobile, inline no desktop */}

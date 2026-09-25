@@ -18,6 +18,7 @@ import {
   Pencil,
   Trash2,
   CalendarDays,
+  MessageCircle,
   type LucideIcon,
 } from "lucide-react";
 import { shortName, matchesSearch } from "@/lib/formatName";
@@ -40,6 +41,7 @@ import {
   PENDING_CONFIRMATION_HINT,
 } from "@/lib/bookingStatus";
 import { bookingRuleErrorMessage } from "@/lib/bookingRules";
+import { whatsappHref, copyText, invokeProvisionMeeting } from "@/lib/meetingWhatsApp";
 import { UserAvatar } from "@/components/UserAvatar";
 import { Button } from "@/components/ui/button";
 import {
@@ -127,6 +129,7 @@ interface MentorInfo {
   id: string;
   full_name: string;
   avatar_url?: string | null;
+  phone?: string | null;
 }
 
 interface BookingRow {
@@ -144,15 +147,61 @@ interface BookingRow {
   report_required?: boolean | null;
   zoom_join_url: string | null;
   zoom_link: string | null;
+  meeting_wa_member_text?: string | null;
+  meeting_wa_mentor_text?: string | null;
+  meeting_provision_error?: string | null;
+  meeting_provisioned_at?: string | null;
+  meeting_provider?: string | null;
   observations: string | null;
   cancellation_reason: string | null;
   availability_id: string | null;
-  liberty: { full_name: string; avatar_url?: string | null; member_tier?: "begin" | "liberty" | null } | null;
+  liberty: {
+    full_name: string;
+    avatar_url?: string | null;
+    member_tier?: "begin" | "liberty" | null;
+    phone?: string | null;
+  } | null;
+  mentor?: { full_name: string; phone?: string | null } | null;
   sessions: { name: string; duration_minutes?: number | null; is_kickoff?: boolean | null } | null;
 }
 
 const BOOKING_SELECT =
-  "*, liberty:profiles!bookings_liberty_id_fkey(full_name, avatar_url, member_tier), sessions(name, duration_minutes, is_kickoff)";
+  "*, liberty:profiles!bookings_liberty_id_fkey(full_name, avatar_url, member_tier, phone), mentor:profiles!bookings_mentor_id_fkey(full_name, phone), sessions(name, duration_minutes, is_kickoff)";
+
+/** Fallback de mensagem WA quando meeting_wa_* ainda não foi gravado. */
+const buildMeetingWaFallback = (
+  booking: BookingRow,
+  role: "member" | "mentor",
+  mentorName: string,
+): string => {
+  const meetUrl = booking.zoom_join_url || booking.zoom_link || "";
+  const memberName = booking.liberty?.full_name || booking.guest_name || "aluno";
+  const sessionName = booking.sessions?.name || "Sessão";
+  const when = `${format(new Date(booking.scheduled_date + "T12:00:00"), "dd/MM/yyyy")} · ${booking.start_time.substring(0, 5)}–${booking.end_time.substring(0, 5)}`;
+  if (role === "member") {
+    return [
+      `Oi, ${memberName.split(" ")[0] || "tudo bem"}!`,
+      ``,
+      `Sua sessão *${sessionName}* com ${mentorName} está confirmada.`,
+      `📅 ${when}`,
+      ``,
+      meetUrl ? `Link da reunião:\n${meetUrl}` : "O link da reunião será enviado em breve.",
+      ``,
+      `Qualquer imprevisto, avise a equipe Liberty.`,
+    ].join("\n");
+  }
+  return [
+    `Oi, ${mentorName.split(" ")[0] || "mentor"}!`,
+    ``,
+    `Sessão *${sessionName}* com ${memberName}.`,
+    `📅 ${when}`,
+    ``,
+    meetUrl ? `Link da reunião:\n${meetUrl}` : "O link da reunião será enviado em breve.",
+  ].join("\n");
+};
+
+const meetingOpenLabel = (url: string | null | undefined): string =>
+  url?.includes("meet.google.com") ? "Abrir Meet" : "Abrir reunião";
 
 /* ───── Constants ───── */
 // 9 distinct hues, one per mentor (cycles only if >9 mentors)
@@ -213,6 +262,7 @@ const AdminAgendaPage = () => {
   // Recusa de pedido de horário (substitui o prompt nativo)
   const [rejectTarget, setRejectTarget] = useState<BookingRow | null>(null);
   const [rejectReason, setRejectReason] = useState("Mentor indisponível");
+  const [provisioningMeet, setProvisioningMeet] = useState(false);
 
   /** Invalida todas as leituras de bookings (agenda + painéis admin) após uma mutação. */
   const invalidateBookings = () => {
@@ -293,7 +343,7 @@ const AdminAgendaPage = () => {
       if (mentorUserIds.length === 0) return [] as MentorInfo[];
       const { data, error } = await supabase
         .from("profiles")
-        .select("id, full_name, avatar_url")
+        .select("id, full_name, avatar_url, phone")
         .in("user_id", mentorUserIds)
         .order("full_name");
       if (error) throw error;
@@ -405,6 +455,11 @@ const AdminAgendaPage = () => {
     // `sync_availability_booked` (trigger) já marca a disponibilidade como ocupada.
     const { error } = await supabase.from("bookings").update({ status: "scheduled", approval_required: false }).eq("id", bk.id);
     if (error) { toast.error(translateBookingError(error, "Erro ao aprovar")); return; }
+    void invokeProvisionMeeting(bk.id).then((r) => {
+      if (r && !r.ok) {
+        toast.warning(r.error || r.message || "Sala Meet não criada — tente provisionar de novo.");
+      }
+    });
     supabase.functions.invoke("google-calendar-sync", { body: { booking_id: bk.id } }).catch((e) => console.warn("google-calendar-sync", e));
     invalidateBookings();
     toast.success("Sessão aprovada. Aluno e mentor foram notificados");
@@ -752,6 +807,11 @@ const AdminAgendaPage = () => {
 
     if (error) { toast.error(translateBookingError(error, "Erro ao remarcar")); return; }
     if (!selectedBooking.is_retroactive) {
+      void invokeProvisionMeeting(selectedBooking.id, { force: true }).then((r) => {
+        if (r && !r.ok) {
+          toast.warning(r.error || r.message || "Sala Meet não recriada — tente provisionar de novo.");
+        }
+      });
       supabase.functions.invoke("google-calendar-sync", { body: { booking_id: selectedBooking.id } }).catch((e) => console.warn("google-calendar-sync", e));
     }
     setShowDateChange(false);
@@ -842,8 +902,13 @@ const AdminAgendaPage = () => {
       console.error("Booking insert error:", error);
       return;
     }
-    // Registro histórico não gera evento no Google Calendar.
+    // Registro histórico não gera evento no Google Calendar nem Meet.
     if (createdBk?.id && !isRetroactive) {
+      void invokeProvisionMeeting(createdBk.id).then((r) => {
+        if (r && !r.ok) {
+          toast.warning(r.error || r.message || "Sala Meet não criada — tente provisionar de novo.");
+        }
+      });
       supabase.functions.invoke("google-calendar-sync", { body: { booking_id: createdBk.id } }).catch((e) => console.warn("google-calendar-sync", e));
     }
 
@@ -974,6 +1039,62 @@ const AdminAgendaPage = () => {
     setShowDateChange(false);
     setShowCancelModal(false);
     setShowNotRealizedModal(false);
+    setProvisioningMeet(false);
+  };
+
+  const refreshSelectedBooking = async (bookingId: string) => {
+    const { data, error } = await supabase
+      .from("bookings")
+      .select(BOOKING_SELECT)
+      .eq("id", bookingId)
+      .maybeSingle();
+    if (error || !data) return;
+    setSelectedBooking(data as unknown as BookingRow);
+  };
+
+  const handleProvisionMeet = async () => {
+    if (!selectedBooking || provisioningMeet) return;
+    setProvisioningMeet(true);
+    try {
+      const result = await invokeProvisionMeeting(selectedBooking.id, { force: true });
+      await refreshSelectedBooking(selectedBooking.id);
+      invalidateBookings();
+      if (result?.ok === false || result?.error) {
+        toast.error(result.error || result.message || "Não foi possível criar a sala Meet");
+      } else {
+        toast.success("Sala Meet criada");
+      }
+    } finally {
+      setProvisioningMeet(false);
+    }
+  };
+
+  const mentorPhoneFor = (b: BookingRow) =>
+    b.mentor?.phone ?? allMentors.find((m) => m.id === b.mentor_id)?.phone ?? null;
+
+  const sendMeetingWhatsApp = async (role: "member" | "mentor") => {
+    if (!selectedBooking) return;
+    const mentorName =
+      selectedBooking.mentor?.full_name || getMentorName(selectedBooking.mentor_id);
+    const text =
+      role === "member"
+        ? selectedBooking.meeting_wa_member_text ||
+          buildMeetingWaFallback(selectedBooking, "member", mentorName)
+        : selectedBooking.meeting_wa_mentor_text ||
+          buildMeetingWaFallback(selectedBooking, "mentor", mentorName);
+    const phone =
+      role === "member" ? selectedBooking.liberty?.phone ?? null : mentorPhoneFor(selectedBooking);
+    const href = whatsappHref(phone, text);
+    if (href) {
+      window.open(href, "_blank", "noopener,noreferrer");
+      return;
+    }
+    await copyText(text);
+    toast.success(
+      role === "member"
+        ? "Mensagem copiada — telefone do aluno indisponível"
+        : "Mensagem copiada — telefone do mentor indisponível",
+    );
   };
 
   const participantName = (b: BookingRow) => (b.liberty ? shortName(b.liberty.full_name) : (b.guest_name || "Sem dados"));
@@ -1795,11 +1916,62 @@ const AdminAgendaPage = () => {
               {(selectedBooking.zoom_join_url || selectedBooking.zoom_link) && (
                 <Button variant="outline" className="w-full" asChild>
                   <a href={selectedBooking.zoom_join_url || selectedBooking.zoom_link || "#"} target="_blank" rel="noopener noreferrer">
-                    <Video className="h-4 w-4" /> Abrir Zoom
+                    <Video className="h-4 w-4" />{" "}
+                    {meetingOpenLabel(selectedBooking.zoom_join_url || selectedBooking.zoom_link)}
                   </a>
                 </Button>
               )}
+              {!selectedBooking.zoom_join_url && !selectedBooking.zoom_link && selectedBooking.status === "scheduled" && (
+                <div className="space-y-2">
+                  {selectedBooking.meeting_provision_error && (
+                    <Callout tone="danger" title="Falha ao criar Meet">
+                      {selectedBooking.meeting_provision_error}
+                    </Callout>
+                  )}
+                  <Button
+                    variant="outline"
+                    className="w-full"
+                    disabled={provisioningMeet}
+                    onClick={handleProvisionMeet}
+                  >
+                    <Video className="h-4 w-4" /> {provisioningMeet ? "Criando…" : "Criar sala Meet"}
+                  </Button>
+                </div>
+              )}
             </div>
+
+            <SectionCard padding="compact" className="space-y-2">
+              <SectionHeader as="h3" title="Lembretes WhatsApp" />
+              <Button
+                variant="outline"
+                className="w-full"
+                onClick={() => sendMeetingWhatsApp("member")}
+              >
+                {selectedBooking.liberty?.phone ? (
+                  <MessageCircle className="h-4 w-4" />
+                ) : (
+                  <Copy className="h-4 w-4" />
+                )}
+                Enviar sessão ao aluno
+              </Button>
+              <Button
+                variant="outline"
+                className="w-full"
+                onClick={() => sendMeetingWhatsApp("mentor")}
+              >
+                {mentorPhoneFor(selectedBooking) ? (
+                  <MessageCircle className="h-4 w-4" />
+                ) : (
+                  <Copy className="h-4 w-4" />
+                )}
+                Enviar sessão ao mentor
+              </Button>
+              {(!selectedBooking.liberty?.phone || !mentorPhoneFor(selectedBooking)) && (
+                <p className="text-xs text-muted-foreground">
+                  Sem telefone cadastrado: o botão copia a mensagem para colar no WhatsApp.
+                </p>
+              )}
+            </SectionCard>
           </div>
         )}
       </BottomSheet>

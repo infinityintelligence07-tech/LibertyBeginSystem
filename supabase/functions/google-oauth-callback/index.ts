@@ -1,4 +1,7 @@
 import { createClient } from "npm:@supabase/supabase-js@2";
+import { resolveGoogleOAuthCredentials, googleOAuthRedirectUri } from "../_shared/googleOAuth.ts";
+
+const DEFAULT_APP_ORIGIN = "https://begin.libertymentoria.com.br";
 
 async function hmac(data: string, secret: string) {
   const key = await crypto.subtle.importKey(
@@ -19,34 +22,67 @@ function htmlRedirect(to: string, message: string) {
   );
 }
 
+function sanitizeAppOrigin(raw: string | undefined): string {
+  if (!raw) return DEFAULT_APP_ORIGIN;
+  try {
+    const u = new URL(raw);
+    if (u.protocol !== "https:" && u.protocol !== "http:") return DEFAULT_APP_ORIGIN;
+    const host = u.hostname.toLowerCase();
+    if (host === "accounts.google.com" || host.endsWith(".supabase.co")) return DEFAULT_APP_ORIGIN;
+    return u.origin;
+  } catch {
+    return DEFAULT_APP_ORIGIN;
+  }
+}
+
+function parseStatePayload(payload: string): { userId: string; returnTo: string; appOrigin: string } {
+  // Formato novo: userId|returnTo|appOrigin|timestamp
+  // Formato antigo: userId|returnTo|timestamp
+  const parts = payload.split("|");
+  if (parts.length >= 4 && /^https?:\/\//i.test(parts[2])) {
+    return {
+      userId: parts[0],
+      returnTo: parts[1],
+      appOrigin: sanitizeAppOrigin(parts[2]),
+    };
+  }
+  return {
+    userId: parts[0] || "",
+    returnTo: parts[1] || "/perfil",
+    appOrigin: DEFAULT_APP_ORIGIN,
+  };
+}
+
 Deno.serve(async (req) => {
   const url = new URL(req.url);
   const code = url.searchParams.get("code");
   const state = url.searchParams.get("state");
   const errorParam = url.searchParams.get("error");
 
-  const appOrigin = req.headers.get("origin") || req.headers.get("referer") || "https://begin.libertymentoria.com.br";
-
   if (errorParam) {
-    return htmlRedirect(`${appOrigin}/mentor/dashboard?google=denied`, "Conexão cancelada.");
+    return htmlRedirect(`${DEFAULT_APP_ORIGIN}/perfil?google=denied`, "Conexão cancelada.");
   }
   if (!code || !state) {
     return new Response("Missing code/state", { status: 400 });
   }
 
   try {
-    const secret = Deno.env.get("GOOGLE_OAUTH_CLIENT_SECRET")!;
-    const clientId = Deno.env.get("GOOGLE_OAUTH_CLIENT_ID")!;
-    const redirectUri = `${Deno.env.get("SUPABASE_URL")}/functions/v1/google-oauth-callback`;
+    const admin = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!);
+    const { clientId, clientSecret } = await resolveGoogleOAuthCredentials(admin);
+    const redirectUri = googleOAuthRedirectUri();
 
     const decoded = atob(state);
     const parts = decoded.split("|");
     const sig = parts.pop()!;
     const payload = parts.join("|");
-    const expectedSig = await hmac(payload, secret);
+    const expectedSig = await hmac(payload, clientSecret);
     if (sig !== expectedSig) return new Response("Invalid state", { status: 400 });
 
-    const [userId, returnTo] = payload.split("|");
+    const { userId, returnTo, appOrigin } = parseStatePayload(payload);
+    const safeReturn =
+      typeof returnTo === "string" && returnTo.startsWith("/") && !returnTo.startsWith("//")
+        ? returnTo
+        : "/perfil";
 
     const tokenRes = await fetch("https://oauth2.googleapis.com/token", {
       method: "POST",
@@ -54,7 +90,7 @@ Deno.serve(async (req) => {
       body: new URLSearchParams({
         code,
         client_id: clientId,
-        client_secret: secret,
+        client_secret: clientSecret,
         redirect_uri: redirectUri,
         grant_type: "authorization_code",
       }),
@@ -65,23 +101,23 @@ Deno.serve(async (req) => {
       return new Response("Token exchange failed: " + JSON.stringify(tokens), { status: 500 });
     }
 
-    // Get user email
     const userInfoRes = await fetch("https://www.googleapis.com/oauth2/v2/userinfo", {
       headers: { Authorization: `Bearer ${tokens.access_token}` },
     });
     const userInfo = await userInfoRes.json();
 
-    const admin = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!);
-
-    // Find profile id for this user
     const { data: prof } = await admin.from("profiles").select("id").eq("user_id", userId).maybeSingle();
-    if (prof?.id) {
+    if (prof?.id && tokens.refresh_token) {
       await admin.from("user_oauth_tokens").upsert({
         profile_id: prof.id,
         google_refresh_token: tokens.refresh_token,
         updated_at: new Date().toISOString(),
       }, { onConflict: "profile_id" });
+    } else if (prof?.id && !tokens.refresh_token) {
+      // Reconsent sem refresh novo: mantém token antigo se existir
+      console.warn("OAuth sem refresh_token; perfil", prof.id);
     }
+
     await admin
       .from("profiles")
       .update({
@@ -90,16 +126,15 @@ Deno.serve(async (req) => {
       })
       .eq("user_id", userId);
 
-    // Optional welcome notification
     await admin.from("notifications").insert({
       user_id: userId,
       type: "google_connected",
       title: "Google Agenda conectado",
       message: `Sua conta ${userInfo.email} foi conectada com sucesso.`,
-      link: returnTo || "/mentor/dashboard",
+      link: safeReturn,
     });
 
-    const target = `${appOrigin.replace(/\/$/, "")}${returnTo || "/mentor/dashboard"}?google=connected`;
+    const target = `${appOrigin.replace(/\/$/, "")}${safeReturn}?google=connected`;
     return htmlRedirect(target, "Conectado! Redirecionando...");
   } catch (e) {
     console.error(e);

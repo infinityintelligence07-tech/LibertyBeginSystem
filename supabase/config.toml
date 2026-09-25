@@ -27,6 +27,9 @@ verify_jwt = false
 [functions.google-calendar-sync]
 verify_jwt = false
 
+[functions.provision-meeting]
+verify_jwt = false
+
 [functions.organize-zoom-report]
 verify_jwt = false
 

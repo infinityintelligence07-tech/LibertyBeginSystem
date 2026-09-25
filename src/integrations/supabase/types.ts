@@ -103,6 +103,14 @@ export type Database = {
           updated_at: string
           zoom_join_url: string | null
           zoom_link: string | null
+          meeting_provider: string | null
+          meeting_host_id: string | null
+          meeting_space_name: string | null
+          meeting_calendar_event_id: string | null
+          meeting_wa_member_text: string | null
+          meeting_wa_mentor_text: string | null
+          meeting_provisioned_at: string | null
+          meeting_provision_error: string | null
         }
         Insert: {
           approval_required?: boolean
@@ -130,6 +138,14 @@ export type Database = {
           updated_at?: string
           zoom_join_url?: string | null
           zoom_link?: string | null
+          meeting_provider?: string | null
+          meeting_host_id?: string | null
+          meeting_space_name?: string | null
+          meeting_calendar_event_id?: string | null
+          meeting_wa_member_text?: string | null
+          meeting_wa_mentor_text?: string | null
+          meeting_provisioned_at?: string | null
+          meeting_provision_error?: string | null
         }
         Update: {
           approval_required?: boolean
@@ -157,6 +173,14 @@ export type Database = {
           updated_at?: string
           zoom_join_url?: string | null
           zoom_link?: string | null
+          meeting_provider?: string | null
+          meeting_host_id?: string | null
+          meeting_space_name?: string | null
+          meeting_calendar_event_id?: string | null
+          meeting_wa_member_text?: string | null
+          meeting_wa_mentor_text?: string | null
+          meeting_provisioned_at?: string | null
+          meeting_provision_error?: string | null
         }
         Relationships: [
           {
@@ -178,6 +202,13 @@ export type Database = {
             columns: ["liberty_id"]
             isOneToOne: false
             referencedRelation: "public_member_profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "bookings_meeting_host_id_fkey"
+            columns: ["meeting_host_id"]
+            isOneToOne: false
+            referencedRelation: "meeting_hosts"
             referencedColumns: ["id"]
           },
           {
@@ -403,6 +434,54 @@ export type Database = {
           summary?: string
         }
         Relationships: []
+      }
+      meeting_hosts: {
+        Row: {
+          created_at: string
+          email: string
+          id: string
+          is_active: boolean
+          label: string
+          profile_id: string | null
+          sort_order: number
+          updated_at: string
+        }
+        Insert: {
+          created_at?: string
+          email: string
+          id?: string
+          is_active?: boolean
+          label: string
+          profile_id?: string | null
+          sort_order?: number
+          updated_at?: string
+        }
+        Update: {
+          created_at?: string
+          email?: string
+          id?: string
+          is_active?: boolean
+          label?: string
+          profile_id?: string | null
+          sort_order?: number
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "meeting_hosts_profile_id_fkey"
+            columns: ["profile_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "meeting_hosts_profile_id_fkey"
+            columns: ["profile_id"]
+            isOneToOne: false
+            referencedRelation: "public_member_profiles"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       member_points: {
         Row: {

@@ -3,6 +3,7 @@ import { format } from "date-fns";
 import { supabase } from "@/integrations/supabase/client";
 import { bookingRuleErrorMessage } from "@/lib/bookingRules";
 import { KICKOFF_MAX_REALIZED_SESSIONS, KICKOFF_NOT_ALLOWED_MESSAGE } from "@/lib/sessionProgress";
+import { invokeProvisionMeeting } from "@/lib/meetingWhatsApp";
 import { useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { BookingDetail, MemberWithProgress } from "@/hooks/useAdminData";
@@ -328,7 +329,12 @@ export const MemberSessionEditor = ({
         approval_required: false,
       }).select("id").single();
       if (error) throw error;
-      if (created?.id && !isRetroactive) {
+      if (created?.id && newBooking.status === "scheduled") {
+        void invokeProvisionMeeting(created.id).then((r) => {
+          if (r && !r.ok) {
+            toast.warning(r.error || r.message || "Sala Meet não criada — tente provisionar de novo.");
+          }
+        });
         supabase.functions.invoke("google-calendar-sync", { body: { booking_id: created.id } }).catch((e) => {
           console.warn("google-calendar-sync falhou:", e);
         });

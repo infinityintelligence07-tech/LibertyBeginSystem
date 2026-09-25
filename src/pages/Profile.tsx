@@ -63,13 +63,18 @@ const ProfilePage = ({ role = "liberty" }: { role?: "liberty" | "mentor" | "admi
     setGoogleLoading(true);
     try {
       const { data, error } = await supabase.functions.invoke("google-oauth-start", {
-        body: { returnTo: window.location.pathname },
+        body: {
+          returnTo: window.location.pathname,
+          appOrigin: window.location.origin,
+        },
       });
       if (error) throw error;
+      if (data?.error) throw new Error(String(data.error));
       if (data?.url) window.location.href = data.url;
+      else throw new Error("URL de autorização não retornada");
     } catch (e) {
       console.error(e);
-      toast.error("Erro ao iniciar conexão com o Google.");
+      toast.error(e instanceof Error ? e.message : "Erro ao iniciar conexão com o Google.");
     } finally {
       setGoogleLoading(false);
     }
