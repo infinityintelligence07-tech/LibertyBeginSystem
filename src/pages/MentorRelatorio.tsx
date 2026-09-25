@@ -241,7 +241,22 @@ const MentorRelatorioPage = () => {
           main_pain: libertyProfile?.main_pain,
         },
       });
-      if (error) throw error;
+      if (error) {
+        let detail = error.message || "Erro ao organizar com IA";
+        try {
+          const ctx = (error as { context?: Response }).context;
+          if (ctx && typeof ctx.json === "function") {
+            const body = await ctx.json();
+            if (body?.error) detail = String(body.error);
+          }
+        } catch {
+          /* keep detail */
+        }
+        if (/non-2xx|Failed to send/i.test(detail)) {
+          detail = "Não foi possível organizar agora. Tente de novo em alguns segundos.";
+        }
+        throw new Error(detail);
+      }
       if ((data as any)?.error) throw new Error((data as any).error);
       setSummary(data.summary || "");
       setDelivered(data.delivered || "");

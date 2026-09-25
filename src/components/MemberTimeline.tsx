@@ -90,16 +90,23 @@ export const MemberTimeline = ({
   // A estrela depende de `sessions.is_kickoff`, nunca da posição na trilha (alguns membros nunca fazem o Mapeamento).
   const isKickoffBooking = (b: Booking) => b.sessions?.is_kickoff === true || Boolean(kickoffIds?.has(b.session_id));
 
-  // Numeração CRONOLÓGICA: a 1ª sessão que aconteceu é a bolinha 1.
-  const chronological = useMemo(() => [...bookings]
-    .filter(isVisibleSessionBooking)
-    .filter((b) => {
-      if (journeyIds) return journeyIds.has(b.session_id);
-      // Fallback: sem os ids da jornada, exclui pelo nome da sessão.
-      return !/^onboarding$/i.test((sessionNames[b.session_id] || b.sessions?.name || "").trim());
-    })
-    .sort((a, b) => `${a.scheduled_date}T${a.start_time || ""}`.localeCompare(`${b.scheduled_date}T${b.start_time || ""}`)),
-  [bookings, journeyIds, sessionNames]);
+  // Trilha: se o membro fez o Mapeamento, ele é sempre a sessão 01.
+  // As demais bolinhas seguem a ordem cronológica. Sem Mapeamento, tudo é só cronológico.
+  const chronological = useMemo(() => {
+    const list = [...bookings]
+      .filter(isVisibleSessionBooking)
+      .filter((b) => {
+        if (journeyIds) return journeyIds.has(b.session_id);
+        return !/^onboarding$/i.test((sessionNames[b.session_id] || b.sessions?.name || "").trim());
+      });
+    const byDate = (a: Booking, b: Booking) =>
+      `${a.scheduled_date}T${a.start_time || ""}`.localeCompare(`${b.scheduled_date}T${b.start_time || ""}`);
+    const hasKickoff = list.some(isKickoffBooking);
+    if (!hasKickoff) return list.sort(byDate);
+    const kickoffs = list.filter(isKickoffBooking).sort(byDate);
+    const rest = list.filter((b) => !isKickoffBooking(b)).sort(byDate);
+    return [...kickoffs, ...rest];
+  }, [bookings, journeyIds, sessionNames, kickoffIds]);
 
   const statusFor = (booking: Booking) => getEffectiveBookingStatus(booking, { hasReport: Boolean(reports[booking.id]) });
   const isRealized = (status: string) => status === "completed" || status === "awaiting_report";
@@ -365,7 +372,7 @@ export const MemberTimeline = ({
             <div className="space-y-0.5">
               <h3 className="text-sm font-semibold text-foreground">Mapa das 12 sessões</h3>
               <p className="text-xs text-muted-foreground">
-                Cada círculo é uma sessão da jornada, na ordem em que aconteceu. Toque para ver os detalhes e o relatório.
+                Cada círculo é uma sessão da jornada. O Mapeamento, quando existe, é sempre a sessão 01. Toque para ver os detalhes.
               </p>
             </div>
             <div className="text-right">

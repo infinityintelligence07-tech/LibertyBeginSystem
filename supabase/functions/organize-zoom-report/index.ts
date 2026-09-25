@@ -75,7 +75,7 @@ Antes de responder, analise silenciosamente: qual era o verdadeiro problema disc
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
-        model: "openai/gpt-5.4",
+        model: "google/gemini-3.6-flash",
         messages: [
           { role: "system", content: systemPrompt },
           { role: "user", content: userPrompt },
@@ -125,7 +125,15 @@ Antes de responder, analise silenciosamente: qual era o verdadeiro problema disc
     if (!response.ok) {
       const txt = await response.text();
       console.error("AI gateway error", response.status, txt);
-      return new Response(JSON.stringify({ error: "Falha ao chamar IA" }), {
+      let detail = "Falha ao organizar o resumo com a IA.";
+      try {
+        const parsed = JSON.parse(txt);
+        if (parsed?.error?.message) detail = String(parsed.error.message);
+        else if (typeof parsed?.error === "string") detail = parsed.error;
+      } catch {
+        if (txt && txt.length < 200) detail = txt;
+      }
+      return new Response(JSON.stringify({ error: detail }), {
         status: 500,
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
