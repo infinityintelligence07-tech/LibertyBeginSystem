@@ -113,6 +113,7 @@ export type Database = {
           meeting_provisioned_at: string | null
           meeting_provision_error: string | null
           meeting_transcript_text: string | null
+          meeting_smart_notes_url: string | null
           meeting_artifacts_status: string | null
           meeting_artifacts_fetched_at: string | null
           meeting_ended_at: string | null
@@ -153,6 +154,7 @@ export type Database = {
           meeting_provisioned_at?: string | null
           meeting_provision_error?: string | null
           meeting_transcript_text?: string | null
+          meeting_smart_notes_url?: string | null
           meeting_artifacts_status?: string | null
           meeting_artifacts_fetched_at?: string | null
           meeting_ended_at?: string | null
@@ -193,6 +195,7 @@ export type Database = {
           meeting_provisioned_at?: string | null
           meeting_provision_error?: string | null
           meeting_transcript_text?: string | null
+          meeting_smart_notes_url?: string | null
           meeting_artifacts_status?: string | null
           meeting_artifacts_fetched_at?: string | null
           meeting_ended_at?: string | null

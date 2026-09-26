@@ -383,6 +383,124 @@ async function fetchMeetArtifacts(accessToken: string, meetingCodeRaw: string): 
   };
 }
 
+type AdminClient = Awaited<ReturnType<typeof requireRole>>["supabaseAdmin"];
+
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+/** Mantém o trabalho vivo após a resposta HTTP (Supabase EdgeRuntime). */
+function scheduleBackground(task: () => Promise<void>): void {
+  const runtime = (globalThis as { EdgeRuntime?: { waitUntil?: (p: Promise<unknown>) => void } }).EdgeRuntime;
+  const promise = task().catch((e) => console.error("[meeting-control] background", e));
+  if (runtime?.waitUntil) runtime.waitUntil(promise);
+  else void promise;
+}
+
+async function persistArtifacts(
+  admin: AdminClient,
+  bookingId: string,
+  artifacts: MeetArtifactsResult,
+): Promise<void> {
+  const patch: Record<string, unknown> = {
+    meeting_artifacts_status: artifacts.status,
+    meeting_artifacts_fetched_at: new Date().toISOString(),
+    meeting_provision_error: artifacts.status === "ready" ? null : artifacts.message,
+  };
+  if (artifacts.transcript && artifacts.transcript.trim().length >= 30) {
+    patch.meeting_transcript_text = artifacts.transcript.trim();
+  }
+  if (artifacts.smart_notes_url) {
+    patch.meeting_smart_notes_url = artifacts.smart_notes_url;
+  }
+  const { error } = await admin.from("bookings").update(patch).eq("id", bookingId);
+  if (error) throw new Error("Falha ao gravar artefatos: " + error.message);
+}
+
+async function notifyMentorArtifactsReady(
+  admin: AdminClient,
+  mentorProfileId: string | null | undefined,
+  bookingId: string,
+  artifacts: MeetArtifactsResult,
+): Promise<void> {
+  if (!mentorProfileId) return;
+  const { data: mentor } = await admin.from("profiles").select("user_id").eq("id", mentorProfileId).maybeSingle();
+  if (!mentor?.user_id) return;
+
+  const hasTranscript = !!(artifacts.transcript && artifacts.transcript.trim().length >= 30);
+  const title = hasTranscript ? "Transcrição da sessão pronta" : "Resumo Gemini da sessão pronto";
+  const message = hasTranscript
+    ? "A transcrição já está no relatório. Abra e revise o rascunho."
+    : artifacts.smart_notes_url
+      ? "O Doc do Gemini ficou pronto. Abra o relatório e use o link Anota pra Mim."
+      : "O resumo da call ficou pronto no relatório.";
+
+  await admin.from("notifications").insert({
+    user_id: mentor.user_id,
+    type: "meeting_artifacts_ready",
+    title,
+    message,
+    link: `/mentor/sessoes/${bookingId}/relatorio`,
+    related_booking_id: bookingId,
+  });
+}
+
+/**
+ * Poll após Encerrar: ~8 min (24 × 20s). Independente do browser do mentor.
+ * Para cedo se ready (transcrição ≥30 ou Doc Gemini) ou unavailable definitivo.
+ */
+async function pollArtifactsAfterEnd(
+  admin: AdminClient,
+  accessToken: string,
+  bookingId: string,
+  meetingCode: string,
+  mentorId: string | null | undefined,
+): Promise<void> {
+  const maxAttempts = 24;
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    await sleep(attempt === 1 ? 8_000 : 20_000);
+
+    const { data: row } = await admin
+      .from("bookings")
+      .select("meeting_artifacts_status, meeting_transcript_text, meeting_smart_notes_url")
+      .eq("id", bookingId)
+      .maybeSingle();
+
+    if (row?.meeting_artifacts_status === "ready" && String(row.meeting_transcript_text || "").trim().length >= 30) {
+      return;
+    }
+
+    let artifacts: MeetArtifactsResult;
+    try {
+      artifacts = await fetchMeetArtifacts(accessToken, meetingCode);
+    } catch (e) {
+      console.warn("[meeting-control] poll attempt", attempt, e);
+      if (attempt === maxAttempts) {
+        await admin.from("bookings").update({
+          meeting_artifacts_status: "unavailable",
+          meeting_artifacts_fetched_at: new Date().toISOString(),
+          meeting_provision_error: (e instanceof Error ? e.message : String(e)).slice(0, 500),
+        }).eq("id", bookingId);
+      }
+      continue;
+    }
+
+    await persistArtifacts(admin, bookingId, artifacts);
+
+    const hasTranscript = !!(artifacts.transcript && artifacts.transcript.trim().length >= 30);
+    if (artifacts.status === "ready" && (hasTranscript || artifacts.smart_notes_url)) {
+      await notifyMentorArtifactsReady(admin, mentorId, bookingId, artifacts);
+      return;
+    }
+    if (artifacts.status === "unavailable") return;
+  }
+
+  await admin.from("bookings").update({
+    meeting_artifacts_status: "unavailable",
+    meeting_artifacts_fetched_at: new Date().toISOString(),
+    meeting_provision_error:
+      "Tempo esgotado buscando transcrição/resumo. Se o Gemini gerou o Doc, abra o e-mail da conta host ou cole o texto no relatório.",
+  }).eq("id", bookingId);
+}
+
 async function assertCanEndOrFetchArtifacts(
   admin: Awaited<ReturnType<typeof requireRole>>["supabaseAdmin"],
   ctx: Awaited<ReturnType<typeof requireRole>>,
@@ -422,7 +540,7 @@ Deno.serve(async (req) => {
 
     const { data: booking, error: bErr } = await admin
       .from("bookings")
-      .select("id, mentor_id, zoom_join_url, meeting_space_name, meeting_ended_at, meeting_transcript_text, meeting_artifacts_status")
+      .select("id, mentor_id, zoom_join_url, meeting_space_name, meeting_ended_at, meeting_transcript_text, meeting_artifacts_status, meeting_smart_notes_url")
       .eq("id", bookingId)
       .single();
     if (bErr || !booking) return errorJson("Agendamento não encontrado", 404);
@@ -449,16 +567,25 @@ Deno.serve(async (req) => {
         }
       }
       const endedAt = new Date().toISOString();
+      const nextArtifactsStatus = booking.meeting_artifacts_status === "ready" ? "ready" : "pending";
       const { error: upErr } = await admin.from("bookings").update({
         meeting_ended_at: booking.meeting_ended_at || endedAt,
-        meeting_artifacts_status: booking.meeting_artifacts_status === "ready" ? "ready" : "pending",
+        meeting_artifacts_status: nextArtifactsStatus,
       }).eq("id", bookingId);
       if (upErr) return errorJson("Meet encerrado, mas falhou ao gravar: " + upErr.message, 500);
+
+      // Continua buscando no servidor mesmo se o mentor sair da tela de relatório.
+      if (nextArtifactsStatus !== "ready") {
+        scheduleBackground(() =>
+          pollArtifactsAfterEnd(admin, hostTok.accessToken, bookingId, meetingCode, booking.mentor_id),
+        );
+      }
+
       return json({
         ok: true,
         ended: true,
         meeting_ended_at: booking.meeting_ended_at || endedAt,
-        message: "Reunião encerrada. A transcrição é buscada na API do Meet.",
+        message: "Reunião encerrada. Buscando transcrição/resumo no servidor (não precisa ficar na tela).",
       });
     }
 
@@ -467,7 +594,7 @@ Deno.serve(async (req) => {
         ok: true,
         status: "ready",
         transcript: booking.meeting_transcript_text,
-        smart_notes_url: null,
+        smart_notes_url: (booking as { meeting_smart_notes_url?: string | null }).meeting_smart_notes_url ?? null,
         message: "Transcrição já salva nesta sessão.",
       });
     }
@@ -485,16 +612,11 @@ Deno.serve(async (req) => {
       return errorJson(msg, 500);
     }
 
-    const patch: Record<string, unknown> = {
-      meeting_artifacts_status: artifacts.status,
-      meeting_artifacts_fetched_at: new Date().toISOString(),
-      meeting_provision_error: artifacts.status === "ready" ? null : artifacts.message,
-    };
-    if (artifacts.transcript && artifacts.transcript.trim().length >= 30) {
-      patch.meeting_transcript_text = artifacts.transcript.trim();
+    await persistArtifacts(admin, bookingId, artifacts);
+    if (artifacts.status === "ready") {
+      await notifyMentorArtifactsReady(admin, booking.mentor_id, bookingId, artifacts);
     }
-    const { error: upErr } = await admin.from("bookings").update(patch).eq("id", bookingId);
-    if (upErr) return errorJson("Resumo obtido, mas falhou ao gravar: " + upErr.message, 500);
+
     return json({
       ok: true,
       status: artifacts.status,

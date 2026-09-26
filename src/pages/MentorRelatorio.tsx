@@ -107,7 +107,7 @@ const MentorRelatorioPage = () => {
       if (!bookingId) return null;
       const { data, error } = await supabase
         .from("bookings")
-        .select("id, mentor_id, liberty_id, session_id, scheduled_date, start_time, end_time, status, is_retroactive, report_required, zoom_join_url, meeting_ended_at, meeting_transcript_text, meeting_artifacts_status")
+        .select("id, mentor_id, liberty_id, session_id, scheduled_date, start_time, end_time, status, is_retroactive, report_required, zoom_join_url, meeting_ended_at, meeting_transcript_text, meeting_artifacts_status, meeting_smart_notes_url")
         .eq("id", bookingId)
         .maybeSingle();
       if (error) throw error;
@@ -305,7 +305,13 @@ const MentorRelatorioPage = () => {
     }
   }, [booking?.meeting_transcript_text, transcript]);
 
+  useEffect(() => {
+    const url = (booking as { meeting_smart_notes_url?: string | null } | null)?.meeting_smart_notes_url;
+    if (url && !smartNotesUrl) setSmartNotesUrl(url);
+  }, [booking, smartNotesUrl]);
+
   // Após Encerrar: poll Meet API até a transcrição ficar pronta (máx ~8 min).
+  // O servidor também busca em background; este poll só atualiza a UI mais rápido.
   useEffect(() => {
     if (!bookingId || !canEdit) return;
     const ended = meetEndedFromNav || !!booking?.meeting_ended_at;
@@ -563,7 +569,7 @@ const MentorRelatorioPage = () => {
           />
         </div>
 
-        {meetEndedFromNav && (
+        {(meetEndedFromNav || !!booking.meeting_ended_at) && (
           <Callout
             tone="success"
             icon={CheckCircle2}
@@ -571,10 +577,10 @@ const MentorRelatorioPage = () => {
           >
             <ol className="mt-1 list-decimal list-inside space-y-1 text-sm text-muted-foreground">
               <li>
-                {artifactsStatus === "polling" && (artifactsHint || "Consultando a API do Meet… (1–5 min em geral)")}
+                {artifactsStatus === "polling" && (artifactsHint || "Consultando a API do Meet… (1–5 min em geral). Pode sair desta tela — o servidor continua buscando.")}
                 {artifactsStatus === "ready" && "Transcrição/resumo chegou — revise o rascunho abaixo e refine o que quiser."}
                 {artifactsStatus === "unavailable" &&
-                  (artifactsHint || "Não veio pela API. Cole o Gemini do e-mail Liberty abaixo e organize com IA.")}
+                  (artifactsHint || "Não veio pela API. Cole o Gemini do e-mail da conta Liberty abaixo e organize com IA.")}
                 {artifactsStatus === "idle" && "Iniciando busca da transcrição…"}
               </li>
               <li>A IA monta o rascunho do relatório — você só ajusta e salva.</li>
