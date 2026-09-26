@@ -189,15 +189,21 @@ export type ProvisionMeetingResult = {
   access_warning?: string | null;
 };
 
-function extractInvokeError(data: unknown, error: { message?: string; context?: Response } | null): string {
+function extractInvokeError(
+  data: unknown,
+  error: { message?: string; context?: Response } | null,
+  kind: "create" | "end" = "create",
+): string {
   if (data && typeof data === "object") {
     const d = data as { error?: unknown; message?: unknown };
     if (typeof d.error === "string" && d.error.trim()) return d.error;
     if (typeof d.message === "string" && d.message.trim()) return d.message;
   }
-  const generic = error?.message || "Falha ao criar sala Meet";
+  const generic = error?.message || (kind === "end" ? "Falha ao encerrar Meet" : "Falha ao criar sala Meet");
   if (/non-2xx|Edge Function/i.test(generic)) {
-    return "Não foi possível criar a sala Meet. Abra a sessão e veja o detalhe em “Falha ao criar Meet”, ou tente de novo.";
+    return kind === "end"
+      ? "Não foi possível encerrar o Meet. Tente de novo em instantes."
+      : "Não foi possível criar a sala Meet. Abra a sessão e veja o detalhe em “Falha ao criar Meet”, ou tente de novo.";
   }
   return generic;
 }
@@ -259,7 +265,7 @@ export async function invokeEndMeeting(bookingId: string): Promise<EndMeetingRes
     } catch {
       /* noop */
     }
-    return { ok: false, error: fromCtx || extractInvokeError(data, error) };
+    return { ok: false, error: fromCtx || extractInvokeError(data, error, "end") };
   }
 
   const result = (data || {}) as EndMeetingResult;
