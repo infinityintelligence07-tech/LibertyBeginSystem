@@ -1593,6 +1593,13 @@ export type Database = {
         }
         Returns: boolean
       }
+      mentor_display_names: {
+        Args: { _ids: string[] }
+        Returns: {
+          id: string
+          full_name: string
+        }[]
+      }
       list_tool_members: {
         Args: never
         Returns: {

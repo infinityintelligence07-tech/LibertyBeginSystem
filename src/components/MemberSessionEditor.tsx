@@ -2,9 +2,16 @@ import { useMemo, useState } from "react";
 import { format } from "date-fns";
 import { supabase } from "@/integrations/supabase/client";
 import { bookingRuleErrorMessage } from "@/lib/bookingRules";
+import {
+  getEffectiveBookingStatus,
+  isFutureScheduledBooking,
+  isPendingConfirmationBooking,
+  isRealizedSessionBooking,
+  isVisibleSessionBooking,
+} from "@/lib/bookingStatus";
 import { KICKOFF_MAX_REALIZED_SESSIONS, KICKOFF_NOT_ALLOWED_MESSAGE } from "@/lib/sessionProgress";
 import { invokeProvisionMeeting } from "@/lib/meetingWhatsApp";
-import { useQueryClient } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { BookingDetail, MemberWithProgress } from "@/hooks/useAdminData";
 import { shortName } from "@/lib/formatName";
@@ -138,6 +145,84 @@ export const translateBookingError = (error: BackendError): string | null => {
 
 const formatDateBR = (date: string) => new Date(date + "T12:00:00").toLocaleDateString("pt-BR");
 
+type EditorSessionJoin = {
+  name: string | null;
+  order: number | null;
+  is_kickoff: boolean | null;
+  duration_minutes: number | null;
+};
+
+type EditorLiveRow = {
+  id: string;
+  session_id: string;
+  mentor_id: string | null;
+  scheduled_date: string;
+  start_time: string | null;
+  end_time: string | null;
+  status: string | null;
+  is_retroactive: boolean | null;
+  report_required: boolean | null;
+  sessions: EditorSessionJoin | EditorSessionJoin[] | null;
+  mentor: { full_name: string | null } | { full_name: string | null }[] | null;
+};
+
+const firstJoin = <T,>(value: T | T[] | null | undefined): T | null => {
+  if (Array.isArray(value)) return value[0] ?? null;
+  return value ?? null;
+};
+
+/**
+ * A ficha do membro não pode depender da lista global de agendamentos.
+ * Essa lista tem teto de linhas e, quando falha, a sessão some de "Agendadas"
+ * e volta para "Faltam realizar" mesmo existindo no banco.
+ */
+const fetchMemberEditorBookings = async (memberId: string): Promise<{
+  completed: EditorBookingDetail[];
+  scheduled: EditorBookingDetail[];
+  pending: EditorBookingDetail[];
+}> => {
+  const { data, error } = await supabase
+    .from("bookings")
+    .select(
+      'id, session_id, mentor_id, scheduled_date, start_time, end_time, status, is_retroactive, report_required, sessions(name, "order", is_kickoff, duration_minutes), mentor:profiles!bookings_mentor_id_fkey(full_name)',
+    )
+    .eq("liberty_id", memberId)
+    .order("scheduled_date", { ascending: true })
+    .order("start_time", { ascending: true });
+  if (error) throw error;
+
+  const completed: EditorBookingDetail[] = [];
+  const scheduled: EditorBookingDetail[] = [];
+  const pending: EditorBookingDetail[] = [];
+
+  for (const row of (data ?? []) as EditorLiveRow[]) {
+    if (!isVisibleSessionBooking(row)) continue;
+    const session = firstJoin(row.sessions);
+    if ((session?.order ?? 1) <= 0) continue;
+    const mentor = firstJoin(row.mentor);
+    const detail: EditorBookingDetail = {
+      session_name: session?.name || "Sem dados",
+      session_id: row.session_id,
+      booking_id: row.id,
+      date: row.scheduled_date,
+      start_time: row.start_time,
+      end_time: row.end_time,
+      mentor_id: row.mentor_id,
+      mentor_name: mentor?.full_name || "Sem dados",
+      status: getEffectiveBookingStatus(row),
+      raw_status: row.status || undefined,
+      is_retroactive: row.is_retroactive === true,
+      report_required: row.report_required !== false,
+      is_kickoff: session?.is_kickoff === true,
+    };
+    if (isRealizedSessionBooking(row)) completed.push(detail);
+    else if (isPendingConfirmationBooking(row)) pending.push(detail);
+    else if (isFutureScheduledBooking(row)) scheduled.push(detail);
+  }
+
+  return { completed, scheduled, pending };
+};
+
 export const MemberSessionEditor = ({
   member, sessions, mentors, filterKey, onReportClick, pendingConfirmationSessions, onChanged,
 }: Props) => {
@@ -158,23 +243,31 @@ export const MemberSessionEditor = ({
   const invalidateAll = () => {
     queryClient.invalidateQueries({ queryKey: ["admin-members"] });
     queryClient.invalidateQueries({ queryKey: ["member-bookings-manager"] });
+    queryClient.invalidateQueries({ queryKey: ["member-session-editor", member.id] });
     onChanged?.();
   };
 
-  const pendingSessions = pendingConfirmationSessions ?? [];
+  const { data: liveBookings } = useQuery({
+    queryKey: ["member-session-editor", member.id],
+    queryFn: () => fetchMemberEditorBookings(member.id),
+  });
+
+  const completedSource = liveBookings?.completed ?? member.completed_sessions;
+  const scheduledSource = liveBookings?.scheduled ?? member.scheduled_sessions;
+  const pendingSource = liveBookings?.pending ?? pendingConfirmationSessions ?? [];
   const completedInView = filterKey
-    ? member.completed_sessions.filter((cs) => cs.date.startsWith(filterKey))
-    : member.completed_sessions;
+    ? completedSource.filter((cs) => cs.date.startsWith(filterKey))
+    : completedSource;
   const scheduledInView = filterKey
-    ? member.scheduled_sessions.filter((cs) => cs.date.startsWith(filterKey))
-    : member.scheduled_sessions;
+    ? scheduledSource.filter((cs) => cs.date.startsWith(filterKey))
+    : scheduledSource;
   const pendingInView = filterKey
-    ? pendingSessions.filter((cs) => cs.date.startsWith(filterKey))
-    : pendingSessions;
+    ? pendingSource.filter((cs) => cs.date.startsWith(filterKey))
+    : pendingSource;
   const allDoneOrScheduledIds = new Set([
-    ...member.completed_sessions.map((s) => s.session_id),
-    ...member.scheduled_sessions.map((s) => s.session_id),
-    ...pendingSessions.map((s) => s.session_id),
+    ...completedSource.map((s) => s.session_id),
+    ...scheduledSource.map((s) => s.session_id),
+    ...pendingSource.map((s) => s.session_id),
   ]);
   const isLiberty = member.member_tier === "liberty";
   const isJourneySessionOption = (s: SessionOption) => {
@@ -187,7 +280,7 @@ export const MemberSessionEditor = ({
   const remaining = selectableSessions.filter((s) => !allDoneOrScheduledIds.has(s.id));
 
   // Regra D2: Mapeamento só até a 3ª sessão realizada (realizadas + a confirmar). Mesmo critério do banco.
-  const realizedForKickoff = member.completed_sessions.length + pendingSessions.length;
+  const realizedForKickoff = completedSource.length + pendingSource.length;
   const kickoffAllowed = realizedForKickoff <= KICKOFF_MAX_REALIZED_SESSIONS;
   const sessionById = useMemo(() => new Map(sessions.map((s) => [s.id, s])), [sessions]);
 
@@ -375,7 +468,10 @@ export const MemberSessionEditor = ({
         title={cs.session_name}
         subtitle={
           <span className="inline-flex items-center gap-2 flex-wrap">
-            <span>{shortName(cs.mentor_name)}</span>
+            <span>
+              {cs.start_time ? `${cs.start_time.slice(0, 5)} · ` : ""}
+              {shortName(cs.mentor_name)}
+            </span>
             <StatusPill status={cs.status} size="sm" />
           </span>
         }

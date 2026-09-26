@@ -250,7 +250,7 @@ export type EndMeetingResult = {
 
 /** Encerra a call Meet para todos (via conta host) — uso do mentor/admin. */
 export async function invokeEndMeeting(bookingId: string): Promise<EndMeetingResult> {
-  const { data, error } = await supabase.functions.invoke("provision-meeting", {
+  const { data, error } = await supabase.functions.invoke("meeting-control", {
     body: { booking_id: bookingId, action: "end" },
   });
 
@@ -285,7 +285,7 @@ export type MeetingArtifactsResult = {
 
 /** Poll da transcrição / smart notes após Encerrar. */
 export async function invokeFetchMeetingArtifacts(bookingId: string): Promise<MeetingArtifactsResult> {
-  const { data, error } = await supabase.functions.invoke("provision-meeting", {
+  const { data, error } = await supabase.functions.invoke("meeting-control", {
     body: { booking_id: bookingId, action: "artifacts" },
   });
 

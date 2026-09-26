@@ -30,6 +30,9 @@ verify_jwt = false
 [functions.provision-meeting]
 verify_jwt = false
 
+[functions.meeting-control]
+verify_jwt = false
+
 [functions.organize-zoom-report]
 verify_jwt = false
 

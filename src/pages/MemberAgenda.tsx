@@ -36,6 +36,7 @@ import {
   sortByScheduledDateAsc,
   todayPlatformDate,
 } from "@/lib/bookingStatus";
+import { fetchMentorNames } from "@/lib/mentorNames";
 
 /** Status que aparecem na agenda do membro: futuras, aguardando aprovação e as de hoje ainda "A confirmar". */
 const AGENDA_STATUSES = new Set(["scheduled", "pending_approval", "pending_confirmation"]);
@@ -46,16 +47,17 @@ const MemberAgendaPage = () => {
   const [currentMonth, setCurrentMonth] = useState(new Date());
   const [expandedBooking, setExpandedBooking] = useState<string | null>(null);
 
-  // "Hoje" no fuso da plataforma (São Paulo), não no fuso do navegador.
-  const today = useMemo(() => parseISO(todayPlatformDate()), []);
-  const { queryStart, monthEnd } = useMemo(() => {
-    const monthStart = startOfMonth(currentMonth);
-    const end = addMonths(monthStart, 1);
-    // Sempre de hoje em diante: a agenda do membro não mostra sessões passadas.
-    return { queryStart: monthStart > today ? monthStart : today, monthEnd: end };
-  }, [currentMonth, today]);
-  const queryStartStr = format(queryStart, "yyyy-MM-dd");
-  const monthEndStr = format(monthEnd, "yyyy-MM-dd");
+  // "Hoje" no fuso da plataforma (São Paulo), comparado como texto YYYY-MM-DD.
+  // parseISO + format deslocava o dia conforme o fuso do celular e podia esconder a sessão de hoje.
+  const todayStr = todayPlatformDate();
+  const { queryStartStr, monthEndStr } = useMemo(() => {
+    const monthStartStr = format(startOfMonth(currentMonth), "yyyy-MM-dd");
+    const endStr = format(addMonths(startOfMonth(currentMonth), 1), "yyyy-MM-dd");
+    return {
+      queryStartStr: monthStartStr > todayStr ? monthStartStr : todayStr,
+      monthEndStr: endStr,
+    };
+  }, [currentMonth, todayStr]);
 
   const { data: _bookings = [], isLoading, isError, refetch } = useQuery({
     queryKey: ["member-agenda", profile?.id, queryStartStr, monthEndStr],
@@ -77,11 +79,10 @@ const MemberAgendaPage = () => {
 
   const demoBks = useMemo(() => {
     if (!demoEnabled || !profile?.id) return [];
-    return demoBookingsForMember(profile.id).filter((b) => {
-      const d = parseISO(b.scheduled_date);
-      return d >= queryStart && d < monthEnd;
-    });
-  }, [demoEnabled, profile?.id, queryStart, monthEnd]);
+    return demoBookingsForMember(profile.id).filter(
+      (b) => b.scheduled_date >= queryStartStr && b.scheduled_date < monthEndStr,
+    );
+  }, [demoEnabled, profile?.id, queryStartStr, monthEndStr]);
   // Mostramos confirmadas e pendentes de aprovação. Canceladas ficam fora da agenda do aluno.
   const bookings = (demoEnabled ? [..._bookings, ...demoBks] : _bookings).filter(isVisibleSessionBooking);
 
@@ -89,10 +90,7 @@ const MemberAgendaPage = () => {
   const { data: _mentorProfiles = [] } = useQuery({
     queryKey: ["member-agenda-mentors", mentorIds],
     queryFn: async () => {
-      if (!mentorIds.length) return [];
-      const { data, error } = await supabase.from("profiles").select("id, full_name").in("id", mentorIds);
-      if (error) throw error;
-      return data || [];
+      return fetchMentorNames(mentorIds);
     },
     enabled: mentorIds.length > 0,
   });
@@ -171,7 +169,7 @@ const MemberAgendaPage = () => {
             <IconButton
               aria-label="Mês anterior"
               onClick={() => setCurrentMonth(subMonths(currentMonth, 1))}
-              disabled={startOfMonth(currentMonth) <= startOfMonth(today)}
+              disabled={format(startOfMonth(currentMonth), "yyyy-MM-dd") <= `${todayStr.slice(0, 7)}-01`}
             >
               <ChevronLeft className="h-4 w-4" />
             </IconButton>

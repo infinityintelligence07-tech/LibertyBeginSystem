@@ -57,6 +57,7 @@ import {
   type SessionProgressStatus,
 } from "@/lib/sessionProgress";
 import { shortName } from "@/lib/formatName";
+import { fetchMentorNames } from "@/lib/mentorNames";
 
 const WEEKDAY_LABELS = ["Dom", "Seg", "Ter", "Qua", "Qui", "Sex", "Sáb"];
 
@@ -175,10 +176,7 @@ const AgendaOverviewPage = () => {
   const { data: mentorProfiles = [] } = useQuery<MentorProfileRow[]>({
     queryKey: ["overview-booking-mentors", mentorIds.join("|")],
     queryFn: async () => {
-      if (!mentorIds.length) return [];
-      const { data, error } = await supabase.from("profiles").select("id, full_name").in("id", mentorIds);
-      if (error) throw error;
-      return data || [];
+      return fetchMentorNames(mentorIds);
     },
     enabled: mentorIds.length > 0,
   });

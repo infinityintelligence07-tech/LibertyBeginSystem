@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
-import { RefreshCw, X } from "lucide-react";
+import { RefreshCw } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { IconButton, SectionCard } from "@/components/ds";
+import { SectionCard } from "@/components/ds";
 import { reloadAppSafely } from "@/lib/appReload";
 
 /**
@@ -48,23 +48,12 @@ async function fetchCurrentAssetHash(): Promise<string | null> {
 export const UpdatePrompt = () => {
   const [outdated, setOutdated] = useState(false);
   const initialHash = useRef<string | null>(null);
-  const hiddenSince = useRef<number | null>(null);
 
   useEffect(() => {
     if (!isCheckableHost()) return;
 
     let cancelled = false;
     let timer: number | undefined;
-
-    const autoReloadIfHiddenLongEnough = async (hash: string) => {
-      // If app was in background for >30s (installed PWA relaunch, tab switch),
-      // silently upgrade — mirrors WhatsApp/iFood behavior. Otherwise show banner.
-      const hiddenMs = hiddenSince.current ? Date.now() - hiddenSince.current : 0;
-      if (hiddenMs > 30_000) {
-        return reloadAppSafely();
-      }
-      return false;
-    };
 
     const check = async () => {
       const hash = await fetchCurrentAssetHash();
@@ -74,7 +63,7 @@ export const UpdatePrompt = () => {
         return;
       }
       if (hash !== initialHash.current) {
-        const reloaded = await autoReloadIfHiddenLongEnough(hash);
+        const reloaded = await reloadAppSafely({ bustCache: true, force: true });
         if (!reloaded) setOutdated(true);
       }
     };
@@ -90,11 +79,7 @@ export const UpdatePrompt = () => {
 
     const onFocus = () => check();
     const onVisibility = () => {
-      if (document.visibilityState === "hidden") {
-        hiddenSince.current = Date.now();
-      } else {
-        check();
-      }
+      if (document.visibilityState === "visible") check();
     };
     window.addEventListener("focus", onFocus);
     document.addEventListener("visibilitychange", onVisibility);
@@ -109,7 +94,7 @@ export const UpdatePrompt = () => {
   }, []);
 
   const handleReload = async () => {
-    await reloadAppSafely();
+    await reloadAppSafely({ bustCache: true, force: true });
   };
 
   if (!outdated) return null;
@@ -124,14 +109,11 @@ export const UpdatePrompt = () => {
         <RefreshCw className="h-5 w-5 text-muted-foreground shrink-0" aria-hidden />
         <div className="flex-1 min-w-0">
           <p className="text-sm font-semibold text-foreground leading-tight">Nova versão disponível</p>
-          <p className="text-xs text-muted-foreground leading-tight mt-0.5">Atualize para ver as novidades.</p>
+          <p className="text-xs text-muted-foreground leading-tight mt-0.5">A tela precisa recarregar para sair da versão anterior.</p>
         </div>
         <Button size="sm" onClick={handleReload} className="shrink-0">
           Atualizar
         </Button>
-        <IconButton aria-label="Dispensar" size="sm" onClick={() => setOutdated(false)} className="-mr-1">
-          <X className="h-4 w-4" />
-        </IconButton>
       </SectionCard>
     </div>
   );

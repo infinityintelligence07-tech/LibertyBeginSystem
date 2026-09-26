@@ -268,7 +268,7 @@ async function configureMeetSpace(accessToken: string, meetingCode: string): Pro
   );
   if (!notesRes.ok) {
     const notesData = await notesRes.json().catch(() => ({}));
-    console.warn("auto artifacts Meet", notesData);
+    throw new Error(humanizeMeetApiError(notesData));
   }
 }
 

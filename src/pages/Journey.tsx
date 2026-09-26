@@ -8,6 +8,7 @@ import { useAuth } from "@/hooks/useAuth";
 import { supabase } from "@/integrations/supabase/client";
 import { useQuery } from "@tanstack/react-query";
 import { shortName } from "@/lib/formatName";
+import { fetchMentorNames } from "@/lib/mentorNames";
 import { TaskChecklist } from "@/components/TaskChecklist";
 import { getEffectiveBookingStatus, PENDING_CONFIRMATION_HINT, sortByScheduledDateAsc } from "@/lib/bookingStatus";
 import { KICKOFF_MAX_REALIZED_SESSIONS, KICKOFF_NOT_ALLOWED_MESSAGE, type SessionProgressStatus } from "@/lib/sessionProgress";
@@ -112,10 +113,7 @@ const JourneyPage = () => {
   const { data: mentorProfiles = [] } = useQuery({
     queryKey: ["journey-mentors", mentorIds],
     queryFn: async () => {
-      if (!mentorIds.length) return [];
-      const { data, error } = await supabase.from("profiles").select("id, full_name").in("id", mentorIds);
-      if (error) throw error;
-      return data || [];
+      return fetchMentorNames(mentorIds);
     },
     enabled: mentorIds.length > 0,
   });

@@ -218,6 +218,12 @@ const hours = Array.from({ length: 34 }, (_, i) => {
   return `${String(h).padStart(2, "0")}:${m}`;
 });
 
+/** Meio-dia local do dia de São Paulo, para o calendário não abrir no dia errado. */
+const platformTodayAsDate = () => {
+  const [year, month, day] = todayPlatformDate().split("-").map(Number);
+  return new Date(year, (month || 1) - 1, day || 1, 12, 0, 0);
+};
+
 /* ───── Component ───── */
 const AdminAgendaPage = () => {
   const queryClient = useQueryClient();
@@ -228,7 +234,7 @@ const AdminAgendaPage = () => {
   );
   const { demoEnabled } = useDemoData();
   const [searchParams, setSearchParams] = useSearchParams();
-  const [currentDate, setCurrentDate] = useState(new Date());
+  const [currentDate, setCurrentDate] = useState(platformTodayAsDate);
   const [viewMode, setViewMode] = useState<ViewMode>("month");
   const [selectedBooking, setSelectedBooking] = useState<BookingRow | null>(null);
   const [drawerOpen, setDrawerOpen] = useState(false);
@@ -370,6 +376,25 @@ const AdminAgendaPage = () => {
     },
   });
 
+  // Lista do dia de São Paulo, independente do filtro de mentor e do mês aberto no calendário.
+  const platformToday = todayPlatformDate();
+  const { data: todayRows = [] } = useQuery({
+    queryKey: ["agenda-today", platformToday],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("bookings")
+        .select(BOOKING_SELECT)
+        .eq("scheduled_date", platformToday)
+        .order("start_time", { ascending: true });
+      if (error) throw error;
+      return (data || []) as unknown as BookingRow[];
+    },
+  });
+  const todaySessions = useMemo(
+    () => todayRows.filter((booking) => isVisibleSessionBooking(booking)),
+    [todayRows],
+  );
+
   // Pending-approval bookings (any date) — admin must approve or reject
   const { data: pendingBookings = [] } = useQuery({
     queryKey: ["agenda-pending-approvals"],
@@ -424,10 +449,10 @@ const AdminAgendaPage = () => {
   // Relatórios salvos para os bookings visíveis: distingue "Realizada" de "Realizada · sem relatório".
   const visibleBookingIds = useMemo(() => {
     const ids = new Set<string>();
-    [..._bookings, ...pendingBookings, ...notRealizedBookings, ...pendingConfirmationBookings].forEach((b) => ids.add(b.id));
+    [..._bookings, ...todayRows, ...pendingBookings, ...notRealizedBookings, ...pendingConfirmationBookings].forEach((b) => ids.add(b.id));
     if (selectedBooking) ids.add(selectedBooking.id);
     return Array.from(ids).sort();
-  }, [_bookings, pendingBookings, notRealizedBookings, pendingConfirmationBookings, selectedBooking]);
+  }, [_bookings, todayRows, pendingBookings, notRealizedBookings, pendingConfirmationBookings, selectedBooking]);
 
   const { data: reportedIdList = [] } = useQuery({
     queryKey: ["agenda-booking-reports", visibleBookingIds.join("|")],
@@ -703,6 +728,14 @@ const AdminAgendaPage = () => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [bookings, dateStr, mentorFilter, statusFilter, studentSearch, reportedIds]
   );
+
+  // Coluna extra quando a sessão existe, mas o mentor não entrou na lista carregada.
+  const columnMentorIds = useMemo(() => {
+    const extras = dayBookings
+      .map((booking) => booking.mentor_id)
+      .filter((id): id is string => !!id && !filteredMentorIds.includes(id));
+    return [...filteredMentorIds, ...extras];
+  }, [filteredMentorIds, dayBookings]);
 
   const totalInRange = bookings.filter(matchesFilters).length;
   const hasActiveFilters = mentorFilter !== null || statusFilter !== null || studentSearch.trim() !== "";
@@ -1333,6 +1366,42 @@ const AdminAgendaPage = () => {
             </div>
           )}
 
+          <SectionCard padding="none">
+            <div className="px-4 pt-4 pb-2">
+              <SectionHeader
+                title={
+                  <span className="inline-flex items-center gap-2">
+                    <CalendarDays className="h-4 w-4 text-muted-foreground" aria-hidden />
+                    Sessões de hoje
+                    <span className="text-muted-foreground font-normal tabular-nums">({todaySessions.length})</span>
+                  </span>
+                }
+                description="Todas as marcações de hoje, sem filtro de mentor. O calendário abaixo continua respeitando os filtros."
+              />
+            </div>
+            {todaySessions.length === 0 ? (
+              <div className="px-4 pb-4">
+                <EmptyState compact icon={CalendarDays} title="Nenhuma sessão hoje" />
+              </div>
+            ) : (
+              todaySessions.map((booking, index) => {
+                const status = displayStatus(booking);
+                return (
+                  <ListRow
+                    key={booking.id}
+                    last={index === todaySessions.length - 1}
+                    onPress={() => openDrawer(booking)}
+                    leading={<DateBlock date={booking.scheduled_date} />}
+                    title={participantName(booking)}
+                    subtitle={`${booking.sessions?.name || "Sessão"} · ${(booking.start_time || "").slice(0, 5)} às ${(booking.end_time || "").slice(0, 5)} · ${shortName(booking.mentor?.full_name || getMentorName(booking.mentor_id))}`}
+                    trailing={<StatusPill status={status} size="sm" />}
+                    chevron
+                  />
+                );
+              })
+            )}
+          </SectionCard>
+
           {/* Barra de filtros fixa: período, visão, mentor, status e busca */}
           <div className="sticky top-0 z-20 -mx-4 sm:-mx-6 lg:-mx-8 px-4 sm:px-6 lg:px-8 py-3 bg-background border-b border-border space-y-3">
             <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-3">
@@ -1341,7 +1410,7 @@ const AdminAgendaPage = () => {
                   <IconButton aria-label={viewMode === "day" ? "Dia anterior" : viewMode === "week" ? "Semana anterior" : "Mês anterior"} size="sm" onClick={navigatePrev}>
                     <ChevronLeft className="h-4 w-4" />
                   </IconButton>
-                  <Button variant="ghost" size="sm" onClick={() => setCurrentDate(new Date())}>Hoje</Button>
+                  <Button variant="ghost" size="sm" onClick={() => setCurrentDate(platformTodayAsDate())}>Hoje</Button>
                   <IconButton aria-label={viewMode === "day" ? "Próximo dia" : viewMode === "week" ? "Próxima semana" : "Próximo mês"} size="sm" onClick={navigateNext}>
                     <ChevronRight className="h-4 w-4" />
                   </IconButton>
@@ -1419,7 +1488,7 @@ const AdminAgendaPage = () => {
                         const TIME_COL_W = 52;
                         const MIN_COL_W = 120;
                         return (
-                          <div className="relative" style={{ minWidth: TIME_COL_W + filteredMentorIds.length * MIN_COL_W }}>
+                          <div className="relative" style={{ minWidth: TIME_COL_W + columnMentorIds.length * MIN_COL_W }}>
                             <div className="flex">
                               {/* Coluna das horas */}
                               <div className="sticky left-0 z-20 bg-card shrink-0" style={{ width: TIME_COL_W }}>
@@ -1437,7 +1506,7 @@ const AdminAgendaPage = () => {
 
                               {/* Colunas por mentor */}
                               <div className="flex-1 flex">
-                                {filteredMentorIds.map((mId) => {
+                                {columnMentorIds.map((mId) => {
                                   const idx = mentorIndexMap[mId] ?? 0;
                                   const mentor = allMentors.find((m) => m.id === mId);
                                   const color = mentorColors[idx % mentorColors.length];
@@ -1534,7 +1603,7 @@ const AdminAgendaPage = () => {
 
                   {/* Lista mobile */}
                   <div className="lg:hidden space-y-4">
-                    {dayBookings.length === 0 && availability.filter((a) => filteredMentorIds.includes(a.mentor_id)).length === 0 && (
+                    {dayBookings.length === 0 && availability.filter((a) => columnMentorIds.includes(a.mentor_id)).length === 0 && (
                       <EmptyState
                         icon={CalendarDays}
                         title="Nenhuma sessão neste dia"
@@ -1543,8 +1612,8 @@ const AdminAgendaPage = () => {
                       />
                     )}
                     {hours.map((hour) => {
-                      const hourBookings = dayBookings.filter((b) => formatTime(b.start_time) === hour && filteredMentorIds.includes(b.mentor_id));
-                      const hourSlots = availability.filter((a) => formatTime(a.start_time) === hour && filteredMentorIds.includes(a.mentor_id));
+                      const hourBookings = dayBookings.filter((b) => formatTime(b.start_time) === hour && columnMentorIds.includes(b.mentor_id));
+                      const hourSlots = availability.filter((a) => formatTime(a.start_time) === hour && columnMentorIds.includes(a.mentor_id));
                       if (hourBookings.length === 0 && hourSlots.length === 0) return null;
                       const total = hourBookings.length + hourSlots.length;
                       return (

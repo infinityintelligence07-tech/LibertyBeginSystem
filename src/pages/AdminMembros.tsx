@@ -939,13 +939,16 @@ const AdminMembrosPage = () => {
   ];
 
   const monthTone = (count: number): "success" | "warning" | "danger" => (count >= 2 ? "success" : count === 1 ? "warning" : "danger");
+  const monthPillTone = (completed: number, scheduled: number): "success" | "warning" | "info" | "danger" =>
+    completed >= 2 ? "success" : completed === 1 ? "warning" : scheduled > 0 ? "info" : "danger";
   const monthCellClass = (count: number) => {
     const tone = monthTone(count);
     if (tone === "success") return "border border-border text-foreground";
     if (tone === "warning") return "border border-border text-muted-foreground";
     return "border border-border text-destructive";
   };
-  const monthStatusLabel = (count: number) => (count >= 2 ? "No ritmo" : count === 1 ? "Parcial" : "Sem sessão");
+  const monthStatusLabel = (completed: number, scheduled = 0) =>
+    completed >= 2 ? "No ritmo" : completed === 1 ? "Parcial" : scheduled > 0 ? "Agendada" : "Sem sessão";
 
   const openImport = () => {
     setImportResults(null);
@@ -1266,6 +1269,7 @@ const AdminMembrosPage = () => {
         <tbody>
           {filtered.map((member) => {
             const monthCount = filterKey ? (member.monthly_counts[filterKey] || 0) : member.total_completed;
+            const monthScheduled = filterKey ? (member.monthly_scheduled_counts[filterKey] || 0) : member.total_scheduled;
             const pendingConfirmationCount = filterKey
               ? (member.monthly_pending_confirmation_counts?.[filterKey] || 0)
               : (member.total_pending_confirmation || 0);
@@ -1317,7 +1321,7 @@ const AdminMembrosPage = () => {
                         <span className="text-xs text-muted-foreground ml-1">de 2</span>
                       </td>
                       <td className="px-3 py-2 align-middle">
-                        <StatusPill tone={monthTone(monthCount)} size="sm">{monthStatusLabel(monthCount)}</StatusPill>
+                        <StatusPill tone={monthPillTone(monthCount, monthScheduled)} size="sm">{monthStatusLabel(monthCount, monthScheduled)}</StatusPill>
                       </td>
                     </>
                   )}
@@ -1352,6 +1356,7 @@ const AdminMembrosPage = () => {
     <SectionCard padding="none" className="lg:hidden">
       {filtered.map((member, i) => {
         const monthCount = filterKey ? (member.monthly_counts[filterKey] || 0) : member.total_completed;
+        const monthScheduled = filterKey ? (member.monthly_scheduled_counts[filterKey] || 0) : member.total_scheduled;
         const pendingConfirmationCount = filterKey
           ? (member.monthly_pending_confirmation_counts?.[filterKey] || 0)
           : (member.total_pending_confirmation || 0);
@@ -1384,7 +1389,7 @@ const AdminMembrosPage = () => {
               }
               trailing={
                 <>
-                  {!isOverview && <StatusPill tone={monthTone(monthCount)} size="sm">{monthStatusLabel(monthCount)}</StatusPill>}
+                  {!isOverview && <StatusPill tone={monthPillTone(monthCount, monthScheduled)} size="sm">{monthStatusLabel(monthCount, monthScheduled)}</StatusPill>}
                   <ChevronDown className={`h-4 w-4 text-muted-foreground transition-transform duration-ds-1 ${isExpanded ? "rotate-180" : ""}`} aria-hidden />
                 </>
               }

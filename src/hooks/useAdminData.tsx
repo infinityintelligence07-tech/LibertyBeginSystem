@@ -19,6 +19,7 @@ export const ADMIN_BOOKING_QUERY_KEYS = [
   "admin-mentors",
   "admin-bookings-all",
   "agenda-bookings",
+  "agenda-today",
   "agenda-pending-confirmation",
   "agenda-pending-approvals",
   "agenda-not-realized",

@@ -11,6 +11,7 @@ import { format as fmtDate, addDays, parseISO } from "date-fns";
 import { ptBR } from "date-fns/locale";
 import { demoBookingsForMember, demoTasksForBookings, demoMentorProfiles, demoProfileFill } from "@/lib/demoForUser";
 import { getEffectiveBookingStatus, PENDING_CONFIRMATION_HINT, sortByScheduledDateAsc, todayPlatformDate } from "@/lib/bookingStatus";
+import { fetchMentorNames } from "@/lib/mentorNames";
 import { UrgencyBookingCard } from "@/components/UrgencyBookingCard";
 import { PendingNpsCard } from "@/components/PendingNpsCard";
 import { MemberTimeline } from "@/components/MemberTimeline";
@@ -84,10 +85,7 @@ const DashboardPage = () => {
   const { data: _mentorProfiles = [] } = useQuery({
     queryKey: ["mentor-profiles", mentorIds],
     queryFn: async () => {
-      if (!mentorIds.length) return [];
-      const { data, error } = await supabase.from("profiles").select("id, full_name").in("id", mentorIds);
-      if (error) throw error;
-      return data || [];
+      return fetchMentorNames(mentorIds);
     },
     enabled: mentorIds.length > 0,
   });
