@@ -2,7 +2,8 @@ import { useQuery } from "@tanstack/react-query";
 import type { PostgrestError } from "@supabase/supabase-js";
 import { supabase } from "@/integrations/supabase/client";
 import type { Tables } from "@/integrations/supabase/types";
-import { sessionFeeMultiplier } from "@/lib/mentorFees";
+import { sessionFeeMultiplier, DEFAULT_SESSION_VALUE, DEFAULT_KICKOFF_SESSION_VALUE } from "@/lib/mentorFees";
+import type { MentorFeeRates } from "@/lib/mentorFees";
 import {
   getEffectiveBookingStatus,
   isVisibleSessionBooking,
@@ -12,6 +13,8 @@ import {
   isPendingConfirmationOverdue,
   isBookingPast,
 } from "@/lib/bookingStatus";
+
+export { DEFAULT_SESSION_VALUE, DEFAULT_KICKOFF_SESSION_VALUE };
 
 /** Chaves react-query que precisam ser invalidadas após qualquer mutação em `bookings`. */
 export const ADMIN_BOOKING_QUERY_KEYS = [
@@ -395,15 +398,22 @@ export const useMentors = () => {
         .select("*, sessions(name)");
       if (msErr) throw msErr;
 
-      const [bookings, reportedIds] = await Promise.all([fetchAdminBookings(), fetchReportedBookingIds()]);
+      const [bookings, reportedIds, feeRates] = await Promise.all([
+        fetchAdminBookings(),
+        fetchReportedBookingIds(),
+        fetchMentorFeeRates(),
+      ]);
 
-      // Multiplicador por sessão a partir do catálogo que veio no join (Mapeamento = 2x, Onboarding = 0).
+      // Multiplicador por sessão a partir do catálogo (Mapeamento = kickoff/normal, Onboarding = 0).
       const feeMultiplierOf = (b: AdminBookingRow) =>
-        sessionFeeMultiplier({
-          session_name: b.sessions?.name,
-          is_kickoff: b.sessions?.is_kickoff,
-          duration_minutes: b.sessions?.duration_minutes,
-        });
+        sessionFeeMultiplier(
+          {
+            session_name: b.sessions?.name,
+            is_kickoff: b.sessions?.is_kickoff,
+            duration_minutes: b.sessions?.duration_minutes,
+          },
+          feeRates,
+        );
       const effectiveStatus = (b: AdminBookingRow) =>
         getEffectiveBookingStatus(b, { hasReport: reportedIds.has(b.id) });
 
@@ -489,7 +499,23 @@ export const useMentors = () => {
 };
 
 /** Valor padrão por sessão quando `system_config.session_value` não existe ou é inválido. */
-export const DEFAULT_SESSION_VALUE = 300;
+const parseMoneyConfig = (raw: string | undefined, fallback: number) => {
+  const parsed = parseFloat(raw ?? "");
+  return Number.isFinite(parsed) && parsed >= 0 ? parsed : fallback;
+};
+
+export const fetchMentorFeeRates = async (): Promise<MentorFeeRates> => {
+  const { data, error } = await supabase
+    .from("system_config")
+    .select("key, value")
+    .in("key", ["session_value", "kickoff_session_value"]);
+  if (error) throw error;
+  const map = Object.fromEntries((data || []).map((row) => [row.key, row.value]));
+  return {
+    sessionValue: parseMoneyConfig(map.session_value, DEFAULT_SESSION_VALUE),
+    kickoffValue: parseMoneyConfig(map.kickoff_session_value, DEFAULT_KICKOFF_SESSION_VALUE),
+  };
+};
 
 /**
  * Configurações globais usadas pelas telas financeiras.
@@ -500,17 +526,11 @@ export const useAdminStats = () => {
   return useQuery({
     queryKey: ["admin-stats"],
     queryFn: async () => {
-      const { data: configData, error } = await supabase
-        .from("system_config")
-        .select("value")
-        .eq("key", "session_value")
-        .maybeSingle();
-      if (error) throw error;
-
-      const parsed = parseFloat(configData?.value ?? "");
-      const sessionValue = Number.isFinite(parsed) && parsed >= 0 ? parsed : DEFAULT_SESSION_VALUE;
-
-      return { sessionValue };
+      const rates = await fetchMentorFeeRates();
+      return {
+        sessionValue: rates.sessionValue,
+        kickoffSessionValue: rates.kickoffValue,
+      };
     },
   });
 };

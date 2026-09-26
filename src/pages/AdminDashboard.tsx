@@ -293,6 +293,7 @@ const AdminDashboardPage = () => {
                       size="sm"
                       label="da meta"
                       value={`${monthlyGoal.pct}%`}
+                      tone={monthlyGoal.pct >= 100 ? "success" : "default"}
                     />
                   }
                 />
@@ -304,7 +305,7 @@ const AdminDashboardPage = () => {
                 <ProgressBar
                   value={monthlyGoal.monthSessions}
                   max={monthlyGoal.goalSessions}
-                  tone={monthlyGoal.goalReached ? "success" : "brand"}
+                  tone="goal"
                   label={`Meta mensal: ${monthlyGoal.monthSessions} de ${monthlyGoal.goalSessions} sessões`}
                 />
                 {monthlyGoal.goalReached && (

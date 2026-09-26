@@ -49,13 +49,13 @@ export const Stat = ({ label, value, hint, icon: Icon, tone = "default", size = 
 interface ProgressBarProps {
   value: number;
   max?: number;
-  tone?: "brand" | "success" | "warning" | "pending" | "info";
+  tone?: "brand" | "success" | "warning" | "pending" | "info" | "goal";
   /** Altura 8px por padrão. */
   className?: string;
   label?: string;
 }
 
-const barTone: Record<NonNullable<ProgressBarProps["tone"]>, string> = {
+const barTone: Record<Exclude<NonNullable<ProgressBarProps["tone"]>, "goal">, string> = {
   brand: "bg-primary",
   success: "bg-status-green",
   warning: "bg-status-yellow",
@@ -63,9 +63,17 @@ const barTone: Record<NonNullable<ProgressBarProps["tone"]>, string> = {
   info: "bg-status-blue",
 };
 
+/** Cor da barra de meta: quanto mais perto de 100%, mais verde. */
+const goalFillColor = (pct: number) => {
+  const green = Math.min(100, Math.max(0, pct));
+  const muted = 100 - green;
+  return `color-mix(in srgb, hsl(var(--status-green)) ${green}%, hsl(var(--muted-foreground)) ${muted}%)`;
+};
+
 /** Barra de progresso sólida (sem gradiente), 8px, acessível. */
 export const ProgressBar = ({ value, max = 100, tone = "brand", className, label }: ProgressBarProps) => {
   const pct = max > 0 ? Math.min(100, Math.max(0, (value / max) * 100)) : 0;
+  const isGoal = tone === "goal";
   return (
     <div
       role="progressbar"
@@ -76,8 +84,11 @@ export const ProgressBar = ({ value, max = 100, tone = "brand", className, label
       className={cn("h-1 w-full rounded-full bg-muted overflow-hidden", className)}
     >
       <div
-        className={cn("h-full rounded-full transition-[width] duration-ds-3 ease-ds-out", barTone[tone])}
-        style={{ width: `${pct}%` }}
+        className={cn(
+          "h-full rounded-full transition-[width,background-color] duration-ds-3 ease-ds-out",
+          !isGoal && barTone[tone],
+        )}
+        style={isGoal ? { width: `${pct}%`, backgroundColor: goalFillColor(pct) } : { width: `${pct}%` }}
       />
     </div>
   );

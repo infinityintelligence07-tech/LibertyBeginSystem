@@ -1,11 +1,13 @@
 import { useState, useEffect } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import { AppLayout } from "@/components/AppLayout";
 import { supabase } from "@/integrations/supabase/client";
 import { Save } from "lucide-react";
 import { toast } from "sonner";
 import { AccessManagement } from "@/components/AccessManagement";
 import { Button } from "@/components/ui/button";
-import { PageContainer, PageHeader, SectionHeader, SectionCard, StatusPill, TextField, LoadingState } from "@/components/ds";
+import { PageContainer, PageHeader, SectionHeader, SectionCard, StatusPill, TextField, LoadingState, Callout } from "@/components/ds";
+import { DEFAULT_KICKOFF_SESSION_VALUE, DEFAULT_SESSION_VALUE } from "@/lib/mentorFees";
 
 interface ConfigValues {
   mariana_whatsapp: string;
@@ -13,6 +15,7 @@ interface ConfigValues {
   max_sessions_month: string;
   session_duration: string;
   session_value: string;
+  kickoff_session_value: string;
   google_calendar_id: string;
   zoom_account_id: string;
 }
@@ -22,12 +25,14 @@ const defaultConfig: ConfigValues = {
   cs_name: "",
   max_sessions_month: "2",
   session_duration: "90",
-  session_value: "300",
+  session_value: String(DEFAULT_SESSION_VALUE),
+  kickoff_session_value: String(DEFAULT_KICKOFF_SESSION_VALUE),
   google_calendar_id: "",
   zoom_account_id: "",
 };
 
 const AdminConfiguracoesPage = () => {
+  const queryClient = useQueryClient();
   const [config, setConfig] = useState<ConfigValues>(defaultConfig);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState<string | null>(null);
@@ -40,13 +45,14 @@ const AdminConfiguracoesPage = () => {
     const { data, error } = await supabase.from("system_config").select("key, value");
     if (error) { setLoading(false); return; }
     const map: Record<string, string> = {};
-    (data || []).forEach((d: any) => { map[d.key] = d.value; });
+    (data || []).forEach((d: { key: string; value: string }) => { map[d.key] = d.value; });
     setConfig({
       mariana_whatsapp: map.mariana_whatsapp || "",
       cs_name: map.cs_name || "",
       max_sessions_month: map.max_sessions_month || "2",
       session_duration: map.session_duration || "90",
-      session_value: map.session_value || "300",
+      session_value: map.session_value || String(DEFAULT_SESSION_VALUE),
+      kickoff_session_value: map.kickoff_session_value || String(DEFAULT_KICKOFF_SESSION_VALUE),
       google_calendar_id: map.google_calendar_id || "",
       zoom_account_id: map.zoom_account_id || "",
     });
@@ -64,6 +70,9 @@ const AdminConfiguracoesPage = () => {
       }
     }
     toast.success("Configurações salvas");
+    await queryClient.invalidateQueries({ queryKey: ["admin-stats"] });
+    await queryClient.invalidateQueries({ queryKey: ["mentor-fee-rates"] });
+    await queryClient.invalidateQueries({ queryKey: ["admin-mentors"] });
     setSaving(null);
   };
 
@@ -87,6 +96,9 @@ const AdminConfiguracoesPage = () => {
       </div>
     );
   };
+
+  const normalValue = parseFloat(config.session_value) || DEFAULT_SESSION_VALUE;
+  const kickoffValue = parseFloat(config.kickoff_session_value) || DEFAULT_KICKOFF_SESSION_VALUE;
 
   return (
     <AppLayout role="admin">
@@ -120,8 +132,12 @@ const AdminConfiguracoesPage = () => {
             </SectionCard>
 
             <SectionCard as="section" className="space-y-4">
-              <SectionHeader as="h3" title="Regras do programa" description="Valores padrão usados nas telas administrativas." />
-              <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+              <SectionHeader
+                as="h3"
+                title="Regras do programa"
+                description="Valores usados no Financeiro, no painel do mentor e quando o mentor não tem taxa própria."
+              />
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
                 <TextField
                   label="Máx. sessões por mês por membro"
                   type="number"
@@ -137,14 +153,28 @@ const AdminConfiguracoesPage = () => {
                   onChange={e => setConfig(c => ({ ...c, session_duration: e.target.value }))}
                 />
                 <TextField
-                  label="Valor padrão por sessão (R$)"
+                  label="Valor da sessão normal (R$)"
                   type="number"
                   inputMode="decimal"
                   value={config.session_value}
                   onChange={e => setConfig(c => ({ ...c, session_value: e.target.value }))}
+                  hint="Sessões de 90 min da jornada."
+                />
+                <TextField
+                  label="Valor do Mapeamento / 3h (R$)"
+                  type="number"
+                  inputMode="decimal"
+                  value={config.kickoff_session_value}
+                  onChange={e => setConfig(c => ({ ...c, kickoff_session_value: e.target.value }))}
+                  hint="Mapeamento do Negócio (kickoff)."
                 />
               </div>
-              {saveButton(["max_sessions_month", "session_duration", "session_value"])}
+              <Callout tone="info">
+                Repasse padrão hoje: sessão normal R$ {Math.round(normalValue).toLocaleString("pt-BR")} ·
+                Mapeamento R$ {Math.round(kickoffValue).toLocaleString("pt-BR")}.
+                Se o mentor tiver valor próprio na ficha, o Mapeamento escala na mesma proporção.
+              </Callout>
+              {saveButton(["max_sessions_month", "session_duration", "session_value", "kickoff_session_value"])}
             </SectionCard>
 
             <SectionCard as="section" className="space-y-4">

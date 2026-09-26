@@ -10,7 +10,7 @@ import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from "@
 import { Button } from "@/components/ui/button";
 import { downloadMentorReportPdf, formatBRL, payoutCategoryOf, type MentorReportSession } from "@/lib/mentorReportPdf";
 import { toast } from "sonner";
-import { KICKOFF_FEE_MULTIPLIER } from "@/lib/mentorFees";
+import { kickoffFeeForRate, kickoffFeeRatio } from "@/lib/mentorFees";
 import { PENDING_CONFIRMATION_HINT } from "@/lib/bookingStatus";
 import {
   PageContainer,
@@ -37,6 +37,12 @@ const AdminFinanceiroPage = () => {
   const { mode, monthKey } = useAdminFilter();
 
   const defaultRate = stats?.sessionValue ?? DEFAULT_SESSION_VALUE;
+  const kickoffRate = stats?.kickoffSessionValue ?? defaultRate * 2;
+  const feeRates = useMemo(
+    () => ({ sessionValue: defaultRate, kickoffValue: kickoffRate }),
+    [defaultRate, kickoffRate],
+  );
+  const kickoffRatio = kickoffFeeRatio(feeRates);
   const filterKey = mode === "month" ? monthKey : null;
 
   const [detailMentorId, setDetailMentorId] = useState<string | null>(null);
@@ -104,13 +110,14 @@ const AdminFinanceiroPage = () => {
       const scheduled = pick(m.total_scheduled, m.monthly_scheduled);
       const pendingConfirmation = pick(m.total_pending_confirmation, m.monthly_pending_confirmation);
       const rate = m.session_rate ?? defaultRate;
+      const mentorKickoff = kickoffFeeForRate(rate, feeRates);
       const total = completed + scheduled + pendingConfirmation;
-      // Mapeamento do Negócio (3h) = dobro do valor
+      // Mapeamento do Negócio (3h) = valor de kickoff (padrão R$ 600)
       const kCompleted = pick(m.total_kickoff_completed, m.monthly_kickoff_completed);
       const kScheduled = pick(m.total_kickoff_scheduled, m.monthly_kickoff_scheduled);
       const kPending = pick(m.total_kickoff_pending_confirmation, m.monthly_kickoff_pending_confirmation);
       const kTotal = kCompleted + kScheduled + kPending;
-      const extra = KICKOFF_FEE_MULTIPLIER - 1;
+      const extra = kickoffRatio - 1;
       return {
         mentor: m,
         id: m.id,
@@ -122,6 +129,7 @@ const AdminFinanceiroPage = () => {
         pendingConfirmation,
         total,
         rate,
+        kickoffRate: mentorKickoff,
         usesDefaultRate: m.session_rate == null,
         kickoffCount: kTotal,
         revenueDone: (completed + kCompleted * extra) * rate,
@@ -129,7 +137,7 @@ const AdminFinanceiroPage = () => {
         revenueProjected: (total + kTotal * extra) * rate,
       };
     }).sort((a, b) => b.total - a.total);
-  }, [activeMentors, filterKey, defaultRate]);
+  }, [activeMentors, filterKey, defaultRate, feeRates, kickoffRatio]);
 
   const totalCompleted = mentorRows.reduce((s, r) => s + r.completed, 0);
   const totalAwaiting = mentorRows.reduce((s, r) => s + r.awaiting, 0);
@@ -162,7 +170,7 @@ const AdminFinanceiroPage = () => {
       {row.usesDefaultRate && <span className="block text-[11px] text-muted-foreground">valor padrão</span>}
       {row.kickoffCount > 0 && (
         <span className="block text-[11px] text-muted-foreground tabular-nums">
-          {row.kickoffCount}× Mapeamento · {formatBRL(row.rate * KICKOFF_FEE_MULTIPLIER)}
+          {row.kickoffCount}× Mapeamento · {formatBRL(row.kickoffRate)}
         </span>
       )}
     </div>
@@ -173,7 +181,7 @@ const AdminFinanceiroPage = () => {
       <PageContainer variant="wide">
         <PageHeader
           title="Financeiro"
-          description={`Valor padrão por sessão: ${formatBRL(defaultRate)} · A pagar = realizadas · Projeção = realizadas + agendadas + a confirmar`}
+          description={`Sessão normal: ${formatBRL(defaultRate)} · Mapeamento (3h): ${formatBRL(kickoffRate)} · A pagar = realizadas · Projeção = realizadas + agendadas + a confirmar`}
           actions={<AdminMonthFilter />}
         />
 
@@ -402,7 +410,7 @@ const AdminFinanceiroPage = () => {
                 {detailRow.usesDefaultRate && " (padrão)"}
               </span>
               {detailRow.kickoffCount > 0 && (
-                <span className="tabular-nums">{detailRow.kickoffCount}× Mapeamento · {formatBRL(detailRow.rate * KICKOFF_FEE_MULTIPLIER)}</span>
+                <span className="tabular-nums">{detailRow.kickoffCount}× Mapeamento · {formatBRL(detailRow.kickoffRate)}</span>
               )}
             </div>
 

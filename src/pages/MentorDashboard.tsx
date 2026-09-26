@@ -1,5 +1,6 @@
 import { useState, useMemo } from "react";
-import { sessionFee } from "@/lib/mentorFees";
+import { sessionFee, DEFAULT_SESSION_VALUE, DEFAULT_KICKOFF_SESSION_VALUE } from "@/lib/mentorFees";
+import type { MentorFeeRates } from "@/lib/mentorFees";
 import { AppLayout } from "@/components/AppLayout";
 import { GoogleCalendarBanner } from "@/components/GoogleCalendarBanner";
 import { Calendar, ClipboardList, AlertTriangle, ExternalLink, ChevronLeft, ChevronRight, ChevronDown, FileText, DollarSign, TrendingUp, Wallet, CalendarDays, PhoneOff, Video } from "lucide-react";
@@ -257,12 +258,21 @@ const MentorDashboardPage = () => {
   const reportSet = useMemo(() => new Set(reportsAll.map((r) => r.booking_id)), [reportsAll]);
 
   // Valor padrão da sessão (config) e taxa individual do mentor
-  const { data: defaultRate = 300 } = useQuery({
-    queryKey: ["session-value-config"],
-    queryFn: async () => {
-      const { data, error } = await supabase.from("system_config").select("value").eq("key", "session_value").maybeSingle();
+  const { data: feeRates = { sessionValue: DEFAULT_SESSION_VALUE, kickoffValue: DEFAULT_KICKOFF_SESSION_VALUE } } = useQuery({
+    queryKey: ["mentor-fee-rates"],
+    queryFn: async (): Promise<MentorFeeRates> => {
+      const { data, error } = await supabase
+        .from("system_config")
+        .select("key, value")
+        .in("key", ["session_value", "kickoff_session_value"]);
       if (error) throw error;
-      return data?.value ? parseFloat(data.value) : 300;
+      const map = Object.fromEntries((data || []).map((row) => [row.key, row.value]));
+      const sessionValue = parseFloat(map.session_value ?? "");
+      const kickoffValue = parseFloat(map.kickoff_session_value ?? "");
+      return {
+        sessionValue: Number.isFinite(sessionValue) && sessionValue >= 0 ? sessionValue : DEFAULT_SESSION_VALUE,
+        kickoffValue: Number.isFinite(kickoffValue) && kickoffValue >= 0 ? kickoffValue : DEFAULT_KICKOFF_SESSION_VALUE,
+      };
     },
   });
 
@@ -277,7 +287,7 @@ const MentorDashboardPage = () => {
     enabled: !!profile?.id,
   });
 
-  const rate = mentorRate ?? defaultRate;
+  const rate = mentorRate ?? feeRates.sessionValue;
 
   // ============== STATS DO PERÍODO (mesmo trio que o mentor já usava) ==============
   const realized = sortByScheduledDateDesc(bookingsAll.filter(isRealizedSessionBooking));
@@ -298,10 +308,14 @@ const MentorDashboardPage = () => {
     [allVisible],
   );
 
-  // Mapeamento do Negócio (3h) = dobro do valor da sessão; mesma regra do admin (flag, duração ou nome)
+  // Mapeamento do Negócio (3h) = valor de kickoff; mesma regra do admin
   const feeOf = (b: { session_id: string }) => {
     const s = sessionInfoMap[b.session_id];
-    return sessionFee(rate, { session_name: s?.name, is_kickoff: s?.is_kickoff, duration_minutes: s?.duration_minutes });
+    return sessionFee(
+      rate,
+      { session_name: s?.name, is_kickoff: s?.is_kickoff, duration_minutes: s?.duration_minutes },
+      feeRates,
+    );
   };
   const sumFees = (list: { session_id: string }[]) => list.reduce((acc, b) => acc + feeOf(b), 0);
 

@@ -2,7 +2,8 @@ import { useState, useMemo } from "react";
 import { AppLayout } from "@/components/AppLayout";
 import { AdminMonthFilter } from "@/components/AdminMonthFilter";
 import { useAdminFilter } from "@/contexts/AdminFilterContext";
-import { useMentors, useAdminStats, useSessionCatalog } from "@/hooks/useAdminData";
+import { useMentors, useAdminStats, useSessionCatalog, DEFAULT_SESSION_VALUE, DEFAULT_KICKOFF_SESSION_VALUE } from "@/hooks/useAdminData";
+import { kickoffFeeForRate } from "@/lib/mentorFees";
 import { toTitleCase } from "@/lib/formatName";
 import { UserAvatar } from "@/components/UserAvatar";
 import { GraduationCap, Users, CheckCircle2, Calendar, DollarSign, Plus, Pencil, Trash2, Send, Loader2, Power } from "lucide-react";
@@ -61,7 +62,12 @@ const AdminMentoresPage = () => {
   const { data: sessionCatalog } = useSessionCatalog();
   const { mode, monthKey } = useAdminFilter();
   const queryClient = useQueryClient();
-  const defaultRate = stats?.sessionValue ?? 300;
+  const defaultRate = stats?.sessionValue ?? DEFAULT_SESSION_VALUE;
+  const kickoffRate = stats?.kickoffSessionValue ?? DEFAULT_KICKOFF_SESSION_VALUE;
+  const feeRates = useMemo(
+    () => ({ sessionValue: defaultRate, kickoffValue: kickoffRate }),
+    [defaultRate, kickoffRate],
+  );
   const filterKey = mode === "month" ? monthKey : null;
 
   const [formOpen, setFormOpen] = useState(false);
@@ -357,8 +363,13 @@ const AdminMentoresPage = () => {
   const formatBRL = (value: number) => `R$ ${Math.round(value).toLocaleString("pt-BR", { maximumFractionDigits: 0 })}`;
 
   const renderMentorCard = (mentor: NonNullable<typeof mentors>[number]) => {
-    const sessionsCount = filterKey ? (mentor.monthly_completed[filterKey] || 0) : mentor.total_completed;
-    const revenue = sessionsCount * defaultRate;
+    const mentorRate = mentor.session_rate ?? defaultRate;
+    const mentorKickoff = kickoffFeeForRate(mentorRate, feeRates);
+    const completed = filterKey ? (mentor.monthly_completed[filterKey] || 0) : mentor.total_completed;
+    const kickoffCompleted = filterKey
+      ? (mentor.monthly_kickoff_completed[filterKey] || 0)
+      : mentor.total_kickoff_completed;
+    const revenue = (completed - kickoffCompleted) * mentorRate + kickoffCompleted * mentorKickoff;
     const inactive = mentor.is_active === false;
     const busy = invitingId === mentor.id || togglingActiveId === mentor.id;
 
@@ -380,8 +391,12 @@ const AdminMentoresPage = () => {
                 <dd className="text-foreground">{mentor.phone || "Sem dados"}</dd>
               </div>
               <div className="flex gap-1">
-                <dt>Valor por sessão:</dt>
-                <dd className="text-foreground tabular-nums">{formatBRL(mentor.session_rate ?? defaultRate)}</dd>
+                <dt>Sessão:</dt>
+                <dd className="text-foreground tabular-nums">{formatBRL(mentorRate)}</dd>
+              </div>
+              <div className="flex gap-1">
+                <dt>Mapeamento:</dt>
+                <dd className="text-foreground tabular-nums">{formatBRL(mentorKickoff)}</dd>
               </div>
             </dl>
           </div>
@@ -422,7 +437,7 @@ const AdminMentoresPage = () => {
 
         {/* Indicadores */}
         <div className="mt-4 grid grid-cols-2 lg:grid-cols-4 gap-3">
-          <Stat size="sm" icon={CheckCircle2} label={filterKey ? "Realizadas no mês" : "Realizadas"} value={sessionsCount} />
+          <Stat size="sm" icon={CheckCircle2} label={filterKey ? "Realizadas no mês" : "Realizadas"} value={completed} />
           <Stat size="sm" icon={Calendar} label="Agendadas" value={mentor.total_scheduled} />
           <Stat size="sm" icon={Users} label="Membros atendidos" value={mentor.members_served} />
           <Stat size="sm" icon={DollarSign} label={filterKey ? "Receita no mês" : "Receita total"} value={formatBRL(revenue)} />
@@ -592,13 +607,13 @@ const AdminMentoresPage = () => {
               placeholder="+55 11 99999-9999"
             />
             <TextField
-              label="Valor por sessão (R$)"
+              label="Valor da sessão normal (R$)"
               type="number"
               inputMode="decimal"
               value={form.session_rate}
               onChange={(e) => setForm((f) => ({ ...f, session_rate: e.target.value }))}
               placeholder={String(defaultRate)}
-              hint={`Em branco usa o valor padrão (${formatBRL(defaultRate)}).`}
+              hint={`Em branco usa o padrão: sessão ${formatBRL(defaultRate)} · Mapeamento ${formatBRL(kickoffRate)}.`}
             />
           </div>
           {sessionCatalog && sessionCatalog.length > 0 && (
