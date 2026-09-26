@@ -209,16 +209,15 @@ const MentorAlunosPage = () => {
 
         {/* Busca e filtros */}
         <div className="space-y-3">
-          <div className="relative">
-            <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground pointer-events-none" aria-hidden />
+          <div className="w-full sm:max-w-sm">
             <TextField
               type="search"
               value={search}
               onChange={(e) => setSearch(e.target.value)}
               placeholder="Buscar por nome ou empresa"
               aria-label="Buscar membro"
-              className="pl-10"
-              containerClassName="w-full sm:max-w-sm"
+              leading={<Search />}
+              containerClassName="w-full"
             />
           </div>
           <div className="flex flex-wrap items-center gap-2">

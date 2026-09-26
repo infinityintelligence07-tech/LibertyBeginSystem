@@ -250,15 +250,14 @@ const MentorFerramentasPage = ({ role = "mentor" }: { role?: "mentor" | "admin" 
             }
           />
           <div className="flex flex-col sm:flex-row sm:items-center gap-3">
-            <div className="relative w-full sm:max-w-sm">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground pointer-events-none" aria-hidden />
+            <div className="w-full sm:max-w-sm">
               <TextField
                 type="search"
                 aria-label="Buscar por aluno ou empresa"
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
                 placeholder="Buscar por aluno ou empresa..."
-                className="pl-10"
+                leading={<Search />}
               />
             </div>
             <div className="flex items-center gap-2 overflow-x-auto scrollbar-hide -mx-4 px-4 sm:mx-0 sm:px-0">

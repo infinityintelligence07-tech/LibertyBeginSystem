@@ -175,15 +175,14 @@ const FerramentaModeloPage = ({ role = "mentor" }: { role?: "mentor" | "admin" }
             ))}
           </div>
 
-          <div className="relative">
-            <Search className="h-4 w-4 absolute left-3 top-[38px] sm:top-[34px] text-muted-foreground pointer-events-none" aria-hidden />
+          <div>
             <TextField
               label="Membro"
               type="search"
               value={search}
               onChange={(e) => setSearch(e.target.value)}
               placeholder="Buscar por nome ou empresa..."
-              className="pl-9"
+              leading={<Search />}
               autoComplete="off"
             />
           </div>

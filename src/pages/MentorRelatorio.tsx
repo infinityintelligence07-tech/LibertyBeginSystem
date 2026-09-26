@@ -5,7 +5,7 @@ import { AppLayout } from "@/components/AppLayout";
 import {
   ExternalLink, AlertCircle, Wand2, Lock, Check, FileText,
   Building2, Target, Instagram, DollarSign, BookOpen, User, Loader2, Plus, X,
-  ShieldCheck, Clock, CheckCircle2,
+  ShieldCheck, Clock, CheckCircle2, PhoneOff,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
@@ -23,13 +23,14 @@ import {
   StatusPill,
   TextAreaField,
 } from "@/components/ds";
+import { toast } from "sonner";
+import { invokeEndMeeting } from "@/lib/meetingWhatsApp";
 import { cn } from "@/lib/utils";
 import { supabase } from "@/integrations/supabase/client";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { format, parseISO } from "date-fns";
 import { ptBR } from "date-fns/locale";
 import { shortName } from "@/lib/formatName";
-import { toast } from "sonner";
 import { useAuth } from "@/hooks/useAuth";
 import { bookingRequiresReport, getEffectiveBookingStatus, isBookingPast } from "@/lib/bookingStatus";
 import { StudentTools } from "@/components/StudentTools";
@@ -66,6 +67,16 @@ const MentorRelatorioPage = () => {
   const [organizing, setOrganizing] = useState(false);
   const [loaded, setLoaded] = useState(false);
   const [deliverableOpen, setDeliverableOpen] = useState(false);
+  const [endingMeet, setEndingMeet] = useState(false);
+  const meetEndedFromNav = !!(location.state as { meetEnded?: boolean } | null)?.meetEnded;
+
+  useEffect(() => {
+    if (!meetEndedFromNav) return;
+    const t = window.setTimeout(() => {
+      document.getElementById("organizar-ia")?.scrollIntoView({ behavior: "smooth", block: "start" });
+    }, 120);
+    return () => window.clearTimeout(t);
+  }, [meetEndedFromNav, bookingId]);
 
   // Ao trocar de sessão na mesma tela (ex.: clique em notificação), zera o formulário
   // para o texto de um relatório não vazar para outro.
@@ -228,7 +239,7 @@ const MentorRelatorioPage = () => {
 
   const organize = async () => {
     if (transcript.trim().length < 30) {
-      toast.error("Cole um resumo do Zoom com mais conteúdo.");
+      toast.error("Cole um resumo do Meet com mais conteúdo.");
       return;
     }
     setOrganizing(true);
@@ -435,23 +446,70 @@ const MentorRelatorioPage = () => {
             }
             actions={
               booking.zoom_join_url ? (
-                <Button asChild variant="outline" size="sm">
-                  <a href={booking.zoom_join_url} target="_blank" rel="noopener noreferrer">
-                    <ExternalLink /> Zoom
-                  </a>
-                </Button>
+                <div className="flex flex-wrap gap-2">
+                  <Button asChild variant="outline" size="sm">
+                    <a href={booking.zoom_join_url} target="_blank" rel="noopener noreferrer">
+                      <ExternalLink /> Meet
+                    </a>
+                  </Button>
+                  {canEdit && (
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      disabled={endingMeet}
+                      onClick={async () => {
+                        if (endingMeet) return;
+                        setEndingMeet(true);
+                        try {
+                          const r = await invokeEndMeeting(booking.id);
+                          if (r.ok === false || r.error) {
+                            toast.error(r.error || "Não foi possível encerrar o Meet");
+                            return;
+                          }
+                          toast.success("Sessão encerrada", {
+                            description: "Cole o resumo Gemini abaixo e organize com a IA.",
+                          });
+                          navigate(location.pathname, { replace: true, state: { meetEnded: true } });
+                        } finally {
+                          setEndingMeet(false);
+                        }
+                      }}
+                    >
+                      <PhoneOff /> {endingMeet ? "Encerrando…" : "Encerrar Meet"}
+                    </Button>
+                  )}
+                </div>
               ) : undefined
             }
           />
         </div>
 
+        {meetEndedFromNav && (
+          <Callout
+            tone="success"
+            icon={CheckCircle2}
+            title="Meet encerrado — hora do relatório"
+          >
+            <ol className="mt-1 list-decimal list-inside space-y-1 text-sm text-muted-foreground">
+              <li>O Gemini costuma enviar o resumo em 2 a 10 minutos para o e-mail da Liberty (membrosliberty).</li>
+              <li>Cole o texto abaixo em “Organizar com IA” — a plataforma monta o rascunho do relatório.</li>
+              <li>Revise, ajuste o que quiser e salve quando a sessão já tiver passado do horário.</li>
+            </ol>
+          </Callout>
+        )}
+
         {/* Avisos de contexto: sessão futura, somente leitura, mapeamento sem relatório */}
-        {!sessionEnded && (
+        {!sessionEnded && !meetEndedFromNav && (
           <div>
             <Callout tone="info" icon={Clock} title="O relatório só pode ser enviado depois do horário da sessão">
               Esta sessão termina em {format(parseISO(booking.scheduled_date), "dd/MM", { locale: ptBR })} às {booking.end_time?.slice(0, 5) ?? "--:--"}. Você pode preparar o texto agora, mas o botão de salvar fica liberado só após o término.
             </Callout>
           </div>
+        )}
+        {!sessionEnded && meetEndedFromNav && (
+          <Callout tone="info" icon={Clock} title="Você já pode montar o rascunho">
+            O Meet acabou, mas o envio do relatório libera após {booking.end_time?.slice(0, 5) ?? "--:--"} (horário agendado). Enquanto isso, cole o Gemini e organize com a IA.
+          </Callout>
         )}
         {!canEdit && (
           <div>
@@ -528,18 +586,18 @@ const MentorRelatorioPage = () => {
         )}
 
         {/* Organizar com IA */}
-        <section>
+        <section id="organizar-ia">
           <SectionCard className="space-y-4">
             <SectionHeader
               as="h3"
               title="Organizar com IA"
-              description="Cole o resumo ou a transcrição gerada pelo Zoom. A IA estrutura o relatório e sugere tarefas para você aprovar."
+              description="Cole o resumo Gemini do Meet (ou a transcrição). A IA monta o rascunho do relatório e sugere tarefas — você só revisa e melhora."
             />
             <TextAreaField
-              label="Resumo do Zoom"
+              label="Resumo do Meet (Gemini)"
               value={transcript}
               onChange={(e) => setTranscript(e.target.value)}
-              placeholder="Cole aqui o resumo da IA do Zoom..."
+              placeholder="Cole aqui o resumo ou a transcrição gerada pelo Gemini após encerrar a call..."
               className="min-h-[128px] resize-y"
               hint={transcript.trim().length > 0 && transcript.trim().length < 30 ? "Cole um trecho com mais conteúdo (mínimo 30 caracteres)." : undefined}
             />
@@ -567,7 +625,7 @@ const MentorRelatorioPage = () => {
           <SectionCard className="space-y-4">
             <SectionHeader as="h3" title="Insights da IA" />
             {!aiAlert && !aiStrategy ? (
-              <p className="text-sm text-muted-foreground">Cole a transcrição do Zoom e toque em “Organizar com IA” para gerar.</p>
+              <p className="text-sm text-muted-foreground">Cole o resumo Gemini e toque em “Organizar com IA” para gerar.</p>
             ) : (
               <div className="space-y-4">
                 <TextAreaField

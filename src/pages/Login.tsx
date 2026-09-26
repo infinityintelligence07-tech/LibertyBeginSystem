@@ -160,29 +160,28 @@ const LoginPage = () => {
                   />
 
                   {mode === "login" && (
-                    <div className="relative">
-                      <TextField
-                        id="login-password"
-                        name="password"
-                        type={showPassword ? "text" : "password"}
-                        label="Senha"
-                        autoComplete="current-password"
-                        value={password}
-                        onChange={(e) => setPassword(e.target.value)}
-                        placeholder="Sua senha"
-                        className="pr-12"
-                        required
-                      />
-                      <IconButton
-                        aria-label={showPassword ? "Ocultar senha" : "Mostrar senha"}
-                        aria-pressed={showPassword}
-                        size="sm"
-                        onClick={() => setShowPassword(!showPassword)}
-                        className="absolute right-1 bottom-0.5 h-10 w-10"
-                      >
-                        {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
-                      </IconButton>
-                    </div>
+                    <TextField
+                      id="login-password"
+                      name="password"
+                      type={showPassword ? "text" : "password"}
+                      label="Senha"
+                      autoComplete="current-password"
+                      value={password}
+                      onChange={(e) => setPassword(e.target.value)}
+                      placeholder="Sua senha"
+                      required
+                      trailing={
+                        <IconButton
+                          aria-label={showPassword ? "Ocultar senha" : "Mostrar senha"}
+                          aria-pressed={showPassword}
+                          size="sm"
+                          onClick={() => setShowPassword(!showPassword)}
+                          className="h-10 w-10"
+                        >
+                          {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                        </IconButton>
+                      }
+                    />
                   )}
 
                   <Button type="submit" size="lg" disabled={loading} className="w-full">

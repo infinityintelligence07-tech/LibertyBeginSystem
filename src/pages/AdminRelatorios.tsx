@@ -144,15 +144,14 @@ const AdminRelatoriosPage = () => {
         <PageHeader title="Relatórios de sessões" description={description} />
 
         <div className="flex flex-col lg:flex-row lg:items-center gap-3">
-          <div className="relative w-full lg:max-w-sm">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground pointer-events-none" aria-hidden />
+          <div className="w-full lg:max-w-sm">
             <TextField
               type="search"
               aria-label="Buscar por membro, mentor ou sessão"
               placeholder="Buscar por membro, mentor ou sessão"
               value={search}
               onChange={(e) => setSearch(e.target.value)}
-              className="pl-10"
+              leading={<Search />}
             />
           </div>
           <div className="flex flex-wrap gap-2" role="group" aria-label="Filtrar por status">

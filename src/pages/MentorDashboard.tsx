@@ -2,7 +2,7 @@ import { useState, useMemo } from "react";
 import { sessionFee } from "@/lib/mentorFees";
 import { AppLayout } from "@/components/AppLayout";
 import { GoogleCalendarBanner } from "@/components/GoogleCalendarBanner";
-import { Calendar, ClipboardList, AlertTriangle, ExternalLink, ChevronLeft, ChevronRight, ChevronDown, FileText, DollarSign, TrendingUp, Wallet, CalendarDays } from "lucide-react";
+import { Calendar, ClipboardList, AlertTriangle, ExternalLink, ChevronLeft, ChevronRight, ChevronDown, FileText, DollarSign, TrendingUp, Wallet, CalendarDays, PhoneOff, Video } from "lucide-react";
 import { MentorClosingSoon, type ClosingStudent } from "@/components/mentor/MentorClosingSoon";
 import { MentorActiveStudents, type ActiveStudent } from "@/components/mentor/MentorActiveStudents";
 import { Button } from "@/components/ui/button";
@@ -32,6 +32,8 @@ import { differenceInDays } from "date-fns";
 import { useAuth } from "@/hooks/useAuth";
 import { supabase } from "@/integrations/supabase/client";
 import { useQuery } from "@tanstack/react-query";
+import { toast } from "sonner";
+import { invokeEndMeeting } from "@/lib/meetingWhatsApp";
 import { format, startOfMonth, addMonths, subMonths, parseISO } from "date-fns";
 import { ptBR } from "date-fns/locale";
 import { shortName } from "@/lib/formatName";
@@ -46,6 +48,7 @@ import {
   getMentorPendingAction,
   isFutureScheduledBooking,
   isRealizedSessionBooking,
+  isSessionHappeningNow,
   isVisibleSessionBooking,
   sortByScheduledDateAsc,
   sortByScheduledDateDesc,
@@ -64,7 +67,26 @@ const MentorDashboardPage = () => {
   const [expandedMember, setExpandedMember] = useState<string | null>(null);
   const [viewMode, setViewMode] = useState<ViewMode>("month");
   const [notRealizedTarget, setNotRealizedTarget] = useState<string | null>(null);
+  const [endingMeetId, setEndingMeetId] = useState<string | null>(null);
   const { actingId, markNotRealized } = useMentorBookingActions();
+
+  const endMeetForAll = async (bookingId: string) => {
+    if (endingMeetId) return;
+    setEndingMeetId(bookingId);
+    try {
+      const r = await invokeEndMeeting(bookingId);
+      if (r.ok === false || r.error) {
+        toast.error(r.error || "Não foi possível encerrar o Meet");
+        return;
+      }
+      toast.success("Sessão encerrada", {
+        description: "Agora finalize o relatório — o resumo Gemini chega em alguns minutos.",
+      });
+      navigate(`/mentor/sessoes/${bookingId}/relatorio`, { state: { meetEnded: true } });
+    } finally {
+      setEndingMeetId(null);
+    }
+  };
 
   const monthStart = startOfMonth(currentMonth);
   const nextMonthStart = addMonths(monthStart, 1);
@@ -298,8 +320,23 @@ const MentorDashboardPage = () => {
 
   const money = (v: number) => `R$ ${v.toLocaleString("pt-BR", { minimumFractionDigits: 2 })}`;
 
-  // Próximas sessões: SEMPRE da lista completa do mentor (não depende do filtro de mês)
-  const upcomingAll = useMemo(() => sortByScheduledDateAsc(allVisible.filter(isFutureScheduledBooking)), [allVisible]);
+  /** Sessões no horário agora (com Meet) — bloco AO VIVO no Início. */
+  const liveMeetSessions = useMemo(
+    () =>
+      allVisible.filter(
+        (b) =>
+          isSessionHappeningNow(b) &&
+          !!(b.zoom_join_url || (b as { zoom_link?: string | null }).zoom_link),
+      ),
+    [allVisible],
+  );
+  const liveIds = useMemo(() => new Set(liveMeetSessions.map((b) => b.id)), [liveMeetSessions]);
+
+  // Próximas: lista completa do mentor; AO VIVO fica só no card de cima
+  const upcomingAll = useMemo(
+    () => sortByScheduledDateAsc(allVisible.filter((b) => isFutureScheduledBooking(b) && !liveIds.has(b.id))),
+    [allVisible, liveIds],
+  );
   const upcoming = upcomingAll.slice(0, 5);
 
   // ============== IMPACTO / ENCERRAMENTOS ==============
@@ -439,6 +476,70 @@ const MentorDashboardPage = () => {
           <ErrorState title="Não foi possível carregar suas sessões" onRetry={() => refetchBookings()} />
         )}
 
+        {!bookingsLoading && liveMeetSessions.length > 0 && (
+          <section aria-label="Sessão ao vivo" className="space-y-3">
+            {liveMeetSessions.map((b) => {
+              const memberName = shortName((b.liberty_id ? libertyName(b.liberty_id) : b.guest_name) || "Membro");
+              const memberAvatar = b.liberty_id ? libertyProfileMap[b.liberty_id]?.avatar_url : null;
+              const meetUrl = b.zoom_join_url || (b as { zoom_link?: string | null }).zoom_link || "";
+              return (
+                <SectionCard
+                  key={b.id}
+                  tone="success"
+                  className="border-status-green/40 ring-1 ring-status-green/20"
+                >
+                  <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+                    <div className="flex items-start gap-3 min-w-0">
+                      <UserAvatar name={memberName} avatarUrl={memberAvatar} size={48} />
+                      <div className="min-w-0 space-y-1">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <StatusPill tone="success" withDot={false} className="gap-1.5">
+                            <span className="relative flex h-2 w-2" aria-hidden>
+                              <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-status-green opacity-60" />
+                              <span className="relative inline-flex h-2 w-2 rounded-full bg-status-green" />
+                            </span>
+                            Ao vivo
+                          </StatusPill>
+                          <span className="text-xs text-muted-foreground tabular-nums">
+                            {b.start_time?.slice(0, 5)}–{b.end_time?.slice(0, 5)}
+                          </span>
+                        </div>
+                        <p className="text-base font-semibold text-foreground truncate">{memberName}</p>
+                        <p className="text-sm text-muted-foreground truncate">{sessionName(b.session_id)}</p>
+                      </div>
+                    </div>
+                    <div className="flex flex-col sm:flex-row flex-wrap gap-2 shrink-0 sm:items-center">
+                      {meetUrl && (
+                        <Button
+                          asChild
+                          size="default"
+                          className="bg-status-green text-primary-foreground hover:bg-status-green/90"
+                        >
+                          <a href={meetUrl} target="_blank" rel="noopener noreferrer">
+                            <Video /> Entrar no Meet
+                          </a>
+                        </Button>
+                      )}
+                      <Button
+                        size="default"
+                        variant="outline"
+                        disabled={endingMeetId === b.id}
+                        onClick={() => endMeetForAll(b.id)}
+                        title="Encerra a call para todos, libera o resumo Gemini e abre o relatório"
+                      >
+                        <PhoneOff /> {endingMeetId === b.id ? "Encerrando…" : "Encerrar sessão"}
+                      </Button>
+                    </div>
+                  </div>
+                  <p className="mt-3 text-xs text-muted-foreground">
+                    Ao encerrar, todos saem da call → o Gemini gera o resumo → você cai no relatório para revisar e enviar.
+                  </p>
+                </SectionCard>
+              );
+            })}
+          </section>
+        )}
+
         {bookingsLoading ? (
           <LoadingState variant="stats" rows={3} />
         ) : (
@@ -563,6 +664,8 @@ const MentorDashboardPage = () => {
           />
           {bookingsLoading ? (
             <LoadingState variant="list" rows={3} />
+          ) : upcoming.length === 0 && liveMeetSessions.length > 0 ? (
+            <p className="text-sm text-muted-foreground">A sessão do momento está no card Ao vivo acima.</p>
           ) : upcoming.length === 0 ? (
             <EmptyState
               icon={CalendarDays}
@@ -587,10 +690,31 @@ const MentorDashboardPage = () => {
                     trailing={
                       <>
                         {b.zoom_join_url && (
-                          <Button asChild size="sm" variant="outline">
+                          <Button
+                            asChild
+                            size="sm"
+                            className={
+                              isSessionHappeningNow(b)
+                                ? "bg-status-green text-primary-foreground hover:bg-status-green/90"
+                                : undefined
+                            }
+                            variant={isSessionHappeningNow(b) ? "default" : "outline"}
+                          >
                             <a href={b.zoom_join_url} target="_blank" rel="noopener noreferrer">
-                              <ExternalLink /> Zoom
+                              {isSessionHappeningNow(b) ? <Video /> : <ExternalLink />}
+                              {isSessionHappeningNow(b) ? "Ao vivo" : "Meet"}
                             </a>
+                          </Button>
+                        )}
+                        {b.zoom_join_url && isSessionHappeningNow(b) && (
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            disabled={endingMeetId === b.id}
+                            onClick={() => endMeetForAll(b.id)}
+                            title="Encerra a call para todos, libera o resumo Gemini e abre o relatório"
+                          >
+                            <PhoneOff /> {endingMeetId === b.id ? "Encerrando…" : "Encerrar"}
                           </Button>
                         )}
                         <Button size="sm" variant="outline" onClick={() => navigate(`/mentor/sessoes/${b.id}/relatorio`)}>

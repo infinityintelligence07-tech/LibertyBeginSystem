@@ -1462,15 +1462,14 @@ const AdminMembrosPage = () => {
             </div>
 
             <div className="flex flex-col sm:flex-row sm:items-center gap-3">
-              <div className="relative flex-1 sm:max-w-sm">
-                <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground pointer-events-none" aria-hidden />
+              <div className="flex-1 sm:max-w-sm">
                 <TextField
                   type="search"
                   aria-label="Buscar membro, empresa ou e-mail"
                   placeholder="Buscar membro, empresa ou e-mail"
                   value={search}
                   onChange={(e) => setSearch(e.target.value)}
-                  className="pl-10"
+                  leading={<Search />}
                 />
               </div>
               <div className="flex gap-2 flex-wrap">

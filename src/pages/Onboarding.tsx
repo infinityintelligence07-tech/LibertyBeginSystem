@@ -449,9 +449,8 @@ export default function Onboarding() {
                 disabled={marginUnknown}
                 onChange={(e) => setField(f.key, e.target.value)}
                 placeholder={marginUnknown ? "Não sei" : f.placeholder}
-                className="pr-9"
+                trailing={<span className="pointer-events-none pr-3 text-sm" aria-hidden>%</span>}
               />
-              <span className="absolute right-4 bottom-3 text-sm text-muted-foreground pointer-events-none" aria-hidden>%</span>
             </div>
             <Chip
               active={marginUnknown}

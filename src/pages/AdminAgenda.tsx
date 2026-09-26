@@ -19,6 +19,7 @@ import {
   Trash2,
   CalendarDays,
   MessageCircle,
+  PhoneOff,
   type LucideIcon,
 } from "lucide-react";
 import { shortName, matchesSearch } from "@/lib/formatName";
@@ -41,7 +42,7 @@ import {
   PENDING_CONFIRMATION_HINT,
 } from "@/lib/bookingStatus";
 import { bookingRuleErrorMessage } from "@/lib/bookingRules";
-import { whatsappHref, copyText, invokeProvisionMeeting } from "@/lib/meetingWhatsApp";
+import { whatsappHref, copyText, invokeProvisionMeeting, friendlyMeetError, buildMeetingWhatsAppTexts, invokeEndMeeting } from "@/lib/meetingWhatsApp";
 import { UserAvatar } from "@/components/UserAvatar";
 import { Button } from "@/components/ui/button";
 import {
@@ -137,6 +138,7 @@ interface BookingRow {
   mentor_id: string;
   liberty_id: string | null;
   guest_name: string | null;
+  guest_email?: string | null;
   session_id: string;
   scheduled_date: string;
   start_time: string;
@@ -174,30 +176,17 @@ const buildMeetingWaFallback = (
   role: "member" | "mentor",
   mentorName: string,
 ): string => {
-  const meetUrl = booking.zoom_join_url || booking.zoom_link || "";
-  const memberName = booking.liberty?.full_name || booking.guest_name || "aluno";
-  const sessionName = booking.sessions?.name || "Sessão";
-  const when = `${format(new Date(booking.scheduled_date + "T12:00:00"), "dd/MM/yyyy")} · ${booking.start_time.substring(0, 5)}–${booking.end_time.substring(0, 5)}`;
-  if (role === "member") {
-    return [
-      `Oi, ${memberName.split(" ")[0] || "tudo bem"}!`,
-      ``,
-      `Sua sessão *${sessionName}* com ${mentorName} está confirmada.`,
-      `📅 ${when}`,
-      ``,
-      meetUrl ? `Link da reunião:\n${meetUrl}` : "O link da reunião será enviado em breve.",
-      ``,
-      `Qualquer imprevisto, avise a equipe Liberty.`,
-    ].join("\n");
-  }
-  return [
-    `Oi, ${mentorName.split(" ")[0] || "mentor"}!`,
-    ``,
-    `Sessão *${sessionName}* com ${memberName}.`,
-    `📅 ${when}`,
-    ``,
-    meetUrl ? `Link da reunião:\n${meetUrl}` : "O link da reunião será enviado em breve.",
-  ].join("\n");
+  const texts = buildMeetingWhatsAppTexts({
+    bookingId: booking.id,
+    memberName: booking.liberty?.full_name || booking.guest_name || "Aluno",
+    mentorName,
+    sessionName: booking.sessions?.name || "Sessão",
+    date: booking.scheduled_date,
+    start: booking.start_time,
+    meetUrl: booking.zoom_join_url || booking.zoom_link || "",
+    appOrigin: typeof window !== "undefined" ? window.location.origin : undefined,
+  });
+  return role === "member" ? texts.member : texts.mentor;
 };
 
 const meetingOpenLabel = (url: string | null | undefined): string =>
@@ -263,6 +252,9 @@ const AdminAgendaPage = () => {
   const [rejectTarget, setRejectTarget] = useState<BookingRow | null>(null);
   const [rejectReason, setRejectReason] = useState("Mentor indisponível");
   const [provisioningMeet, setProvisioningMeet] = useState(false);
+  const [endingMeet, setEndingMeet] = useState(false);
+  const [guestEmailDraft, setGuestEmailDraft] = useState("");
+  const [savingGuestEmail, setSavingGuestEmail] = useState(false);
   const [showReminders, setShowReminders] = useState(false);
 
   /** Invalida todas as leituras de bookings (agenda + painéis admin) após uma mutação. */
@@ -274,6 +266,7 @@ const AdminAgendaPage = () => {
   // Manual booking form
   const [manualLiberty, setManualLiberty] = useState("");
   const [manualGuestName, setManualGuestName] = useState("");
+  const [manualGuestEmail, setManualGuestEmail] = useState("");
   const [manualIsGuest, setManualIsGuest] = useState(false);
   const [manualSession, setManualSession] = useState("");
   const [manualMentor, setManualMentor] = useState("");
@@ -352,7 +345,7 @@ const AdminAgendaPage = () => {
     },
   });
   const allMentors = useMemo(
-    () => (demoEnabled ? [..._allMentors, ...demoMentorProfiles] : _allMentors),
+    () => (demoEnabled ? [..._allMentors, ...(demoMentorProfiles as MentorInfo[])] : _allMentors),
     [_allMentors, demoEnabled]
   );
 
@@ -852,7 +845,9 @@ const AdminAgendaPage = () => {
 
   const handleManualBook = async () => {
     if (submittingBook) return;
-    const hasParticipant = manualIsGuest ? manualGuestName.trim().length > 0 : !!manualLiberty;
+    const hasParticipant = manualIsGuest
+      ? manualGuestName.trim().length > 0 && manualGuestEmail.trim().includes("@")
+      : !!manualLiberty;
     if (!hasParticipant || !manualSession || !manualMentor || !manualTime || !manualDate) return;
     const endTime = computeEndTime(manualTime, manualSessionInfo?.duration_minutes);
     const isRetroactive = manualStatus === "completed";
@@ -885,6 +880,7 @@ const AdminAgendaPage = () => {
     const { data: createdBk, error } = await supabase.from("bookings").insert({
       liberty_id: manualIsGuest ? null : manualLiberty,
       guest_name: manualIsGuest ? manualGuestName.trim() : null,
+      guest_email: manualIsGuest ? manualGuestEmail.trim().toLowerCase() : null,
       mentor_id: manualMentor,
       session_id: manualSession,
       scheduled_date: manualDate,
@@ -905,16 +901,31 @@ const AdminAgendaPage = () => {
     }
     // Registro histórico não gera evento no Google Calendar nem Meet.
     if (createdBk?.id && !isRetroactive) {
+      const toastId = toast.loading("Criando sala Google Meet…");
       void invokeProvisionMeeting(createdBk.id).then((r) => {
-        if (r && !r.ok) {
-          toast.warning(r.error || r.message || "Sala Meet não criada — tente provisionar de novo.");
+        if (r?.ok && r.meet_url) {
+          toast.success("Sala Meet pronta", {
+            id: toastId,
+            description: "Abra a sessão para copiar o link ou enviar no WhatsApp.",
+          });
+          invalidateBookings();
+          return;
         }
+        if (r?.skipped) {
+          toast.dismiss(toastId);
+          return;
+        }
+        toast.error(r?.error || r?.message || "Sala Meet não criada", {
+          id: toastId,
+          duration: 12_000,
+        });
+        invalidateBookings();
       });
       supabase.functions.invoke("google-calendar-sync", { body: { booking_id: createdBk.id } }).catch((e) => console.warn("google-calendar-sync", e));
     }
 
     setShowManualModal(false);
-    setManualLiberty(""); setManualGuestName(""); setManualIsGuest(false);
+    setManualLiberty(""); setManualGuestName(""); setManualGuestEmail(""); setManualIsGuest(false);
     setManualSession(""); setManualMentor("");
     setManualTime("09:00"); setManualNotes(""); setLibertySearch(""); setManualDate("");
     setManualStatus("scheduled"); setManualConflict(null);
@@ -926,6 +937,7 @@ const AdminAgendaPage = () => {
   const openDrawer = (booking: BookingRow) => {
     // Mantém o status BRUTO no booking selecionado; o efetivo é derivado na hora de exibir.
     setSelectedBooking(booking);
+    setGuestEmailDraft(booking.guest_email || "");
     setEditStatus(toRawStatus(booking.status));
     setNewDate(booking.scheduled_date);
     setNewTime((booking.start_time || "09:00").substring(0, 5));
@@ -1049,22 +1061,80 @@ const AdminAgendaPage = () => {
       .maybeSingle();
     if (error || !data) return;
     setSelectedBooking(data as unknown as BookingRow);
+    setGuestEmailDraft((data as { guest_email?: string | null }).guest_email || "");
   };
 
   const handleProvisionMeet = async () => {
     if (!selectedBooking || provisioningMeet) return;
+    if (!selectedBooking.liberty_id && !(selectedBooking.guest_email || guestEmailDraft).trim().includes("@")) {
+      toast.error("Informe o e-mail do convidado antes de criar a sala Meet");
+      return;
+    }
     setProvisioningMeet(true);
+    const toastId = toast.loading("Criando sala Google Meet…");
     try {
+      // Garante e-mail do convidado no banco antes de provisionar.
+      const emailToSave = guestEmailDraft.trim().toLowerCase();
+      if (!selectedBooking.liberty_id && emailToSave.includes("@") && emailToSave !== (selectedBooking.guest_email || "").toLowerCase()) {
+        const { error: emailErr } = await supabase
+          .from("bookings")
+          .update({ guest_email: emailToSave })
+          .eq("id", selectedBooking.id);
+        if (emailErr) {
+          toast.error("Não foi possível salvar o e-mail do convidado", { id: toastId });
+          return;
+        }
+        setSelectedBooking({ ...selectedBooking, guest_email: emailToSave });
+      }
+
       const result = await invokeProvisionMeeting(selectedBooking.id, { force: true });
       await refreshSelectedBooking(selectedBooking.id);
       invalidateBookings();
-      if (result?.ok === false || result?.error) {
-        toast.error(result.error || result.message || "Não foi possível criar a sala Meet");
+      if (result?.ok === false || (result?.error && !result?.meet_url)) {
+        toast.error(friendlyMeetError(result.error || result.message || "Não foi possível criar a sala Meet"), {
+          id: toastId,
+          duration: 14_000,
+        });
+      } else if (result?.meet_url) {
+        if (result.access_warning) {
+          toast.warning("Sala Meet criada, mas o acesso aberto falhou", {
+            id: toastId,
+            description: friendlyMeetError(result.access_warning),
+            duration: 16_000,
+          });
+        } else {
+          toast.success("Sala Meet pronta", {
+            id: toastId,
+            description: "Quem tem o link entra sem aguardar admissão.",
+          });
+        }
       } else {
-        toast.success("Sala Meet criada");
+        toast.success("Sala Meet criada", { id: toastId });
       }
     } finally {
       setProvisioningMeet(false);
+    }
+  };
+
+  const saveGuestEmail = async () => {
+    if (!selectedBooking || savingGuestEmail) return;
+    const email = guestEmailDraft.trim().toLowerCase();
+    if (!email.includes("@")) {
+      toast.error("E-mail inválido");
+      return;
+    }
+    setSavingGuestEmail(true);
+    try {
+      const { error } = await supabase.from("bookings").update({ guest_email: email }).eq("id", selectedBooking.id);
+      if (error) {
+        toast.error("Erro ao salvar e-mail");
+        return;
+      }
+      setSelectedBooking({ ...selectedBooking, guest_email: email });
+      toast.success("E-mail do convidado salvo");
+      invalidateBookings();
+    } finally {
+      setSavingGuestEmail(false);
     }
   };
 
@@ -1075,12 +1145,8 @@ const AdminAgendaPage = () => {
     if (!selectedBooking) return;
     const mentorName =
       selectedBooking.mentor?.full_name || getMentorName(selectedBooking.mentor_id);
-    const text =
-      role === "member"
-        ? selectedBooking.meeting_wa_member_text ||
-          buildMeetingWaFallback(selectedBooking, "member", mentorName)
-        : selectedBooking.meeting_wa_mentor_text ||
-          buildMeetingWaFallback(selectedBooking, "mentor", mentorName);
+    // Sempre gera na hora (HOJE/AMANHÃ + NPS da plataforma), não usa texto antigo gravado.
+    const text = buildMeetingWaFallback(selectedBooking, role, mentorName);
     const phone =
       role === "member" ? selectedBooking.liberty?.phone ?? null : mentorPhoneFor(selectedBooking);
     const href = whatsappHref(phone, text);
@@ -1291,14 +1357,14 @@ const AdminAgendaPage = () => {
                   ))}
                 </div>
                 <div className="relative flex-1 min-w-[180px] sm:max-w-[260px]">
-                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground pointer-events-none" aria-hidden />
                   <TextField
                     type="search"
                     aria-label="Buscar aluno"
                     value={studentSearch}
                     onChange={(e) => setStudentSearch(e.target.value)}
                     placeholder="Buscar aluno"
-                    className="pl-10 h-9"
+                    leading={<Search />}
+                    className="h-9"
                   />
                 </div>
               </div>
@@ -1920,11 +1986,36 @@ const AdminAgendaPage = () => {
                   </a>
                 </Button>
               )}
-              {!selectedBooking.zoom_join_url && !selectedBooking.zoom_link && selectedBooking.status === "scheduled" && (
+
+              {!selectedBooking.liberty_id && selectedBooking.status === "scheduled" && (
+                <SectionCard padding="compact" className="space-y-2">
+                  <SectionHeader as="h3" title="Convidado externo" />
+                  <TextField
+                    label="E-mail do convidado"
+                    type="email"
+                    value={guestEmailDraft}
+                    onChange={(e) => setGuestEmailDraft(e.target.value)}
+                    placeholder="email@empresa.com"
+                    hint="Obrigatório para o Meet liberar a entrada sem “aguardar admissão”."
+                  />
+                  <Button
+                    variant="outline"
+                    className="w-full"
+                    disabled={savingGuestEmail || !guestEmailDraft.trim().includes("@")}
+                    onClick={saveGuestEmail}
+                  >
+                    {savingGuestEmail ? "Salvando…" : "Salvar e-mail"}
+                  </Button>
+                </SectionCard>
+              )}
+
+              {selectedBooking.status === "scheduled" && !selectedBooking.is_retroactive && (
                 <div className="space-y-2">
                   {selectedBooking.meeting_provision_error && (
-                    <Callout tone="danger" title="Falha ao criar Meet">
-                      {selectedBooking.meeting_provision_error}
+                    <Callout tone="danger" title="Atenção no Meet">
+                      <p className="text-sm whitespace-pre-wrap break-words">
+                        {friendlyMeetError(selectedBooking.meeting_provision_error)}
+                      </p>
                     </Callout>
                   )}
                   <Button
@@ -1933,8 +2024,38 @@ const AdminAgendaPage = () => {
                     disabled={provisioningMeet}
                     onClick={handleProvisionMeet}
                   >
-                    <Video className="h-4 w-4" /> {provisioningMeet ? "Criando…" : "Criar sala Meet"}
+                    <Video className="h-4 w-4" />{" "}
+                    {provisioningMeet
+                      ? "Criando…"
+                      : selectedBooking.zoom_join_url || selectedBooking.zoom_link
+                        ? "Recriar sala Meet"
+                        : "Criar sala Meet"}
                   </Button>
+                  {(selectedBooking.zoom_join_url || selectedBooking.zoom_link) && (
+                    <Button
+                      variant="outline"
+                      className="w-full"
+                      disabled={endingMeet}
+                      onClick={async () => {
+                        if (!selectedBooking || endingMeet) return;
+                        setEndingMeet(true);
+                        try {
+                          const r = await invokeEndMeeting(selectedBooking.id);
+                          if (r.ok === false || r.error) {
+                            toast.error(r.error || "Não foi possível encerrar o Meet");
+                            return;
+                          }
+                          toast.success("Meet encerrado para todos", {
+                            description: "Resumo Gemini chega em alguns minutos no e-mail da Liberty.",
+                          });
+                        } finally {
+                          setEndingMeet(false);
+                        }
+                      }}
+                    >
+                      <PhoneOff className="h-4 w-4" /> {endingMeet ? "Encerrando…" : "Encerrar Meet para todos"}
+                    </Button>
+                  )}
                 </div>
               )}
             </div>
@@ -2073,7 +2194,16 @@ const AdminAgendaPage = () => {
             <Button
               onClick={handleManualBook}
               variant={manualConflict ? "destructive" : "default"}
-              disabled={submittingBook || (manualIsGuest ? !manualGuestName.trim() : !manualLiberty) || !manualSession || !manualMentor || !manualTime || !manualDate}
+              disabled={
+                submittingBook ||
+                (manualIsGuest
+                  ? !manualGuestName.trim() || !manualGuestEmail.trim().includes("@")
+                  : !manualLiberty) ||
+                !manualSession ||
+                !manualMentor ||
+                !manualTime ||
+                !manualDate
+              }
             >
               {submittingBook ? "Agendando" : manualConflict ? "Forçar mesmo assim" : "Criar agendamento"}
             </Button>
@@ -2084,18 +2214,17 @@ const AdminAgendaPage = () => {
           <div className="space-y-2">
             <p className="text-sm font-medium text-foreground">Participante</p>
             <div className="flex gap-2" role="group" aria-label="Tipo de participante">
-              <Chip active={!manualIsGuest} onClick={() => { setManualIsGuest(false); setManualGuestName(""); }}>Membro da plataforma</Chip>
+              <Chip active={!manualIsGuest} onClick={() => { setManualIsGuest(false); setManualGuestName(""); setManualGuestEmail(""); }}>Membro da plataforma</Chip>
               <Chip active={manualIsGuest} onClick={() => { setManualIsGuest(true); setManualLiberty(""); setLibertySearch(""); }}>Convidado externo</Chip>
             </div>
             {!manualIsGuest ? (
               <div className="relative">
-                <Search className="absolute left-3 top-[38px] -translate-y-1/2 h-4 w-4 text-muted-foreground pointer-events-none" aria-hidden />
                 <TextField
                   label="Membro"
                   value={libertySearch}
                   onChange={(e) => { setLibertySearch(e.target.value); setManualLiberty(""); }}
                   placeholder="Buscar membro por nome"
-                  className="pl-10"
+                  leading={<Search />}
                   hint={manualLiberty ? "Membro selecionado" : undefined}
                   autoComplete="off"
                 />
@@ -2116,13 +2245,24 @@ const AdminAgendaPage = () => {
                 )}
               </div>
             ) : (
-              <TextField
-                label="Convidado"
-                value={manualGuestName}
-                onChange={(e) => setManualGuestName(e.target.value)}
-                placeholder="Nome completo do convidado"
-                maxLength={120}
-              />
+              <div className="space-y-3">
+                <TextField
+                  label="Convidado"
+                  value={manualGuestName}
+                  onChange={(e) => setManualGuestName(e.target.value)}
+                  placeholder="Nome completo do convidado"
+                  maxLength={120}
+                />
+                <TextField
+                  label="E-mail do convidado"
+                  type="email"
+                  value={manualGuestEmail}
+                  onChange={(e) => setManualGuestEmail(e.target.value)}
+                  placeholder="email@empresa.com"
+                  hint="Entra no convite do Meet/Calendar — sem isso a pessoa pode ficar “aguardando admissão”."
+                  autoComplete="email"
+                />
+              </div>
             )}
           </div>
 

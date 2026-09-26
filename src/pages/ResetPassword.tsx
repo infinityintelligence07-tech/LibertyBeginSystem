@@ -189,30 +189,29 @@ const ResetPasswordPage = () => {
             )}
 
             <form onSubmit={handleReset} className="space-y-4">
-              <div className="relative">
-                <TextField
-                  id="new-password"
-                  name="new-password"
-                  type={showPassword ? "text" : "password"}
-                  label="Nova senha"
-                  autoComplete="new-password"
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                  placeholder="Nova senha"
-                  className="pr-12"
-                  required
-                  minLength={MIN_PASSWORD_LENGTH}
-                />
-                <IconButton
-                  aria-label={showPassword ? "Ocultar senha" : "Mostrar senha"}
-                  aria-pressed={showPassword}
-                  size="sm"
-                  onClick={() => setShowPassword(!showPassword)}
-                  className="absolute right-1 bottom-0.5 h-10 w-10"
-                >
-                  {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
-                </IconButton>
-              </div>
+              <TextField
+                id="new-password"
+                name="new-password"
+                type={showPassword ? "text" : "password"}
+                label="Nova senha"
+                autoComplete="new-password"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                placeholder="Nova senha"
+                required
+                minLength={MIN_PASSWORD_LENGTH}
+                trailing={
+                  <IconButton
+                    aria-label={showPassword ? "Ocultar senha" : "Mostrar senha"}
+                    aria-pressed={showPassword}
+                    size="sm"
+                    onClick={() => setShowPassword(!showPassword)}
+                    className="h-10 w-10"
+                  >
+                    {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                  </IconButton>
+                }
+              />
 
               <TextField
                 id="confirm-password"

@@ -99,6 +99,22 @@ export const todayPlatformDate = (now = new Date()) => {
 export const getBookingEndDate = (booking: BookingTiming) =>
   parseBookingDateTime(booking.scheduled_date, booking.end_time || booking.start_time);
 
+export const getBookingStartDate = (booking: BookingTiming) =>
+  parseBookingDateTime(booking.scheduled_date, booking.start_time);
+
+/** Sessão no horário (ou janela curta antes/depois) — para destacar Encerrar Meet no mentor. */
+export const isSessionHappeningNow = (booking: BookingTiming, now = new Date()) => {
+  const raw = booking.status || "scheduled";
+  if (raw !== "scheduled" && raw !== "rescheduled") return false;
+  const start = getBookingStartDate(booking);
+  const end = getBookingEndDate(booking);
+  if (!start || !end) return false;
+  const t = now.getTime();
+  const graceBeforeMs = 15 * 60_000;
+  const graceAfterMs = 45 * 60_000;
+  return t >= start.getTime() - graceBeforeMs && t <= end.getTime() + graceAfterMs;
+};
+
 export const isBookingPast = (booking: BookingTiming, now = new Date()) => {
   const endDate = getBookingEndDate(booking);
   return endDate ? endDate.getTime() <= now.getTime() : false;

@@ -33,16 +33,45 @@ async function refreshAccessToken(refreshToken: string, admin: Parameters<typeof
   return data.access_token as string;
 }
 
-function formatBrDate(date: string): string {
-  const [y, m, d] = date.split("-");
-  return `${d}/${m}/${y}`;
-}
-
 function formatBrTime(time: string): string {
   return time.slice(0, 5);
 }
 
+const APP_ORIGIN_DEFAULT = "https://begin.libertymentoria.com.br";
+
+function ymdInSaoPaulo(d: Date): string {
+  return new Intl.DateTimeFormat("en-CA", {
+    timeZone: "America/Sao_Paulo",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(d);
+}
+
+function relativeSessionDayLabel(dateYmd: string, now = new Date()): string {
+  const today = ymdInSaoPaulo(now);
+  if (dateYmd === today) return "HOJE";
+  const tomorrowBase = new Date(`${today}T12:00:00-03:00`);
+  tomorrowBase.setTime(tomorrowBase.getTime() + 24 * 60 * 60 * 1000);
+  if (dateYmd === ymdInSaoPaulo(tomorrowBase)) return "AMANHÃ";
+  return new Intl.DateTimeFormat("pt-BR", {
+    weekday: "long",
+    timeZone: "America/Sao_Paulo",
+  })
+    .format(new Date(`${dateYmd}T12:00:00-03:00`))
+    .toUpperCase()
+    .replace("-FEIRA", "");
+}
+
+function sessionPhrase(sessionName: string): string {
+  const n = sessionName.trim() || "Mentoria";
+  if (/^sess[aã]o\b/i.test(n)) return n;
+  return `Sessão de ${n}`;
+}
+
+/** Copy WA: aluno sem NPS; mentor com lembrete + link NPS da plataforma. */
 function buildWaTexts(opts: {
+  bookingId: string;
   memberName: string;
   mentorName: string;
   sessionName: string;
@@ -50,33 +79,74 @@ function buildWaTexts(opts: {
   start: string;
   end: string;
   meetUrl: string;
+  appOrigin?: string;
 }): { member: string; mentor: string } {
-  const when = `${formatBrDate(opts.date)} · ${formatBrTime(opts.start)}–${formatBrTime(opts.end)}`;
-  const member = [
-    `Oi, ${opts.memberName.split(" ")[0] || "tudo bem"}!`,
+  const origin = (opts.appOrigin || Deno.env.get("APP_URL") || APP_ORIGIN_DEFAULT).replace(/\/$/, "");
+  const day = relativeSessionDayLabel(opts.date);
+  const [, m, d] = opts.date.split("-");
+  const dateShort = `${d}/${m}`;
+  const timeH = `${formatBrTime(opts.start)}H`;
+  const session = sessionPhrase(opts.sessionName);
+  const meetUrl = (opts.meetUrl || "").trim();
+  const npsUrl = `${origin}/nps/${opts.bookingId}`;
+
+  const headline = "Estou passando para lembrá-lo da sua Sessão do Liberty Begin.";
+  const mentorSessionLine = [
+    day,
+    dateShort,
+    timeH,
+    "membro Liberty Begin",
+    opts.memberName.trim() || "Aluno",
+    session,
+  ].join(" - ");
+  const memberSessionLine = [
+    day,
+    dateShort,
+    timeH,
+    "mentor",
+    opts.mentorName.trim() || "Mentor",
+    session,
+  ].join(" - ");
+  const meetBlock = meetUrl
+    ? `Ingressar na reunião Meet\n${meetUrl}`
+    : "O link da reunião Meet será enviado em breve.";
+  const npsBlock = [
+    `🚨 Lembrete`,
+    `Confira com o Liberty Begin se abriu corretamente o link para a pesquisa de NPS 🙏🏼😊`,
+    `Link para a pesquisa 👇🏼👇🏼`,
     ``,
-    `Sua sessão *${opts.sessionName}* com ${opts.mentorName} está confirmada.`,
-    `📅 ${when}`,
-    ``,
-    `Link do Google Meet (navegador):`,
-    opts.meetUrl,
-    ``,
-    `Qualquer imprevisto, avise a equipe Liberty.`,
+    `📝 Clique aqui para avaliar a sessão: ${npsUrl}`,
   ].join("\n");
 
-  const mentor = [
-    `Oi, ${opts.mentorName.split(" ")[0] || "mentor"}!`,
-    ``,
-    `Sessão *${opts.sessionName}* com ${opts.memberName}.`,
-    `📅 ${when}`,
-    ``,
-    `Entre pelo Google Meet no navegador (não precisa de conta Zoom):`,
-    opts.meetUrl,
-    ``,
-    `Ative/confirme as notas com Gemini se o Meet pedir.`,
-  ].join("\n");
+  return {
+    member: [headline, ``, memberSessionLine, ``, meetBlock].join("\n"),
+    mentor: [headline, ``, mentorSessionLine, ``, meetBlock, ``, npsBlock].join("\n"),
+  };
+}
 
-  return { member, mentor };
+/** Traduz erros da Calendar API para mensagem curta e acionável. */
+function humanizeCalendarApiError(data: unknown): string {
+  const raw = typeof data === "string" ? data : JSON.stringify(data ?? {});
+  const msg =
+    (data as { error?: { message?: string; status?: string } })?.error?.message ||
+    (data as { message?: string })?.message ||
+    raw;
+
+  if (/Calendar API has not been used|SERVICE_DISABLED|accessNotConfigured|calendar-json\.googleapis\.com/i.test(msg + raw)) {
+    return (
+      "A API Google Calendar está desativada no Google Cloud. " +
+      "Ative em: https://console.cloud.google.com/apis/library/calendar-json.googleapis.com?project=430819812839 " +
+      "Espere 1–2 min e clique em Criar sala Meet."
+    );
+  }
+  if (/invalid_grant|Token has been expired or revoked/i.test(msg)) {
+    return "Token Google da conta host expirou. Entre como membrosliberty@gmail.com e reconecte o Google Agenda.";
+  }
+  if (/insufficientPermissions|Insufficient Permission/i.test(msg)) {
+    return "A conta host não tem permissão de Calendar/Meet. Reconecte o Google Agenda aceitando todos os escopos.";
+  }
+  const short = String(msg).slice(0, 240);
+  return `Falha ao criar Meet: ${short}`;
 }
 
 async function createMeetViaCalendar(
@@ -89,7 +159,7 @@ async function createMeetViaCalendar(
     attendeeEmails: string[];
     existingEventId?: string | null;
   },
-): Promise<{ eventId: string; meetUrl: string }> {
+): Promise<{ eventId: string; meetUrl: string; meetingCode: string | null }> {
   const requestId = crypto.randomUUID();
   const body = {
     summary: opts.title,
@@ -97,6 +167,9 @@ async function createMeetViaCalendar(
     start: { dateTime: opts.startISO, timeZone: "America/Sao_Paulo" },
     end: { dateTime: opts.endISO, timeZone: "America/Sao_Paulo" },
     attendees: opts.attendeeEmails.map((email) => ({ email })),
+    guestsCanModify: false,
+    guestsCanInviteOthers: true,
+    guestsCanSeeOtherGuests: true,
     conferenceData: {
       createRequest: {
         requestId,
@@ -119,7 +192,7 @@ async function createMeetViaCalendar(
   });
   const data = await res.json();
   if (!res.ok) {
-    throw new Error("Calendar/Meet falhou: " + JSON.stringify(data));
+    throw new Error(humanizeCalendarApiError(data));
   }
 
   const meetUrl =
@@ -132,7 +205,186 @@ async function createMeetViaCalendar(
     throw new Error("Evento criado sem link Meet. Verifique se a conta host tem Google Meet habilitado.");
   }
 
-  return { eventId: data.id as string, meetUrl };
+  const meetingCode =
+    (typeof data.conferenceData?.conferenceId === "string" && data.conferenceData.conferenceId) ||
+    meetUrl.replace(/^https?:\/\/meet\.google\.com\//, "").split("?")[0] ||
+    null;
+
+  return { eventId: data.id as string, meetUrl, meetingCode };
+}
+
+/**
+ * Abre a sala (OPEN) e liga notas Gemini + transcrição automáticas.
+ * Feito na criação — não exige alguém entrar com membrosLiberty a cada sessão.
+ */
+async function configureMeetSpace(accessToken: string, meetingCode: string): Promise<void> {
+  const code = meetingCode.trim();
+  if (!code) return;
+
+  const getRes = await fetch(`https://meet.googleapis.com/v2/spaces/${encodeURIComponent(code)}`, {
+    headers: { Authorization: `Bearer ${accessToken}` },
+  });
+  const getData = await getRes.json().catch(() => ({}));
+  if (!getRes.ok) {
+    throw new Error(humanizeMeetApiError(getData));
+  }
+  const spaceName = typeof getData.name === "string" ? getData.name : `spaces/${code}`;
+
+  // OPEN primeiro (crítico para convidado externo entrar sem “aguardar admissão”).
+  const openRes = await fetch(
+    `https://meet.googleapis.com/v2/${spaceName}?updateMask=config.accessType`,
+    {
+      method: "PATCH",
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ config: { accessType: "OPEN" } }),
+    },
+  );
+  const openData = await openRes.json().catch(() => ({}));
+  if (!openRes.ok) {
+    throw new Error(humanizeMeetApiError(openData));
+  }
+
+  // Notas/transcrição: best-effort (plano Gemini já ok na host).
+  const notesRes = await fetch(
+    `https://meet.googleapis.com/v2/${spaceName}?updateMask=config.artifactConfig.smartNotesConfig.autoSmartNotesGeneration,config.artifactConfig.transcriptionConfig.autoTranscriptionGeneration`,
+    {
+      method: "PATCH",
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        config: {
+          artifactConfig: {
+            smartNotesConfig: { autoSmartNotesGeneration: "ON" },
+            transcriptionConfig: { autoTranscriptionGeneration: "ON" },
+          },
+        },
+      }),
+    },
+  );
+  if (!notesRes.ok) {
+    const notesData = await notesRes.json().catch(() => ({}));
+    console.warn("auto artifacts Meet", notesData);
+  }
+}
+
+function humanizeMeetApiError(data: unknown): string {
+  const raw = typeof data === "string" ? data : JSON.stringify(data ?? {});
+  const msg =
+    (data as { error?: { message?: string; status?: string } })?.error?.message ||
+    (data as { message?: string })?.message ||
+    raw;
+
+  if (/Meet API has not been used|SERVICE_DISABLED|accessNotConfigured|meet\.googleapis\.com/i.test(msg + raw)) {
+    return (
+      "A API Google Meet está desativada no Google Cloud. " +
+      "Ative em: https://console.cloud.google.com/apis/library/meet.googleapis.com?project=430819812839 " +
+      "Espere 1–2 min e clique em Criar sala Meet."
+    );
+  }
+  if (/insufficientPermissions|Insufficient Permission|PERMISSION_DENIED/i.test(msg + raw)) {
+    return (
+      "Sem permissão para abrir a sala Meet / notas automáticas. " +
+      "Reconecte o Google da conta host aceitando os escopos de Meet (settings)."
+    );
+  }
+  if (/smartNotes|Smart notes|Gemini|not.*supported|FAILED_PRECONDITION|not enabled|not available/i.test(msg + raw)) {
+    return (
+      "A conta host não tem “Anota pra Mim” / Gemini liberado no plano Google. " +
+      "Sem isso o Meet abre, mas notas/transcrição automáticas não ligam. " +
+      "Confira o plano em https://one.google.com (Google AI) na conta membrosLiberty."
+    );
+  }
+  return `Falha ao configurar acesso do Meet: ${String(msg).slice(0, 240)}`;
+}
+
+async function resolveHostAccessToken(
+  admin: Awaited<ReturnType<typeof requireRole>>["supabaseAdmin"],
+): Promise<{ accessToken: string; hostEmail: string } | { error: string }> {
+  const { data: hosts } = await admin
+    .from("meeting_hosts")
+    .select("id, email, label, profile_id")
+    .eq("is_active", true)
+    .order("sort_order", { ascending: true })
+    .limit(5);
+
+  let host = (hosts?.[0] || null) as HostRow | null;
+  if (!host) {
+    const { data: cfg } = await admin.from("system_config").select("value").eq("key", "meeting_host_email").maybeSingle();
+    const email = (cfg?.value || "membrosliberty@gmail.com").trim();
+    const { data: inserted } = await admin
+      .from("meeting_hosts")
+      .upsert({ label: "Liberty Meet", email, is_active: true, sort_order: 0 }, { onConflict: "email" })
+      .select("id, email, label, profile_id")
+      .single();
+    host = inserted as HostRow;
+  }
+
+  let profileId = host.profile_id;
+  if (!profileId) {
+    const { data: p } = await admin.from("profiles").select("id").ilike("email", host.email).maybeSingle();
+    profileId = p?.id ?? null;
+    if (profileId) {
+      await admin.from("meeting_hosts").update({ profile_id: profileId }).eq("id", host.id);
+    }
+  }
+  if (!profileId) {
+    return { error: `Conta host ${host.email} não tem perfil no Liberty. Conecte o Google (OAuth).` };
+  }
+
+  const { data: tokenRow } = await admin
+    .from("user_oauth_tokens")
+    .select("google_refresh_token")
+    .eq("profile_id", profileId)
+    .maybeSingle();
+  if (!tokenRow?.google_refresh_token) {
+    return { error: `Conecte o Google da conta host (${host.email}) em Perfil → Google Agenda.` };
+  }
+
+  try {
+    const accessToken = await refreshAccessToken(tokenRow.google_refresh_token, admin);
+    return { accessToken, hostEmail: host.email };
+  } catch (e) {
+    return { error: e instanceof Error ? e.message : String(e) };
+  }
+}
+
+/** Encerra a call ativa para todos (sem precisar entrar como membrosLiberty). */
+async function endActiveMeetConference(accessToken: string, meetingCode: string): Promise<void> {
+  const code = meetingCode.trim();
+  if (!code) throw new Error("Código da sala Meet ausente.");
+
+  const getRes = await fetch(`https://meet.googleapis.com/v2/spaces/${encodeURIComponent(code)}`, {
+    headers: { Authorization: `Bearer ${accessToken}` },
+  });
+  const getData = await getRes.json().catch(() => ({}));
+  if (!getRes.ok) throw new Error(humanizeMeetApiError(getData));
+
+  const spaceName = typeof getData.name === "string" ? getData.name : `spaces/${code}`;
+  const endRes = await fetch(`https://meet.googleapis.com/v2/${spaceName}:endActiveConference`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+      "Content-Type": "application/json",
+    },
+    body: "{}",
+  });
+  if (!endRes.ok) {
+    const endData = await endRes.json().catch(() => ({}));
+    // Sem call ativa = já encerrada; trata como sucesso.
+    const msg = JSON.stringify(endData);
+    if (/FAILED_PRECONDITION|not found|no active|ACTIVE_CONFERENCE/i.test(msg) && /404|400|409|412/.test(String(endRes.status))) {
+      return;
+    }
+    if (endRes.status === 404 || /no active conference|does not have an active/i.test(msg)) {
+      return;
+    }
+    throw new Error(humanizeMeetApiError(endData));
+  }
 }
 
 Deno.serve(async (req) => {
@@ -150,7 +402,7 @@ Deno.serve(async (req) => {
     const { data: booking, error: bErr } = await admin
       .from("bookings")
       .select(
-        "id, status, scheduled_date, start_time, end_time, mentor_id, liberty_id, guest_name, session_id, zoom_join_url, meeting_calendar_event_id, is_retroactive, created_by",
+        "id, status, scheduled_date, start_time, end_time, mentor_id, liberty_id, guest_name, guest_email, session_id, zoom_join_url, meeting_space_name, meeting_calendar_event_id, is_retroactive, created_by",
       )
       .eq("id", bookingId)
       .single();
@@ -169,6 +421,45 @@ Deno.serve(async (req) => {
         (myProfile?.id && booking.liberty_id === myProfile.id) ||
         booking.created_by === ctx.user?.id;
       if (!owns) return errorJson("Forbidden", 403);
+    }
+
+    // Encerrar call para todos via API da host — mentor da sessão ou admin.
+    if (payload.action === "end") {
+      if (!isStaff) return errorJson("Forbidden", 403);
+
+      const isAdmin = ctx.roles.some((r) => r === "admin" || r === "super_admin");
+      if (!isAdmin) {
+        const { data: myProfile } = await admin
+          .from("profiles")
+          .select("id")
+          .eq("user_id", ctx.user?.id || "")
+          .maybeSingle();
+        if (!myProfile?.id || booking.mentor_id !== myProfile.id) {
+          return errorJson("Só o mentor desta sessão (ou um admin) pode encerrar o Meet.", 403);
+        }
+      }
+
+      const meetingCode =
+        (typeof booking.meeting_space_name === "string" && booking.meeting_space_name) ||
+        (booking.zoom_join_url || "").replace(/^https?:\/\/meet\.google\.com\//, "").split("?")[0] ||
+        "";
+      if (!meetingCode) {
+        return errorJson("Esta sessão ainda não tem sala Meet para encerrar.", 400);
+      }
+      const hostTok = await resolveHostAccessToken(admin);
+      if ("error" in hostTok) return errorJson(hostTok.error, 400);
+      try {
+        await endActiveMeetConference(hostTok.accessToken, meetingCode);
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : String(e);
+        return errorJson(msg, 500);
+      }
+      return json({
+        ok: true,
+        ended: true,
+        message:
+          "Reunião encerrada para todos. O resumo/transcrição chega em alguns minutos no e-mail da conta host (membrosliberty).",
+      });
     }
 
     if (booking.is_retroactive) {
@@ -191,6 +482,7 @@ Deno.serve(async (req) => {
         ? await admin.from("profiles").select("full_name, phone, email").eq("id", booking.liberty_id).maybeSingle()
         : { data: null };
       const texts = buildWaTexts({
+        bookingId,
         memberName: liberty?.full_name || booking.guest_name || "Aluno",
         mentorName: mentor?.full_name || "Mentor",
         sessionName: session?.name || "Mentoria",
@@ -216,59 +508,21 @@ Deno.serve(async (req) => {
       });
     }
 
+    const hostTok = await resolveHostAccessToken(admin);
+    if ("error" in hostTok) {
+      await admin.from("bookings").update({ meeting_provision_error: hostTok.error }).eq("id", bookingId);
+      return errorJson(hostTok.error, 400);
+    }
+    const accessToken = hostTok.accessToken;
+    const hostEmail = hostTok.hostEmail;
+
     const { data: hosts } = await admin
       .from("meeting_hosts")
       .select("id, email, label, profile_id")
       .eq("is_active", true)
       .order("sort_order", { ascending: true })
-      .limit(5);
-
-    let host = (hosts?.[0] || null) as HostRow | null;
-
-    if (!host) {
-      const { data: cfg } = await admin.from("system_config").select("value").eq("key", "meeting_host_email").maybeSingle();
-      const email = (cfg?.value || "membrosliberty@gmail.com").trim();
-      const { data: inserted } = await admin
-        .from("meeting_hosts")
-        .upsert({ label: "Liberty Meet", email, is_active: true, sort_order: 0 }, { onConflict: "email" })
-        .select("id, email, label, profile_id")
-        .single();
-      host = inserted as HostRow;
-    }
-
-    let profileId = host.profile_id;
-    if (!profileId) {
-      const { data: p } = await admin
-        .from("profiles")
-        .select("id")
-        .ilike("email", host.email)
-        .maybeSingle();
-      profileId = p?.id ?? null;
-      if (profileId) {
-        await admin.from("meeting_hosts").update({ profile_id: profileId }).eq("id", host.id);
-      }
-    }
-
-    if (!profileId) {
-      const msg =
-        `Conta host ${host.email} não tem perfil no Liberty. Crie/vincule o perfil e conecte o Google (OAuth).`;
-      await admin.from("bookings").update({ meeting_provision_error: msg }).eq("id", bookingId);
-      return errorJson(msg, 400);
-    }
-
-    const { data: tokenRow } = await admin
-      .from("user_oauth_tokens")
-      .select("google_refresh_token")
-      .eq("profile_id", profileId)
-      .maybeSingle();
-
-    const refresh = tokenRow?.google_refresh_token;
-    if (!refresh) {
-      const msg =
-        `Conecte o Google da conta host (${host.email}) em Perfil → Google Agenda (com permissão de Meet/Calendar).`;
-      await admin.from("bookings").update({ meeting_provision_error: msg }).eq("id", bookingId);
-      return errorJson(msg, 400);
-    }
+      .limit(1);
+    const host = (hosts?.[0] || { id: null, email: hostEmail }) as HostRow;
 
     const { data: session } = await admin.from("sessions").select("name, description").eq("id", booking.session_id).maybeSingle();
     const { data: mentor } = await admin
@@ -285,19 +539,18 @@ Deno.serve(async (req) => {
     const sessionName = session?.name || "Mentoria";
     const startISO = `${booking.scheduled_date}T${booking.start_time}-03:00`;
     const endISO = `${booking.scheduled_date}T${booking.end_time}-03:00`;
-    const attendeeEmails = [mentor?.email, liberty?.email].filter(Boolean) as string[];
-
-    let accessToken: string;
-    try {
-      accessToken = await refreshAccessToken(refresh, admin);
-    } catch (e) {
-      const msg = e instanceof Error ? e.message : String(e);
-      await admin.from("bookings").update({ meeting_provision_error: msg }).eq("id", bookingId);
-      return errorJson(msg, 500);
-    }
+    const guestEmail =
+      typeof booking.guest_email === "string" ? booking.guest_email.trim().toLowerCase() : "";
+    const attendeeEmails = [...new Set(
+      [mentor?.email, liberty?.email, guestEmail || null]
+        .map((e) => (typeof e === "string" ? e.trim().toLowerCase() : ""))
+        .filter((e) => e.includes("@")),
+    )];
 
     let meetUrl: string;
     let eventId: string;
+    let meetingCode: string | null = null;
+    let accessWarning: string | null = null;
     try {
       const created = await createMeetViaCalendar(accessToken, {
         title: `Sessão: ${sessionName} — ${memberName}`,
@@ -307,7 +560,8 @@ Deno.serve(async (req) => {
           `Mentor: ${mentorName}`,
           session?.description || "",
           ``,
-          `Notas/transcrição: use Gemini no Meet se disponível na conta host.`,
+          `Sala aberta: quem tem o link entra sem aguardar admissão.`,
+          `Notas Gemini + transcrição: ligadas automaticamente na criação da sala (se o plano Google da host permitir).`,
         ].join("\n"),
         startISO,
         endISO,
@@ -316,13 +570,24 @@ Deno.serve(async (req) => {
       });
       meetUrl = created.meetUrl;
       eventId = created.eventId;
+      meetingCode = created.meetingCode;
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
       await admin.from("bookings").update({ meeting_provision_error: msg }).eq("id", bookingId);
       return errorJson(msg, 500);
     }
 
+    if (meetingCode) {
+      try {
+        await configureMeetSpace(accessToken, meetingCode);
+      } catch (e) {
+        accessWarning = e instanceof Error ? e.message : String(e);
+        console.warn("configureMeetSpace", accessWarning);
+      }
+    }
+
     const texts = buildWaTexts({
+      bookingId,
       memberName,
       mentorName,
       sessionName,
@@ -344,7 +609,7 @@ Deno.serve(async (req) => {
         meeting_wa_member_text: texts.member,
         meeting_wa_mentor_text: texts.mentor,
         meeting_provisioned_at: new Date().toISOString(),
-        meeting_provision_error: null,
+        meeting_provision_error: accessWarning,
       })
       .eq("id", bookingId);
 
@@ -371,9 +636,10 @@ Deno.serve(async (req) => {
       ok: true,
       meet_url: meetUrl,
       event_id: eventId,
-      host_email: host.email,
+      host_email: hostEmail,
       wa_member: texts.member,
       wa_mentor: texts.mentor,
+      access_warning: accessWarning,
     });
   } catch (e) {
     return toResponse(e);

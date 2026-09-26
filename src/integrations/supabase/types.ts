@@ -88,6 +88,7 @@ export type Database = {
           google_event_id_liberty: string | null
           google_event_id_mentor: string | null
           guest_name: string | null
+          guest_email: string | null
           id: string
           is_retroactive: boolean
           liberty_id: string | null
@@ -123,6 +124,7 @@ export type Database = {
           google_event_id_liberty?: string | null
           google_event_id_mentor?: string | null
           guest_name?: string | null
+          guest_email?: string | null
           id?: string
           is_retroactive?: boolean
           liberty_id?: string | null
@@ -158,6 +160,7 @@ export type Database = {
           google_event_id_liberty?: string | null
           google_event_id_mentor?: string | null
           guest_name?: string | null
+          guest_email?: string | null
           id?: string
           is_retroactive?: boolean
           liberty_id?: string | null

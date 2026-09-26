@@ -35,23 +35,52 @@ type BaseFieldProps = {
   containerClassName?: string;
 };
 
-export type TextFieldProps = BaseFieldProps & InputHTMLAttributes<HTMLInputElement>;
+export type TextFieldProps = BaseFieldProps &
+  InputHTMLAttributes<HTMLInputElement> & {
+    /** Ícone à esquerda do input (centralizado na caixa, independente do rótulo). */
+    leading?: ReactNode;
+    /** Conteúdo à direita do input (olho de senha, %, etc.) — centrado só na caixa. */
+    trailing?: ReactNode;
+  };
 
 /** Campo de texto padrão: rótulo + input 44px (mobile) / 40px + ajuda ou erro. Substitui `input-begin` solto. */
 export const TextField = forwardRef<HTMLInputElement, TextFieldProps>(
-  ({ label, hint, error, containerClassName, className, id, required, ...props }, ref) => {
+  ({ label, hint, error, containerClassName, className, id, required, leading, trailing, ...props }, ref) => {
     const autoId = useId();
     const fieldId = id ?? autoId;
+    const input = (
+      <input
+        ref={ref}
+        id={fieldId}
+        required={required}
+        aria-invalid={error ? true : undefined}
+        className={cn("input-begin", leading && "pl-10", trailing && "pr-12", className)}
+        {...props}
+      />
+    );
+    const adorned = leading || trailing ? (
+      <div className="relative">
+        {leading ? (
+          <span
+            className="pointer-events-none absolute left-3 top-1/2 z-[1] flex h-4 w-4 -translate-y-1/2 items-center justify-center text-muted-foreground [&>svg]:h-4 [&>svg]:w-4"
+            aria-hidden
+          >
+            {leading}
+          </span>
+        ) : null}
+        {input}
+        {trailing ? (
+          <span className="absolute right-1 top-1/2 z-[1] flex -translate-y-1/2 items-center text-muted-foreground">
+            {trailing}
+          </span>
+        ) : null}
+      </div>
+    ) : (
+      input
+    );
     return (
       <FieldShell label={label} hint={hint} error={error} required={required} className={containerClassName} htmlFor={fieldId}>
-        <input
-          ref={ref}
-          id={fieldId}
-          required={required}
-          aria-invalid={error ? true : undefined}
-          className={cn("input-begin", className)}
-          {...props}
-        />
+        {adorned}
       </FieldShell>
     );
   },
