@@ -1,4 +1,4 @@
-import { useState, useMemo, useEffect, type ReactNode } from "react";
+import { useState, useMemo, useEffect, type CSSProperties, type ReactNode } from "react";
 import { useSearchParams } from "react-router-dom";
 import { AppLayout } from "@/components/AppLayout";
 import {
@@ -131,6 +131,7 @@ interface MentorInfo {
   full_name: string;
   avatar_url?: string | null;
   phone?: string | null;
+  is_active?: boolean | null;
 }
 
 interface BookingRow {
@@ -193,20 +194,54 @@ const meetingOpenLabel = (url: string | null | undefined): string =>
   url?.includes("meet.google.com") ? "Abrir Meet" : "Abrir reunião";
 
 /* ───── Constants ───── */
-// 9 distinct hues, one per mentor (cycles only if >9 mentors)
-// Superfície neutra; a identidade do mentor fica só no ponto e na borda esquerda do bloco.
+// Identidade do mentor: ponto + borda esquerda. Matizes fora da paleta de status
+// (azul/verde/amarelo/laranja/vermelho) para não confundir com filtros de sessão.
 const MENTOR_HEADER = "bg-card border-b border-border";
-const mentorColors = [
-  { header: MENTOR_HEADER, dot: "bg-status-blue", text: "text-muted-foreground", bg: "bg-card border-border border-l-2 border-l-status-blue" },
-  { header: MENTOR_HEADER, dot: "bg-status-green", text: "text-muted-foreground", bg: "bg-card border-border border-l-2 border-l-status-green" },
-  { header: MENTOR_HEADER, dot: "bg-status-yellow", text: "text-muted-foreground", bg: "bg-card border-border border-l-2 border-l-status-yellow" },
-  { header: MENTOR_HEADER, dot: "bg-destructive", text: "text-muted-foreground", bg: "bg-card border-border border-l-2 border-l-destructive" },
-  { header: MENTOR_HEADER, dot: "bg-primary", text: "text-muted-foreground", bg: "bg-card border-border border-l-2 border-l-primary" },
-  { header: MENTOR_HEADER, dot: "bg-status-orange", text: "text-muted-foreground", bg: "bg-card border-border border-l-2 border-l-status-orange" },
-  { header: MENTOR_HEADER, dot: "bg-silver-light", text: "text-muted-foreground", bg: "bg-card border-border border-l-2 border-l-silver-light" },
-  { header: MENTOR_HEADER, dot: "bg-muted-foreground", text: "text-muted-foreground", bg: "bg-card border-border border-l-2 border-l-muted-foreground" },
-  { header: MENTOR_HEADER, dot: "bg-accent-foreground", text: "text-muted-foreground", bg: "bg-card border-border border-l-2 border-l-accent-foreground" },
-];
+const MENTOR_ACCENTS = [
+  "hsl(270 48% 62%)", // violeta
+  "hsl(185 52% 45%)", // ciano
+  "hsl(320 45% 58%)", // magenta
+  "hsl(162 42% 42%)", // teal
+  "hsl(248 48% 64%)", // índigo
+  "hsl(300 40% 58%)", // fúcsia
+  "hsl(95 40% 48%)", // chartreuse
+  "hsl(345 48% 58%)", // rosa
+  "hsl(210 18% 58%)", // slate
+] as const;
+
+type MentorColor = {
+  header: string;
+  accent: string;
+  text: string;
+  bg: string;
+};
+
+const mentorColorAt = (index: number): MentorColor => ({
+  header: MENTOR_HEADER,
+  accent: MENTOR_ACCENTS[((index % MENTOR_ACCENTS.length) + MENTOR_ACCENTS.length) % MENTOR_ACCENTS.length],
+  text: "text-muted-foreground",
+  bg: "bg-card border-border border-l-2",
+});
+
+/** Sessão ainda "aberta" — mentor inativo com isso permanece na agenda para remanejamento. */
+const bookingNeedsRemanejamento = (status: SessionStatus): boolean => {
+  switch (status) {
+    case "scheduled":
+    case "rescheduled":
+    case "pending_approval":
+    case "pending_confirmation":
+    case "not_realized":
+      return true;
+    case "completed":
+    case "awaiting_report":
+    case "cancelled":
+      return false;
+    default: {
+      const _exhaustive: never = status;
+      return _exhaustive;
+    }
+  }
+};
 
 /** Rótulo único de status (mesmo texto/cor das outras telas). */
 const statusLabel = (s: SessionStatus) => bookingStatusConfig[s]?.label ?? s;
@@ -332,7 +367,7 @@ const AdminAgendaPage = () => {
 
   // Fetch all mentors (via user_roles, NOT by email domain)
   const { data: _allMentors = [] } = useQuery({
-    queryKey: ["agenda-mentors"],
+    queryKey: ["agenda-mentors", "active-flag"],
     queryFn: async () => {
       const { data: roleRows, error: roleErr } = await supabase
         .from("user_roles")
@@ -343,7 +378,7 @@ const AdminAgendaPage = () => {
       if (mentorUserIds.length === 0) return [] as MentorInfo[];
       const { data, error } = await supabase
         .from("profiles")
-        .select("id, full_name, avatar_url, phone")
+        .select("id, full_name, avatar_url, phone, is_active")
         .in("user_id", mentorUserIds)
         .order("full_name");
       if (error) throw error;
@@ -698,7 +733,31 @@ const AdminAgendaPage = () => {
     return map;
   }, [allMentors]);
 
-  const filteredMentorIds = mentorFilter ? [mentorFilter] : allMentors.map((m) => m.id);
+  /** Mentores ativos + inativos que ainda têm sessão aberta no período (para remanejar). */
+  const agendaMentors = useMemo(() => {
+    const inactiveWithOpen = new Set<string>();
+    for (const booking of bookings) {
+      if (!booking.mentor_id) continue;
+      if (bookingNeedsRemanejamento(displayStatus(booking))) {
+        inactiveWithOpen.add(booking.mentor_id);
+      }
+    }
+    return allMentors.filter((m) => m.is_active !== false || inactiveWithOpen.has(m.id));
+  }, [allMentors, bookings, reportedIds]);
+
+  /** Destino de remanejamento / nova sessão / disponibilidade: só ativos. */
+  const activeMentors = useMemo(
+    () => allMentors.filter((m) => m.is_active !== false),
+    [allMentors],
+  );
+
+  useEffect(() => {
+    if (mentorFilter && !agendaMentors.some((m) => m.id === mentorFilter)) {
+      setMentorFilter(null);
+    }
+  }, [mentorFilter, agendaMentors]);
+
+  const filteredMentorIds = mentorFilter ? [mentorFilter] : agendaMentors.map((m) => m.id);
 
   
   const matchesFilters = (b: BookingRow) => {
@@ -758,7 +817,19 @@ const AdminAgendaPage = () => {
   // Color per mentor (overrides status colors for visual identification)
   const mentorColorFor = (mentorId: string) => {
     const idx = mentorIndexMap[mentorId] ?? 0;
-    return mentorColors[idx % mentorColors.length];
+    return mentorColorAt(idx);
+  };
+  const bookingAccentStyle = (b: BookingRow): CSSProperties | undefined => {
+    const st = displayStatus(b);
+    if (
+      st === "cancelled" ||
+      st === "not_realized" ||
+      st === "pending_approval" ||
+      st === "pending_confirmation"
+    ) {
+      return undefined;
+    }
+    return { borderLeftColor: mentorColorFor(b.mentor_id).accent };
   };
   const bookingBg = (b: BookingRow) => {
     const c = mentorColorFor(b.mentor_id);
@@ -1015,9 +1086,10 @@ const AdminAgendaPage = () => {
       })
     : members;
 
-  const mentorsForSession = manualSession
+  const mentorsForSession = (manualSession
     ? allMentors.filter((m) => mentorSessionAssignments.some((ms) => ms.mentor_id === m.id && ms.session_id === manualSession))
-    : allMentors;
+    : allMentors
+  ).filter((m) => m.is_active !== false);
 
   // Helper data for week/month views
   const weekDays = useMemo(() => {
@@ -1064,8 +1136,8 @@ const AdminAgendaPage = () => {
   // Mentors without any availability in current range
   const mentorsWithoutAvailability = useMemo(() => {
     const withSlots = new Set(expandedAvailability.map((s) => s.mentor_id));
-    return allMentors.filter((m) => !withSlots.has(m.id));
-  }, [allMentors, expandedAvailability]);
+    return activeMentors.filter((m) => !withSlots.has(m.id));
+  }, [activeMentors, expandedAvailability]);
 
   const headerLabel = useMemo(() => {
     if (viewMode === "day") return format(currentDate, "EEEE, dd 'de' MMMM", { locale: ptBR });
@@ -1440,13 +1512,19 @@ const AdminAgendaPage = () => {
             </div>
 
             <div className="flex gap-2 flex-wrap" role="group" aria-label="Filtrar por mentor">
-              <Chip active={mentorFilter === null} onClick={() => setMentorFilter(null)} count={allMentors.length}>Todos os mentores</Chip>
-              {allMentors.map((m, i) => (
-                <Chip key={m.id} active={mentorFilter === m.id} onClick={() => setMentorFilter(mentorFilter === m.id ? null : m.id)}>
-                  <span className={`w-2 h-2 rounded-full ${mentorColors[i % mentorColors.length].dot}`} aria-hidden />
-                  {shortName(m.full_name)}
-                </Chip>
-              ))}
+              <Chip active={mentorFilter === null} onClick={() => setMentorFilter(null)} count={agendaMentors.length}>Todos os mentores</Chip>
+              {agendaMentors.map((m) => {
+                const color = mentorColorFor(m.id);
+                return (
+                  <Chip key={m.id} active={mentorFilter === m.id} onClick={() => setMentorFilter(mentorFilter === m.id ? null : m.id)}>
+                    <span className="w-2 h-2 rounded-full" style={{ backgroundColor: color.accent }} aria-hidden />
+                    {shortName(m.full_name)}
+                    {m.is_active === false ? (
+                      <span className="text-[10px] text-muted-foreground font-normal">inativo</span>
+                    ) : null}
+                  </Chip>
+                );
+              })}
             </div>
 
             <div className="flex gap-2 flex-wrap items-center" role="group" aria-label="Filtrar por status">
@@ -1507,19 +1585,23 @@ const AdminAgendaPage = () => {
                               {/* Colunas por mentor */}
                               <div className="flex-1 flex">
                                 {columnMentorIds.map((mId) => {
-                                  const idx = mentorIndexMap[mId] ?? 0;
                                   const mentor = allMentors.find((m) => m.id === mId);
-                                  const color = mentorColors[idx % mentorColors.length];
+                                  const color = mentorColorFor(mId);
                                   const colBookings = dayBookings.filter((b) => b.mentor_id === mId);
                                   const colSlots = availability.filter((a) => a.mentor_id === mId);
                                   return (
                                     <div key={mId} className="flex-1 border-l border-border/30 relative" style={{ minWidth: MIN_COL_W }}>
                                       <div className={`sticky top-0 z-10 text-center ${color.header}`} style={{ height: HEADER_H }}>
-                                        <div className="h-full flex items-center justify-center gap-1.5 px-2">
-                                          <span className={`w-2 h-2 rounded-full shrink-0 ${color.dot}`} aria-hidden />
-                                          <span className="text-xs font-medium text-foreground leading-tight truncate">
-                                            {mentor ? shortName(mentor.full_name) : "Sem dados"}
-                                          </span>
+                                        <div className="h-full flex flex-col items-center justify-center gap-0.5 px-2">
+                                          <div className="flex items-center justify-center gap-1.5 min-w-0 w-full">
+                                            <span className="w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: color.accent }} aria-hidden />
+                                            <span className="text-xs font-medium text-foreground leading-tight truncate">
+                                              {mentor ? shortName(mentor.full_name) : "Sem dados"}
+                                            </span>
+                                          </div>
+                                          {mentor?.is_active === false ? (
+                                            <span className="text-[10px] text-muted-foreground">Inativo · remanejar</span>
+                                          ) : null}
                                         </div>
                                       </div>
                                       <div
@@ -1574,7 +1656,7 @@ const AdminAgendaPage = () => {
                                               onClick={() => openDrawer(b)}
                                               aria-label={`${participantName(b)}, ${b.sessions?.name || "sessão"}, ${formatTime(b.start_time)} às ${formatTime(b.end_time)}, ${statusLabel(st)}`}
                                               className={`absolute left-0.5 right-0.5 rounded-ds border px-2 py-1 text-left transition-colors duration-ds-1 hover:bg-accent overflow-hidden focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${bookingBg(b)}`}
-                                              style={{ top, height: h - 2 }}
+                                              style={{ top, height: h - 2, ...bookingAccentStyle(b) }}
                                             >
                                               <p className={`text-[11px] font-medium tabular-nums leading-tight ${bookingText(b)}`}>
                                                 {formatTime(b.start_time)} às {formatTime(b.end_time)}
@@ -1627,7 +1709,10 @@ const AdminAgendaPage = () => {
                                 onPress={() => openDrawer(b)}
                                 leading={
                                   <span className="flex h-10 w-10 items-center justify-center" aria-hidden>
-                                    <span className={`h-2.5 w-2.5 rounded-full ${mentorColorFor(b.mentor_id).dot}`} />
+                                    <span
+                                      className="h-2.5 w-2.5 rounded-full"
+                                      style={{ backgroundColor: mentorColorFor(b.mentor_id).accent }}
+                                    />
                                   </span>
                                 }
                                 title={participantName(b)}
@@ -1702,6 +1787,7 @@ const AdminAgendaPage = () => {
                                     onClick={() => openDrawer(b)}
                                     aria-label={`${participantName(b)}, ${formatTime(b.start_time)}, ${statusLabel(st)}`}
                                     className={`w-full rounded-ds border p-2 text-left transition-colors duration-ds-1 hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${bookingBg(b)}`}
+                                    style={bookingAccentStyle(b)}
                                   >
                                     <p className={`text-[11px] font-medium tabular-nums flex items-center gap-1.5 ${bookingText(b)}`}>
                                       <span className={`w-1.5 h-1.5 rounded-full ${bookingStatusConfig[st]?.dot ?? "bg-muted-foreground"}`} aria-hidden />
@@ -1738,7 +1824,7 @@ const AdminAgendaPage = () => {
                               ))}
                               <button
                                 type="button"
-                                onClick={() => { setSlotAddDate(ds); setSlotAddMentor(mentorFilter || allMentors[0]?.id || ""); setSlotAddStart("07:00"); }}
+                                onClick={() => { setSlotAddDate(ds); setSlotAddMentor(mentorFilter || activeMentors[0]?.id || ""); setSlotAddStart("07:00"); }}
                                 className="w-full rounded-ds border border-dashed border-border min-h-[32px] text-[11px] text-muted-foreground hover:text-foreground hover:border-foreground/30 transition-colors duration-ds-1 flex items-center justify-center gap-1 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                               >
                                 <Plus className="h-3 w-3" aria-hidden /> Disponibilidade
@@ -1874,10 +1960,10 @@ const AdminAgendaPage = () => {
             <div className="px-4 pt-3 pb-1">
               <SectionHeader as="h3" title="Todos os mentores" />
             </div>
-            {allMentors.map((m, i) => (
+            {activeMentors.map((m, i) => (
               <ListRow
                 key={m.id}
-                last={i === allMentors.length - 1}
+                last={i === activeMentors.length - 1}
                 title={shortName(m.full_name)}
                 trailing={
                   <IconButton aria-label={`Copiar lembrete para ${shortName(m.full_name)}`} size="sm" onClick={() => copyReminderLink(m.full_name)}>
@@ -1995,21 +2081,32 @@ const AdminAgendaPage = () => {
                   <SectionHeader as="h3" title="Trocar mentor" />
                   <IconButton aria-label="Fechar troca de mentor" size="sm" onClick={() => setShowMentorSwap(false)}><X className="h-4 w-4" /></IconButton>
                 </div>
-                {allMentors.map((m, i) => {
+                {(() => {
+                  const swapMentors = (() => {
+                    const currentId = selectedBooking.mentor_id;
+                    if (currentId && !activeMentors.some((m) => m.id === currentId)) {
+                      const current = allMentors.find((m) => m.id === currentId);
+                      return current ? [current, ...activeMentors] : activeMentors;
+                    }
+                    return activeMentors;
+                  })();
+                  return swapMentors.map((m, i) => {
                   const isCurrent = m.id === selectedBooking.mentor_id;
                   return (
                     <ListRow
                       key={m.id}
-                      last={i === allMentors.length - 1}
+                      last={i === swapMentors.length - 1}
                       onPress={isCurrent ? undefined : () => handleMentorSwap(m.id)}
                       active={isCurrent}
                       leading={<UserAvatar name={m.full_name} avatarUrl={(m as { avatar_url?: string | null }).avatar_url ?? null} size={32} />}
                       title={shortName(m.full_name)}
+                      subtitle={m.is_active === false ? "Inativo" : undefined}
                       trailing={isCurrent ? <StatusPill tone="neutral" size="sm" withDot={false}>Atual</StatusPill> : undefined}
                       chevron={!isCurrent}
                     />
                   );
-                })}
+                });
+                })()}
               </SectionCard>
             )}
 
@@ -2448,7 +2545,7 @@ const AdminAgendaPage = () => {
         <div className="space-y-4">
           <SelectField label="Mentor" value={slotAddMentor} onChange={(e) => setSlotAddMentor(e.target.value)}>
             <option value="">Selecione</option>
-            {allMentors.map((m) => <option key={m.id} value={m.id}>{shortName(m.full_name)}</option>)}
+            {activeMentors.map((m) => <option key={m.id} value={m.id}>{shortName(m.full_name)}</option>)}
           </SelectField>
           <TextField
             label="Início (blocos de 2h)"
