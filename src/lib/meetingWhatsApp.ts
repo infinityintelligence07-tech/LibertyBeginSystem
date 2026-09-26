@@ -245,6 +245,7 @@ export type EndMeetingResult = {
   ended?: boolean;
   error?: string;
   message?: string;
+  meeting_ended_at?: string;
 };
 
 /** Encerra a call Meet para todos (via conta host) — uso do mentor/admin. */
@@ -270,5 +271,46 @@ export async function invokeEndMeeting(bookingId: string): Promise<EndMeetingRes
 
   const result = (data || {}) as EndMeetingResult;
   if (result.error && !result.ended) return { ok: false, error: result.error, message: result.message };
-  return { ok: true, ended: true, message: result.message };
+  return { ok: true, ended: true, message: result.message, meeting_ended_at: result.meeting_ended_at };
+}
+
+export type MeetingArtifactsResult = {
+  ok?: boolean;
+  status?: "pending" | "ready" | "unavailable";
+  transcript?: string | null;
+  smart_notes_url?: string | null;
+  message?: string;
+  error?: string;
+};
+
+/** Poll da transcrição / smart notes após Encerrar. */
+export async function invokeFetchMeetingArtifacts(bookingId: string): Promise<MeetingArtifactsResult> {
+  const { data, error } = await supabase.functions.invoke("provision-meeting", {
+    body: { booking_id: bookingId, action: "artifacts" },
+  });
+
+  if (error) {
+    console.warn("meeting-artifacts", error, data);
+    let fromCtx: string | null = null;
+    try {
+      const ctx = (error as { context?: Response }).context;
+      if (ctx && typeof ctx.json === "function") {
+        const body = await ctx.clone().json();
+        if (body?.error && typeof body.error === "string") fromCtx = body.error;
+      }
+    } catch {
+      /* noop */
+    }
+    return { ok: false, error: fromCtx || extractInvokeError(data, error, "end") };
+  }
+
+  const result = (data || {}) as MeetingArtifactsResult;
+  if (result.error) return { ok: false, error: result.error, message: result.message };
+  return {
+    ok: true,
+    status: result.status || "pending",
+    transcript: result.transcript ?? null,
+    smart_notes_url: result.smart_notes_url ?? null,
+    message: result.message,
+  };
 }

@@ -112,6 +112,10 @@ export type Database = {
           meeting_wa_mentor_text: string | null
           meeting_provisioned_at: string | null
           meeting_provision_error: string | null
+          meeting_transcript_text: string | null
+          meeting_artifacts_status: string | null
+          meeting_artifacts_fetched_at: string | null
+          meeting_ended_at: string | null
         }
         Insert: {
           approval_required?: boolean
@@ -148,6 +152,10 @@ export type Database = {
           meeting_wa_mentor_text?: string | null
           meeting_provisioned_at?: string | null
           meeting_provision_error?: string | null
+          meeting_transcript_text?: string | null
+          meeting_artifacts_status?: string | null
+          meeting_artifacts_fetched_at?: string | null
+          meeting_ended_at?: string | null
         }
         Update: {
           approval_required?: boolean
@@ -184,6 +192,10 @@ export type Database = {
           meeting_wa_mentor_text?: string | null
           meeting_provisioned_at?: string | null
           meeting_provision_error?: string | null
+          meeting_transcript_text?: string | null
+          meeting_artifacts_status?: string | null
+          meeting_artifacts_fetched_at?: string | null
+          meeting_ended_at?: string | null
         }
         Relationships: [
           {

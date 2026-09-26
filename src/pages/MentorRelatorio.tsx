@@ -24,7 +24,7 @@ import {
   TextAreaField,
 } from "@/components/ds";
 import { toast } from "sonner";
-import { invokeEndMeeting } from "@/lib/meetingWhatsApp";
+import { invokeEndMeeting, invokeFetchMeetingArtifacts } from "@/lib/meetingWhatsApp";
 import { cn } from "@/lib/utils";
 import { supabase } from "@/integrations/supabase/client";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
@@ -68,6 +68,10 @@ const MentorRelatorioPage = () => {
   const [loaded, setLoaded] = useState(false);
   const [deliverableOpen, setDeliverableOpen] = useState(false);
   const [endingMeet, setEndingMeet] = useState(false);
+  const [artifactsStatus, setArtifactsStatus] = useState<"idle" | "polling" | "ready" | "unavailable">("idle");
+  const [artifactsHint, setArtifactsHint] = useState<string | null>(null);
+  const [smartNotesUrl, setSmartNotesUrl] = useState<string | null>(null);
+  const [autoOrganizeOnce, setAutoOrganizeOnce] = useState(false);
   const meetEndedFromNav = !!(location.state as { meetEnded?: boolean } | null)?.meetEnded;
 
   useEffect(() => {
@@ -91,6 +95,10 @@ const MentorRelatorioPage = () => {
     setShowImpressions(false);
     setSuggestions([]);
     setLoaded(false);
+    setArtifactsStatus("idle");
+    setArtifactsHint(null);
+    setSmartNotesUrl(null);
+    setAutoOrganizeOnce(false);
   }, [bookingId]);
 
   const { data: booking, isLoading: bookingLoading, isError: bookingError, refetch: refetchBooking } = useQuery({
@@ -99,7 +107,7 @@ const MentorRelatorioPage = () => {
       if (!bookingId) return null;
       const { data, error } = await supabase
         .from("bookings")
-        .select("id, mentor_id, liberty_id, session_id, scheduled_date, start_time, end_time, status, is_retroactive, report_required, zoom_join_url")
+        .select("id, mentor_id, liberty_id, session_id, scheduled_date, start_time, end_time, status, is_retroactive, report_required, zoom_join_url, meeting_ended_at, meeting_transcript_text, meeting_artifacts_status")
         .eq("id", bookingId)
         .maybeSingle();
       if (error) throw error;
@@ -287,6 +295,77 @@ const MentorRelatorioPage = () => {
       setOrganizing(false);
     }
   };
+
+  // Pré-carrega transcrição já salva no booking
+  useEffect(() => {
+    const saved = booking?.meeting_transcript_text;
+    if (saved && saved.trim().length >= 30 && !transcript.trim()) {
+      setTranscript(saved.trim());
+      setArtifactsStatus("ready");
+    }
+  }, [booking?.meeting_transcript_text, transcript]);
+
+  // Após Encerrar: poll Meet API até a transcrição ficar pronta (máx ~8 min).
+  useEffect(() => {
+    if (!bookingId || !canEdit) return;
+    const ended = meetEndedFromNav || !!booking?.meeting_ended_at;
+    if (!ended) return;
+
+    let cancelled = false;
+    let attempts = 0;
+    let done = false;
+    const maxAttempts = 32;
+
+    const tick = async () => {
+      if (cancelled || done) return;
+      attempts += 1;
+      setArtifactsStatus((s) => (s === "ready" || s === "unavailable" ? s : "polling"));
+      const r = await invokeFetchMeetingArtifacts(bookingId);
+      if (cancelled || done) return;
+      if (r.ok === false) {
+        setArtifactsHint(r.error || "Falha ao buscar transcrição");
+        if (attempts >= maxAttempts) {
+          done = true;
+          setArtifactsStatus("unavailable");
+        }
+        return;
+      }
+      if (r.smart_notes_url) setSmartNotesUrl(r.smart_notes_url);
+      setArtifactsHint(r.message || null);
+      if (r.status === "ready" && r.transcript && r.transcript.trim().length >= 30) {
+        done = true;
+        setTranscript(r.transcript.trim());
+        setArtifactsStatus("ready");
+        setAutoOrganizeOnce(true);
+        toast.success("Transcrição pronta", { description: "Organizando rascunho com IA…" });
+        return;
+      }
+      if (r.status === "ready") {
+        done = true;
+        setArtifactsStatus("ready");
+        return;
+      }
+      if (r.status === "unavailable" || attempts >= maxAttempts) {
+        done = true;
+        setArtifactsStatus("unavailable");
+      }
+    };
+
+    void tick();
+    const id = window.setInterval(() => void tick(), 15_000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(id);
+    };
+  }, [bookingId, canEdit, meetEndedFromNav, booking?.meeting_ended_at]);
+
+  useEffect(() => {
+    if (!autoOrganizeOnce || organizing) return;
+    if (transcript.trim().length < 30) return;
+    setAutoOrganizeOnce(false);
+    void organize();
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- dispara uma vez quando a transcrição chega
+  }, [autoOrganizeOnce, transcript, organizing]);
 
   // A sessão só pode ser concluída (e o relatório enviado) depois do horário de término.
   const sessionEnded = !!booking && isBookingPast(booking);
@@ -488,12 +567,24 @@ const MentorRelatorioPage = () => {
           <Callout
             tone="success"
             icon={CheckCircle2}
-            title="Meet encerrado — hora do relatório"
+            title="Meet encerrado — buscando resumo automaticamente"
           >
             <ol className="mt-1 list-decimal list-inside space-y-1 text-sm text-muted-foreground">
-              <li>O Gemini costuma enviar o resumo em 2 a 10 minutos para o e-mail da Liberty (membrosliberty).</li>
-              <li>Cole o texto abaixo em “Organizar com IA” — a plataforma monta o rascunho do relatório.</li>
-              <li>Revise, ajuste o que quiser e salve quando a sessão já tiver passado do horário.</li>
+              <li>
+                {artifactsStatus === "polling" && (artifactsHint || "Consultando a API do Meet… (1–5 min em geral)")}
+                {artifactsStatus === "ready" && "Transcrição/resumo chegou — revise o rascunho abaixo e refine o que quiser."}
+                {artifactsStatus === "unavailable" &&
+                  (artifactsHint || "Não veio pela API. Cole o Gemini do e-mail Liberty abaixo e organize com IA.")}
+                {artifactsStatus === "idle" && "Iniciando busca da transcrição…"}
+              </li>
+              <li>A IA monta o rascunho do relatório — você só ajusta e salva.</li>
+              {smartNotesUrl && (
+                <li>
+                  <a href={smartNotesUrl} target="_blank" rel="noopener noreferrer" className="underline text-foreground">
+                    Abrir Doc do Gemini
+                  </a>
+                </li>
+              )}
             </ol>
           </Callout>
         )}

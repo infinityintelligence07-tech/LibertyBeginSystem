@@ -33,6 +33,8 @@ type BookingTiming = {
   is_retroactive?: boolean | null;
   /** Sessões de mapeamento (kickoff) não exigem relatório do mentor. */
   report_required?: boolean | null;
+  /** Mentor encerrou o Meet pela plataforma — deixa de contar como "ao vivo". */
+  meeting_ended_at?: string | null;
 };
 
 /** Sessões gravadas antes desta data (migração para o app) não exigem relatório do mentor. */
@@ -104,6 +106,7 @@ export const getBookingStartDate = (booking: BookingTiming) =>
 
 /** Sessão no horário (ou janela curta antes/depois) — para destacar Encerrar Meet no mentor. */
 export const isSessionHappeningNow = (booking: BookingTiming, now = new Date()) => {
+  if (booking.meeting_ended_at) return false;
   const raw = booking.status || "scheduled";
   if (raw !== "scheduled" && raw !== "rescheduled") return false;
   const start = getBookingStartDate(booking);

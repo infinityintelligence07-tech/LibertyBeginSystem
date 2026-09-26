@@ -375,16 +375,260 @@ async function endActiveMeetConference(accessToken: string, meetingCode: string)
   });
   if (!endRes.ok) {
     const endData = await endRes.json().catch(() => ({}));
-    // Sem call ativa = já encerrada; trata como sucesso.
+    // Sem call ativa / já encerrada = sucesso idempotente (não exige 2º clique).
     const msg = JSON.stringify(endData);
-    if (/FAILED_PRECONDITION|not found|no active|ACTIVE_CONFERENCE/i.test(msg) && /404|400|409|412/.test(String(endRes.status))) {
-      return;
-    }
-    if (endRes.status === 404 || /no active conference|does not have an active/i.test(msg)) {
+    if (
+      endRes.status === 404 ||
+      endRes.status === 400 ||
+      endRes.status === 409 ||
+      endRes.status === 412 ||
+      /FAILED_PRECONDITION|no active|not found|ACTIVE_CONFERENCE|does not have an active|no longer active|already ended/i.test(msg)
+    ) {
       return;
     }
     throw new Error(humanizeMeetApiError(endData));
   }
+}
+
+type MeetArtifactsResult = {
+  status: "pending" | "ready" | "unavailable";
+  transcript: string | null;
+  smart_notes_url: string | null;
+  conference_record: string | null;
+  message: string;
+};
+
+function normalizeMeetingCode(raw: string): string {
+  return raw
+    .trim()
+    .replace(/^spaces\//i, "")
+    .replace(/^https?:\/\/meet\.google\.com\//i, "")
+    .split("?")[0]
+    .trim();
+}
+
+async function listAllTranscriptEntries(accessToken: string, transcriptName: string): Promise<string[]> {
+  const lines: string[] = [];
+  let pageToken: string | undefined;
+  for (let page = 0; page < 40; page++) {
+    const url = new URL(`https://meet.googleapis.com/v2/${transcriptName}/entries`);
+    url.searchParams.set("pageSize", "100");
+    if (pageToken) url.searchParams.set("pageToken", pageToken);
+    const res = await fetch(url.toString(), { headers: { Authorization: `Bearer ${accessToken}` } });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(humanizeMeetApiError(data));
+    const entries = Array.isArray(data.transcriptEntries) ? data.transcriptEntries : [];
+    for (const e of entries) {
+      const text = typeof e?.text === "string" ? e.text.trim() : "";
+      if (text) lines.push(text);
+    }
+    pageToken = typeof data.nextPageToken === "string" ? data.nextPageToken : undefined;
+    if (!pageToken) break;
+  }
+  return lines;
+}
+
+/**
+ * Busca conferenceRecord da sala + transcrição (entries) e link do Doc de smart notes.
+ * Não é instantâneo: enquanto state !== FILE_GENERATED devolve pending.
+ */
+async function fetchMeetArtifacts(accessToken: string, meetingCodeRaw: string): Promise<MeetArtifactsResult> {
+  const meetingCode = normalizeMeetingCode(meetingCodeRaw);
+  if (!meetingCode) {
+    return {
+      status: "unavailable",
+      transcript: null,
+      smart_notes_url: null,
+      conference_record: null,
+      message: "Código da sala Meet ausente.",
+    };
+  }
+
+  // Resolve space.name (mais estável que só o meeting code).
+  let spaceName = `spaces/${meetingCode}`;
+  try {
+    const getRes = await fetch(`https://meet.googleapis.com/v2/spaces/${encodeURIComponent(meetingCode)}`, {
+      headers: { Authorization: `Bearer ${accessToken}` },
+    });
+    const getData = await getRes.json().catch(() => ({}));
+    if (getRes.ok && typeof getData.name === "string") spaceName = getData.name;
+  } catch {
+    /* segue com spaces/{code} */
+  }
+
+  const filter = `space.name = "${spaceName}"`;
+  const listUrl = new URL("https://meet.googleapis.com/v2/conferenceRecords");
+  listUrl.searchParams.set("filter", filter);
+  listUrl.searchParams.set("pageSize", "10");
+  const listRes = await fetch(listUrl.toString(), { headers: { Authorization: `Bearer ${accessToken}` } });
+  const listData = await listRes.json().catch(() => ({}));
+  if (!listRes.ok) throw new Error(humanizeMeetApiError(listData));
+
+  const records = Array.isArray(listData.conferenceRecords) ? listData.conferenceRecords : [];
+  if (records.length === 0) {
+    // Fallback: filtro por meeting_code
+    const altFilter = `space.meeting_code = "${meetingCode}"`;
+    const altUrl = new URL("https://meet.googleapis.com/v2/conferenceRecords");
+    altUrl.searchParams.set("filter", altFilter);
+    altUrl.searchParams.set("pageSize", "10");
+    const altRes = await fetch(altUrl.toString(), { headers: { Authorization: `Bearer ${accessToken}` } });
+    const altData = await altRes.json().catch(() => ({}));
+    if (altRes.ok && Array.isArray(altData.conferenceRecords) && altData.conferenceRecords.length) {
+      records.push(...altData.conferenceRecords);
+    }
+  }
+
+  if (!records.length) {
+    return {
+      status: "pending",
+      transcript: null,
+      smart_notes_url: null,
+      conference_record: null,
+      message: "Ainda não há registro da call. O Google costuma levar 1–5 minutos após encerrar.",
+    };
+  }
+
+  // Mais recente primeiro (API já ordena por startTime desc, mas garantimos).
+  records.sort((a: { startTime?: string }, b: { startTime?: string }) =>
+    String(b.startTime || "").localeCompare(String(a.startTime || "")),
+  );
+  const conferenceRecord = String(records[0].name || "");
+  if (!conferenceRecord) {
+    return {
+      status: "pending",
+      transcript: null,
+      smart_notes_url: null,
+      conference_record: null,
+      message: "Registro da call ainda incompleto.",
+    };
+  }
+
+  // Smart notes (link do Doc Gemini) — best-effort.
+  let smartNotesUrl: string | null = null;
+  let smartNotesPending = false;
+  try {
+    const snRes = await fetch(`https://meet.googleapis.com/v2/${conferenceRecord}/smartNotes?pageSize=10`, {
+      headers: { Authorization: `Bearer ${accessToken}` },
+    });
+    const snData = await snRes.json().catch(() => ({}));
+    if (snRes.ok) {
+      const notes = Array.isArray(snData.smartNotes) ? snData.smartNotes : [];
+      for (const n of notes) {
+        const state = String(n?.state || "");
+        if (state === "FILE_GENERATED") {
+          const uri = n?.docsDestination?.exportUri || n?.docsDestination?.document;
+          if (typeof uri === "string" && uri) {
+            smartNotesUrl = uri.startsWith("http") ? uri : `https://docs.google.com/document/d/${uri}/edit`;
+          }
+        } else if (state === "STARTED" || state === "ENDED") {
+          smartNotesPending = true;
+        }
+      }
+    }
+  } catch {
+    /* ignore */
+  }
+
+  // Transcripts + entries
+  const trRes = await fetch(`https://meet.googleapis.com/v2/${conferenceRecord}/transcripts?pageSize=10`, {
+    headers: { Authorization: `Bearer ${accessToken}` },
+  });
+  const trData = await trRes.json().catch(() => ({}));
+  if (!trRes.ok) throw new Error(humanizeMeetApiError(trData));
+
+  const transcripts = Array.isArray(trData.transcripts) ? trData.transcripts : [];
+  if (!transcripts.length) {
+    if (smartNotesUrl) {
+      return {
+        status: "ready",
+        transcript: null,
+        smart_notes_url: smartNotesUrl,
+        conference_record: conferenceRecord,
+        message: "Resumo Gemini pronto no Google Docs (transcrição ainda não disponível via API).",
+      };
+    }
+    return {
+      status: smartNotesPending ? "pending" : "pending",
+      transcript: null,
+      smart_notes_url: null,
+      conference_record: conferenceRecord,
+      message: "Transcrição ainda está sendo gerada pelo Google.",
+    };
+  }
+
+  let anyPending = false;
+  const allLines: string[] = [];
+  for (const t of transcripts) {
+    const state = String(t?.state || "");
+    const name = typeof t?.name === "string" ? t.name : "";
+    if (state === "STARTED" || state === "ENDED") {
+      anyPending = true;
+      continue;
+    }
+    if (state !== "FILE_GENERATED" || !name) continue;
+    const lines = await listAllTranscriptEntries(accessToken, name);
+    allLines.push(...lines);
+  }
+
+  const transcript = allLines.join("\n").trim();
+  if (transcript.length >= 30) {
+    return {
+      status: "ready",
+      transcript,
+      smart_notes_url: smartNotesUrl,
+      conference_record: conferenceRecord,
+      message: "Transcrição pronta para preencher o relatório.",
+    };
+  }
+
+  if (anyPending || smartNotesPending) {
+    return {
+      status: "pending",
+      transcript: transcript || null,
+      smart_notes_url: smartNotesUrl,
+      conference_record: conferenceRecord,
+      message: "Google ainda processando a transcrição/resumo (costuma levar 1–5 min).",
+    };
+  }
+
+  if (smartNotesUrl) {
+    return {
+      status: "ready",
+      transcript: transcript || null,
+      smart_notes_url: smartNotesUrl,
+      conference_record: conferenceRecord,
+      message: "Resumo Gemini disponível; transcrição curta ou vazia.",
+    };
+  }
+
+  return {
+    status: "unavailable",
+    transcript: null,
+    smart_notes_url: null,
+    conference_record: conferenceRecord,
+    message:
+      "Não encontramos transcrição desta call. Confira se a sala tinha “Anota pra Mim”/transcrição ligados e se o plano Gemini da host permite.",
+  };
+}
+
+async function assertCanEndOrFetchArtifacts(
+  admin: Awaited<ReturnType<typeof requireRole>>["supabaseAdmin"],
+  ctx: Awaited<ReturnType<typeof requireRole>>,
+  booking: { mentor_id?: string | null },
+): Promise<Response | null> {
+  const isStaff = ctx.roles.some((r) => STAFF_ROLES.includes(r));
+  if (!isStaff) return errorJson("Forbidden", 403);
+  const isAdmin = ctx.roles.some((r) => r === "admin" || r === "super_admin");
+  if (isAdmin) return null;
+  const { data: myProfile } = await admin
+    .from("profiles")
+    .select("id")
+    .eq("user_id", ctx.user?.id || "")
+    .maybeSingle();
+  if (!myProfile?.id || booking.mentor_id !== myProfile.id) {
+    return errorJson("Só o mentor desta sessão (ou um admin) pode encerrar / buscar o resumo do Meet.", 403);
+  }
+  return null;
 }
 
 Deno.serve(async (req) => {
@@ -402,7 +646,7 @@ Deno.serve(async (req) => {
     const { data: booking, error: bErr } = await admin
       .from("bookings")
       .select(
-        "id, status, scheduled_date, start_time, end_time, mentor_id, liberty_id, guest_name, guest_email, session_id, zoom_join_url, meeting_space_name, meeting_calendar_event_id, is_retroactive, created_by",
+        "id, status, scheduled_date, start_time, end_time, mentor_id, liberty_id, guest_name, guest_email, session_id, zoom_join_url, meeting_space_name, meeting_calendar_event_id, is_retroactive, created_by, meeting_ended_at, meeting_transcript_text, meeting_artifacts_status",
       )
       .eq("id", bookingId)
       .single();
@@ -423,26 +667,15 @@ Deno.serve(async (req) => {
       if (!owns) return errorJson("Forbidden", 403);
     }
 
+    const meetingCode =
+      (typeof booking.meeting_space_name === "string" && booking.meeting_space_name) ||
+      (booking.zoom_join_url || "").replace(/^https?:\/\/meet\.google\.com\//, "").split("?")[0] ||
+      "";
+
     // Encerrar call para todos via API da host — mentor da sessão ou admin.
     if (payload.action === "end") {
-      if (!isStaff) return errorJson("Forbidden", 403);
-
-      const isAdmin = ctx.roles.some((r) => r === "admin" || r === "super_admin");
-      if (!isAdmin) {
-        const { data: myProfile } = await admin
-          .from("profiles")
-          .select("id")
-          .eq("user_id", ctx.user?.id || "")
-          .maybeSingle();
-        if (!myProfile?.id || booking.mentor_id !== myProfile.id) {
-          return errorJson("Só o mentor desta sessão (ou um admin) pode encerrar o Meet.", 403);
-        }
-      }
-
-      const meetingCode =
-        (typeof booking.meeting_space_name === "string" && booking.meeting_space_name) ||
-        (booking.zoom_join_url || "").replace(/^https?:\/\/meet\.google\.com\//, "").split("?")[0] ||
-        "";
+      const denied = await assertCanEndOrFetchArtifacts(admin, ctx, booking);
+      if (denied) return denied;
       if (!meetingCode) {
         return errorJson("Esta sessão ainda não tem sala Meet para encerrar.", 400);
       }
@@ -452,13 +685,68 @@ Deno.serve(async (req) => {
         await endActiveMeetConference(hostTok.accessToken, meetingCode);
       } catch (e) {
         const msg = e instanceof Error ? e.message : String(e);
-        return errorJson(msg, 500);
+        // Se a API falhar mas a call já não existe, ainda marcamos como encerrada na plataforma.
+        if (!/FAILED_PRECONDITION|no active|not found|already ended|does not have an active/i.test(msg)) {
+          return errorJson(msg, 500);
+        }
       }
+      const endedAt = new Date().toISOString();
+      await admin
+        .from("bookings")
+        .update({
+          meeting_ended_at: endedAt,
+          meeting_artifacts_status: booking.meeting_artifacts_status === "ready" ? "ready" : "pending",
+        })
+        .eq("id", bookingId);
       return json({
         ok: true,
         ended: true,
+        meeting_ended_at: endedAt,
         message:
-          "Reunião encerrada para todos. O resumo/transcrição chega em alguns minutos no e-mail da conta host (membrosliberty).",
+          "Reunião encerrada. Buscando transcrição/resumo Gemini automaticamente — costuma levar 1–5 minutos.",
+      });
+    }
+
+    // Poll da transcrição / smart notes após Encerrar.
+    if (payload.action === "artifacts") {
+      const denied = await assertCanEndOrFetchArtifacts(admin, ctx, booking);
+      if (denied) return denied;
+      if (!meetingCode) {
+        return errorJson("Esta sessão ainda não tem sala Meet.", 400);
+      }
+      if (booking.meeting_transcript_text && String(booking.meeting_transcript_text).trim().length >= 30) {
+        return json({
+          ok: true,
+          status: "ready",
+          transcript: booking.meeting_transcript_text,
+          smart_notes_url: null,
+          message: "Transcrição já salva nesta sessão.",
+        });
+      }
+      const hostTok = await resolveHostAccessToken(admin);
+      if ("error" in hostTok) return errorJson(hostTok.error, 400);
+      let artifacts: MeetArtifactsResult;
+      try {
+        artifacts = await fetchMeetArtifacts(hostTok.accessToken, meetingCode);
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : String(e);
+        return errorJson(msg, 500);
+      }
+      const patch: Record<string, unknown> = {
+        meeting_artifacts_status: artifacts.status,
+        meeting_artifacts_fetched_at: new Date().toISOString(),
+      };
+      if (artifacts.transcript && artifacts.transcript.trim().length >= 30) {
+        patch.meeting_transcript_text = artifacts.transcript.trim();
+      }
+      await admin.from("bookings").update(patch).eq("id", bookingId);
+      return json({
+        ok: true,
+        status: artifacts.status,
+        transcript: artifacts.transcript,
+        smart_notes_url: artifacts.smart_notes_url,
+        conference_record: artifacts.conference_record,
+        message: artifacts.message,
       });
     }
 

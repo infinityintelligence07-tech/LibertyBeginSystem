@@ -31,7 +31,7 @@ import {
 import { differenceInDays } from "date-fns";
 import { useAuth } from "@/hooks/useAuth";
 import { supabase } from "@/integrations/supabase/client";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { invokeEndMeeting } from "@/lib/meetingWhatsApp";
 import { format, startOfMonth, addMonths, subMonths, parseISO } from "date-fns";
@@ -68,6 +68,9 @@ const MentorDashboardPage = () => {
   const [viewMode, setViewMode] = useState<ViewMode>("month");
   const [notRealizedTarget, setNotRealizedTarget] = useState<string | null>(null);
   const [endingMeetId, setEndingMeetId] = useState<string | null>(null);
+  /** Esconde o card Ao vivo na hora, mesmo antes do refetch. */
+  const [locallyEndedMeetIds, setLocallyEndedMeetIds] = useState<Set<string>>(() => new Set());
+  const queryClient = useQueryClient();
   const { actingId, markNotRealized } = useMentorBookingActions();
 
   const endMeetForAll = async (bookingId: string) => {
@@ -79,8 +82,10 @@ const MentorDashboardPage = () => {
         toast.error(r.error || "Não foi possível encerrar o Meet");
         return;
       }
+      setLocallyEndedMeetIds((prev) => new Set(prev).add(bookingId));
+      await queryClient.invalidateQueries({ queryKey: ["mentor-dash-bookings", profile?.id] });
       toast.success("Sessão encerrada", {
-        description: "Agora finalize o relatório — o resumo Gemini chega em alguns minutos.",
+        description: "Abrindo o relatório — buscamos o resumo Gemini automaticamente.",
       });
       navigate(`/mentor/sessoes/${bookingId}/relatorio`, { state: { meetEnded: true } });
     } finally {
@@ -325,10 +330,11 @@ const MentorDashboardPage = () => {
     () =>
       allVisible.filter(
         (b) =>
+          !locallyEndedMeetIds.has(b.id) &&
           isSessionHappeningNow(b) &&
           !!(b.zoom_join_url || (b as { zoom_link?: string | null }).zoom_link),
       ),
-    [allVisible],
+    [allVisible, locallyEndedMeetIds],
   );
   const liveIds = useMemo(() => new Set(liveMeetSessions.map((b) => b.id)), [liveMeetSessions]);
 
