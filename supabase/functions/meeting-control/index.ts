@@ -3,7 +3,7 @@
  * Função separada de provision-meeting: criar sala e encerrar não compartilham deploy.
  */
 import { handleOptions, json, errorJson } from "../_shared/cors.ts";
-import { requireRole, toResponse, STAFF_ROLES, type AppRole } from "../_shared/auth.ts";
+import { getAdminClient, requireRole, timingSafeEqual, toResponse, STAFF_ROLES, type AppRole } from "../_shared/auth.ts";
 import { resolveGoogleOAuthCredentials } from "../_shared/googleOAuth.ts";
 
 const CONTROL_ROLES: AppRole[] = [...STAFF_ROLES];
@@ -58,23 +58,35 @@ function humanizeMeetApiError(data: unknown): string {
     return (
       "A conta host não tem “Anota pra Mim” / Gemini liberado no plano Google. " +
       "Sem isso o Meet abre, mas notas/transcrição automáticas não ligam. " +
-      "Confira o plano em https://one.google.com (Google AI) na conta membrosLiberty."
+      "Confira no Admin Console do Workspace se o Gemini no Meet está ativo para a conta host."
     );
   }
   return `Falha ao configurar acesso do Meet: ${String(msg).slice(0, 240)}`;
 }
 
+/** Só a conta dona da sala lê os artefatos: usa a host gravada na sessão; sem ela, a host ativa. */
 async function resolveHostAccessToken(
   admin: Awaited<ReturnType<typeof requireRole>>["supabaseAdmin"],
+  bookingHostId?: string | null,
 ): Promise<{ accessToken: string; hostEmail: string } | { error: string }> {
-  const { data: hosts } = await admin
-    .from("meeting_hosts")
-    .select("id, email, label, profile_id")
-    .eq("is_active", true)
-    .order("sort_order", { ascending: true })
-    .limit(5);
-
-  let host = (hosts?.[0] || null) as HostRow | null;
+  let host: HostRow | null = null;
+  if (bookingHostId) {
+    const { data: owner } = await admin
+      .from("meeting_hosts")
+      .select("id, email, label, profile_id")
+      .eq("id", bookingHostId)
+      .maybeSingle();
+    host = (owner || null) as HostRow | null;
+  }
+  if (!host) {
+    const { data: hosts } = await admin
+      .from("meeting_hosts")
+      .select("id, email, label, profile_id")
+      .eq("is_active", true)
+      .order("sort_order", { ascending: true })
+      .limit(5);
+    host = (hosts?.[0] || null) as HostRow | null;
+  }
   if (!host) {
     const { data: cfg } = await admin.from("system_config").select("value").eq("key", "meeting_host_email").maybeSingle();
     const email = (cfg?.value || "membrosliberty@gmail.com").trim();
@@ -425,6 +437,13 @@ async function notifyMentorArtifactsReady(
   const { data: mentor } = await admin.from("profiles").select("user_id").eq("id", mentorProfileId).maybeSingle();
   if (!mentor?.user_id) return;
 
+  const { count } = await admin
+    .from("notifications")
+    .select("id", { count: "exact", head: true })
+    .eq("type", "meeting_artifacts_ready")
+    .eq("related_booking_id", bookingId);
+  if ((count ?? 0) > 0) return;
+
   const hasTranscript = !!(artifacts.transcript && artifacts.transcript.trim().length >= 30);
   const title = hasTranscript ? "Transcrição da sessão pronta" : "Resumo Gemini da sessão pronto";
   const message = hasTranscript
@@ -444,8 +463,9 @@ async function notifyMentorArtifactsReady(
 }
 
 /**
- * Poll após Encerrar: ~8 min (24 × 20s). Independente do browser do mentor.
+ * Poll após Encerrar: ~6 min (limite de wall-clock do EdgeRuntime ~400s).
  * Para cedo se ready (transcrição ≥30 ou Doc Gemini) ou unavailable definitivo.
+ * Se não ficar pronto, a varredura do cron (action "sweep") continua depois.
  */
 async function pollArtifactsAfterEnd(
   admin: AdminClient,
@@ -454,7 +474,7 @@ async function pollArtifactsAfterEnd(
   meetingCode: string,
   mentorId: string | null | undefined,
 ): Promise<void> {
-  const maxAttempts = 24;
+  const maxAttempts = 17;
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
     await sleep(attempt === 1 ? 8_000 : 20_000);
 
@@ -492,13 +512,106 @@ async function pollArtifactsAfterEnd(
     }
     if (artifacts.status === "unavailable") return;
   }
+}
 
-  await admin.from("bookings").update({
-    meeting_artifacts_status: "unavailable",
-    meeting_artifacts_fetched_at: new Date().toISOString(),
-    meeting_provision_error:
-      "Tempo esgotado buscando transcrição/resumo. Se o Gemini gerou o Doc, abra o e-mail da conta host ou cole o texto no relatório.",
-  }).eq("id", bookingId);
+const SWEEP_WINDOW_MS = 6 * 60 * 60 * 1000;
+const SWEEP_GIVE_UP_MS = 5 * 60 * 60 * 1000;
+const SWEEP_GRACE_MS = 2 * 60 * 1000;
+
+type SweepBooking = {
+  id: string;
+  mentor_id: string | null;
+  zoom_join_url: string | null;
+  meeting_space_name: string | null;
+  meeting_host_id: string | null;
+  meeting_ended_at: string | null;
+  scheduled_date: string;
+  end_time: string | null;
+  meeting_transcript_text: string | null;
+};
+
+/** Horários da agenda são de Brasília (UTC-3, sem horário de verão). */
+function bookingEndMs(b: SweepBooking): number {
+  const scheduledEnd = Date.parse(`${b.scheduled_date}T${(b.end_time || "23:59:00").slice(0, 8)}-03:00`);
+  const endedAt = b.meeting_ended_at ? Date.parse(b.meeting_ended_at) : NaN;
+  return Number.isNaN(endedAt) ? scheduledEnd : Math.min(endedAt, scheduledEnd);
+}
+
+function meetingCodeOf(b: { meeting_space_name?: string | null; zoom_join_url?: string | null }): string {
+  return (
+    (typeof b.meeting_space_name === "string" && b.meeting_space_name) ||
+    (b.zoom_join_url || "").replace(/^https?:\/\/meet\.google\.com\//, "").split("?")[0] ||
+    ""
+  );
+}
+
+async function isValidSweepSecret(admin: AdminClient, req: Request): Promise<boolean> {
+  const provided = (req.headers.get("x-sweep-secret") || "").trim();
+  if (!provided) return false;
+  const { data } = await admin.from("system_config").select("value").eq("key", "meeting_sweep_secret").maybeSingle();
+  const expected = String(data?.value || "").trim();
+  return expected.length >= 32 && timingSafeEqual(provided, expected);
+}
+
+/**
+ * Cron: busca transcrição de sessões Meet que já terminaram, mesmo sem o mentor clicar em Encerrar.
+ */
+async function sweepEndedMeetings(admin: AdminClient): Promise<{ checked: number; ready: number; errors: number }> {
+  const now = Date.now();
+  const spToday = new Date(now - 3 * 60 * 60 * 1000).toISOString().slice(0, 10);
+  const spYesterday = new Date(now - 27 * 60 * 60 * 1000).toISOString().slice(0, 10);
+
+  const { data, error } = await admin
+    .from("bookings")
+    .select("id, mentor_id, zoom_join_url, meeting_space_name, meeting_host_id, meeting_ended_at, scheduled_date, end_time, meeting_transcript_text")
+    .eq("meeting_provider", "meet")
+    .in("scheduled_date", [spYesterday, spToday])
+    .neq("status", "cancelled")
+    .or("meeting_artifacts_status.is.null,meeting_artifacts_status.neq.ready")
+    .limit(50);
+  if (error) throw new Error("Falha ao listar sessões: " + error.message);
+
+  const due = ((data || []) as SweepBooking[]).filter((b) => {
+    if (String(b.meeting_transcript_text || "").trim().length >= 30) return false;
+    if (!meetingCodeOf(b)) return false;
+    const elapsed = now - bookingEndMs(b);
+    return elapsed >= SWEEP_GRACE_MS && elapsed <= SWEEP_WINDOW_MS;
+  });
+
+  const tokens = new Map<string, Awaited<ReturnType<typeof resolveHostAccessToken>>>();
+  let ready = 0;
+  let errors = 0;
+  for (const b of due) {
+    const hostKey = b.meeting_host_id || "active";
+    if (!tokens.has(hostKey)) tokens.set(hostKey, await resolveHostAccessToken(admin, b.meeting_host_id));
+    const hostTok = tokens.get(hostKey)!;
+    if ("error" in hostTok) {
+      errors++;
+      console.warn("[meeting-control] sweep host", b.id, hostTok.error);
+      continue;
+    }
+
+    try {
+      const artifacts = await fetchMeetArtifacts(hostTok.accessToken, meetingCodeOf(b));
+      const givingUp = artifacts.status === "pending" && now - bookingEndMs(b) >= SWEEP_GIVE_UP_MS;
+      await persistArtifacts(
+        admin,
+        b.id,
+        givingUp
+          ? { ...artifacts, status: "unavailable", message: "O Google não gerou transcrição desta call. Cole o resumo no relatório." }
+          : artifacts,
+      );
+      const hasTranscript = !!(artifacts.transcript && artifacts.transcript.trim().length >= 30);
+      if (artifacts.status === "ready" && (hasTranscript || artifacts.smart_notes_url)) {
+        await notifyMentorArtifactsReady(admin, b.mentor_id, b.id, artifacts);
+        ready++;
+      }
+    } catch (e) {
+      errors++;
+      console.warn("[meeting-control] sweep", b.id, e);
+    }
+  }
+  return { checked: due.length, ready, errors };
 }
 
 async function assertCanEndOrFetchArtifacts(
@@ -528,6 +641,12 @@ Deno.serve(async (req) => {
   if (preflight) return preflight;
 
   try {
+    if (req.headers.get("x-sweep-secret")) {
+      const sweepAdmin = getAdminClient();
+      if (!(await isValidSweepSecret(sweepAdmin, req))) return errorJson("Forbidden", 403);
+      return json({ ok: true, ...(await sweepEndedMeetings(sweepAdmin)) });
+    }
+
     const ctx = await requireRole(req, CONTROL_ROLES);
     const admin = ctx.supabaseAdmin;
     const payload = await req.json().catch(() => ({}));
@@ -540,7 +659,7 @@ Deno.serve(async (req) => {
 
     const { data: booking, error: bErr } = await admin
       .from("bookings")
-      .select("id, mentor_id, zoom_join_url, meeting_space_name, meeting_ended_at, meeting_transcript_text, meeting_artifacts_status, meeting_smart_notes_url")
+      .select("id, mentor_id, zoom_join_url, meeting_space_name, meeting_host_id, meeting_ended_at, meeting_transcript_text, meeting_artifacts_status, meeting_smart_notes_url")
       .eq("id", bookingId)
       .single();
     if (bErr || !booking) return errorJson("Agendamento não encontrado", 404);
@@ -548,13 +667,10 @@ Deno.serve(async (req) => {
     const denied = await assertCanEndOrFetchArtifacts(admin, ctx, booking);
     if (denied) return denied;
 
-    const meetingCode =
-      (typeof booking.meeting_space_name === "string" && booking.meeting_space_name) ||
-      (booking.zoom_join_url || "").replace(/^https?:\/\/meet\.google\.com\//, "").split("?")[0] ||
-      "";
+    const meetingCode = meetingCodeOf(booking);
     if (!meetingCode) return errorJson("Esta sessão ainda não tem sala Meet.", 400);
 
-    const hostTok = await resolveHostAccessToken(admin);
+    const hostTok = await resolveHostAccessToken(admin, booking.meeting_host_id);
     if ("error" in hostTok) return errorJson(hostTok.error, 400);
 
     if (action === "end") {
