@@ -49,6 +49,7 @@ import ProfilePage from "./pages/Profile";
 import NpsFormPage from "./pages/NpsForm";
 import AdminNpsPage from "./pages/AdminNps";
 import NotFound from "./pages/NotFound";
+import { TermsPage, PrivacyPage } from "./pages/Legal";
 import TarefasPage from "./pages/TarefasPage";
 
 import { GlobalLoadingBar } from "@/components/GlobalLoadingBar";
@@ -91,6 +92,8 @@ const App = () => {
               <Route path="/" element={<LoginPage />} />
               <Route path="/login" element={<LoginPage />} />
               <Route path="/reset-password" element={<ResetPasswordPage />} />
+              <Route path="/termos" element={<TermsPage />} />
+              <Route path="/privacidade" element={<PrivacyPage />} />
               <Route path="/onboarding" element={<ProtectedRoute allowedRoles={["liberty"]}><OnboardingPage /></ProtectedRoute>} />
 
 

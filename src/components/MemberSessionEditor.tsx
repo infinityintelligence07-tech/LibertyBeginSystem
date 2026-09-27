@@ -320,7 +320,7 @@ export const MemberSessionEditor = ({
       const nextSessionId = editSessionId || editing.session_id;
       const sessionChanged = nextSessionId !== editing.session_id;
       const nextSession = sessionById.get(nextSessionId);
-      const currentDetail = [...member.completed_sessions, ...member.scheduled_sessions, ...pendingSessions]
+      const currentDetail = [...completedSource, ...scheduledSource, ...pendingSource]
         .find((b) => b.booking_id === editing.booking_id) as EditorBookingDetail | undefined;
       const startTime = currentDetail?.start_time || null;
 
