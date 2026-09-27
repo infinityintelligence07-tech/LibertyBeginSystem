@@ -128,7 +128,7 @@ const ProfilePage = ({ role = "liberty" }: { role?: "liberty" | "mentor" | "admi
     navigate("/login");
   };
 
-  const googleConnected = Boolean(profile?.google_calendar_email);
+  const googleConnected = Boolean(profile?.google_connected && profile?.google_calendar_email);
 
   return (
     <AppLayout role={role}>
