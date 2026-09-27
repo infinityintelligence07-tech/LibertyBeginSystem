@@ -15,11 +15,9 @@ async function hmac(data: string, secret: string) {
   return Array.from(new Uint8Array(sig)).map((b) => b.toString(16).padStart(2, "0")).join("");
 }
 
-function htmlRedirect(to: string, message: string) {
-  return new Response(
-    `<!doctype html><html><head><meta charset="utf-8"><title>Conectando...</title></head><body style="background:#0a0a08;color:#a0a8b4;font-family:system-ui;display:flex;align-items:center;justify-content:center;height:100vh;margin:0"><div style="text-align:center"><p>${message}</p><p><a style="color:#a0a8b4" href="${to}">Continuar</a></p></div><script>setTimeout(()=>location.href=${JSON.stringify(to)},800)</script></body></html>`,
-    { headers: { "Content-Type": "text/html; charset=utf-8" } },
-  );
+// Supabase serve respostas HTML de Edge Functions como texto puro; por isso redireciona via 302.
+function htmlRedirect(to: string, _message: string) {
+  return new Response(null, { status: 302, headers: { Location: to } });
 }
 
 function sanitizeAppOrigin(raw: string | undefined): string {
