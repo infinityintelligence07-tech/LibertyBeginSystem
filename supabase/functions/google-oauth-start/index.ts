@@ -17,7 +17,10 @@ const SCOPES = [
   "https://www.googleapis.com/auth/userinfo.email",
   "https://www.googleapis.com/auth/userinfo.profile",
   "openid",
-].join(" ");
+];
+
+// Só a conta host envia o resumo da sessão por e-mail; mentores e membros não veem esse pedido no consentimento.
+const HOST_EXTRA_SCOPES = ["https://www.googleapis.com/auth/gmail.send"];
 
 async function hmac(data: string, secret: string) {
   const key = await crypto.subtle.importKey(
@@ -82,6 +85,15 @@ Deno.serve(async (req) => {
       { auth: { persistSession: false, autoRefreshToken: false } },
     );
     const { clientId, clientSecret } = await resolveGoogleOAuthCredentials(admin);
+
+    const { data: hosts } = await admin.from("meeting_hosts").select("email, profile_id");
+    const { data: myProfile } = await admin.from("profiles").select("id").eq("user_id", user.id).maybeSingle();
+    const userEmail = (user.email || "").trim().toLowerCase();
+    const isHost = (hosts || []).some(
+      (h: { email: string | null; profile_id: string | null }) =>
+        (h.email || "").trim().toLowerCase() === userEmail || (!!myProfile?.id && h.profile_id === myProfile.id),
+    );
+    const scopes = (isHost ? [...SCOPES, ...HOST_EXTRA_SCOPES] : SCOPES).join(" ");
     const redirectUri = googleOAuthRedirectUri();
 
     // userId | returnTo | appOrigin | timestamp  (appOrigin sem '|')
@@ -93,7 +105,7 @@ Deno.serve(async (req) => {
     url.searchParams.set("client_id", clientId);
     url.searchParams.set("redirect_uri", redirectUri);
     url.searchParams.set("response_type", "code");
-    url.searchParams.set("scope", SCOPES);
+    url.searchParams.set("scope", scopes);
     url.searchParams.set("access_type", "offline");
     url.searchParams.set("prompt", "consent");
     url.searchParams.set("state", state);

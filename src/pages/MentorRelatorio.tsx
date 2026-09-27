@@ -107,13 +107,18 @@ const MentorRelatorioPage = () => {
       if (!bookingId) return null;
       const { data, error } = await supabase
         .from("bookings")
-        .select("id, mentor_id, liberty_id, session_id, scheduled_date, start_time, end_time, status, is_retroactive, report_required, zoom_join_url, meeting_ended_at, meeting_transcript_text, meeting_artifacts_status, meeting_smart_notes_url")
+        .select("id, mentor_id, liberty_id, session_id, scheduled_date, start_time, end_time, status, is_retroactive, report_required, zoom_join_url, meeting_ended_at, meeting_transcript_text, meeting_artifacts_status, meeting_smart_notes_url, meeting_summary_text, meeting_summary_emailed_at, meeting_summary_email_error")
         .eq("id", bookingId)
         .maybeSingle();
       if (error) throw error;
       return data;
     },
     enabled: !!bookingId,
+    // Resumo por IA é gerado no servidor depois que a transcrição chega: recarrega até aparecer.
+    refetchInterval: (query) => {
+      const b = query.state.data;
+      return b?.meeting_ended_at && !b.meeting_summary_text && b.meeting_artifacts_status !== "unavailable" ? 20_000 : false;
+    },
   });
 
   const { data: libertyProfile } = useQuery({
@@ -568,6 +573,23 @@ const MentorRelatorioPage = () => {
             }
           />
         </div>
+
+        {booking.meeting_summary_text && (
+          <SectionCard>
+            <SectionHeader
+              title="Resumo da sessão"
+              description={
+                booking.meeting_summary_emailed_at
+                  ? `Gerado pela IA a partir da transcrição do Meet · enviado por e-mail ao mentor em ${format(parseISO(booking.meeting_summary_emailed_at), "dd/MM 'às' HH:mm", { locale: ptBR })}`
+                  : "Gerado pela IA a partir da transcrição do Meet"
+              }
+            />
+            <p className="mt-3 whitespace-pre-wrap text-sm leading-relaxed text-foreground">{booking.meeting_summary_text}</p>
+            {!booking.meeting_summary_emailed_at && booking.meeting_summary_email_error && canEdit && (
+              <p className="mt-3 text-xs text-status-yellow">E-mail ainda não enviado: {booking.meeting_summary_email_error}</p>
+            )}
+          </SectionCard>
+        )}
 
         {(meetEndedFromNav || !!booking.meeting_ended_at) && (
           <Callout

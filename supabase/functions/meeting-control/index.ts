@@ -5,6 +5,7 @@
 import { handleOptions, json, errorJson } from "../_shared/cors.ts";
 import { getAdminClient, requireRole, timingSafeEqual, toResponse, STAFF_ROLES, type AppRole } from "../_shared/auth.ts";
 import { resolveGoogleOAuthCredentials } from "../_shared/googleOAuth.ts";
+import { chatCompletions } from "../_shared/ai.ts";
 
 const CONTROL_ROLES: AppRole[] = [...STAFF_ROLES];
 
@@ -41,7 +42,8 @@ function humanizeMeetApiError(data: unknown): string {
     (data as { message?: string })?.message ||
     raw;
 
-  if (/Meet API has not been used|SERVICE_DISABLED|accessNotConfigured|meet\.googleapis\.com/i.test(msg + raw)) {
+  // Não casar só "meet.googleapis.com": todo erro do Google traz esse domínio nos details.
+  if (/has not been used|SERVICE_DISABLED|accessNotConfigured/i.test(msg + raw)) {
     return (
       "A API Google Meet está desativada no Google Cloud. " +
       "Ative em: https://console.cloud.google.com/apis/library/meet.googleapis.com?project=430819812839 " +
@@ -50,8 +52,8 @@ function humanizeMeetApiError(data: unknown): string {
   }
   if (/insufficientPermissions|Insufficient Permission|PERMISSION_DENIED/i.test(msg + raw)) {
     return (
-      "Sem permissão para abrir a sala Meet / notas automáticas. " +
-      "Reconecte o Google da conta host aceitando os escopos de Meet (settings)."
+      "Sem permissão no Google Meet para esta sala. " +
+      `Reconecte o Google da conta host aceitando todos os escopos. (Google: ${String(msg).slice(0, 160)})`
     );
   }
   if (/smartNotes|Smart notes|Gemini|not.*supported|FAILED_PRECONDITION|not enabled|not available/i.test(msg + raw)) {
@@ -127,19 +129,33 @@ async function resolveHostAccessToken(
   }
 }
 
-/** Encerra a call ativa para todos (sem precisar entrar como membrosLiberty). */
-async function endActiveMeetConference(accessToken: string, meetingCode: string): Promise<void> {
-  const code = meetingCode.trim();
-  if (!code) throw new Error("Código da sala Meet ausente.");
-
+async function getSpace(accessToken: string, code: string): Promise<{ name: string; hasActiveConference: boolean }> {
   const getRes = await fetch(`https://meet.googleapis.com/v2/spaces/${encodeURIComponent(code)}`, {
     headers: { Authorization: `Bearer ${accessToken}` },
   });
   const getData = await getRes.json().catch(() => ({}));
-  if (!getRes.ok) throw new Error(humanizeMeetApiError(getData));
+  if (!getRes.ok) {
+    console.warn("[meeting-control] spaces.get", getRes.status, JSON.stringify(getData));
+    throw new Error(humanizeMeetApiError(getData));
+  }
+  return {
+    name: typeof getData.name === "string" ? getData.name : `spaces/${code}`,
+    hasActiveConference: !!getData.activeConference,
+  };
+}
 
-  const spaceName = typeof getData.name === "string" ? getData.name : `spaces/${code}`;
-  const endRes = await fetch(`https://meet.googleapis.com/v2/${spaceName}:endActiveConference`, {
+/**
+ * Encerra a call ativa para todos (sem precisar entrar como a conta host).
+ * Confere depois em spaces.get: só devolve sucesso se o Google não tiver mais call ativa.
+ */
+async function endActiveMeetConference(accessToken: string, meetingCode: string): Promise<void> {
+  const code = normalizeMeetingCode(meetingCode);
+  if (!code) throw new Error("Código da sala Meet ausente.");
+
+  const space = await getSpace(accessToken, code);
+  if (!space.hasActiveConference) return;
+
+  const endRes = await fetch(`https://meet.googleapis.com/v2/${space.name}:endActiveConference`, {
     method: "POST",
     headers: {
       Authorization: `Bearer ${accessToken}`,
@@ -149,19 +165,19 @@ async function endActiveMeetConference(accessToken: string, meetingCode: string)
   });
   if (!endRes.ok) {
     const endData = await endRes.json().catch(() => ({}));
-    // Sem call ativa / já encerrada = sucesso idempotente (não exige 2º clique).
-    const msg = JSON.stringify(endData);
-    if (
-      endRes.status === 404 ||
-      endRes.status === 400 ||
-      endRes.status === 409 ||
-      endRes.status === 412 ||
-      /FAILED_PRECONDITION|no active|not found|ACTIVE_CONFERENCE|does not have an active|no longer active|already ended/i.test(msg)
-    ) {
-      return;
+    const raw = JSON.stringify(endData);
+    console.warn("[meeting-control] endActiveConference", endRes.status, raw);
+    // Só "não há call ativa" é sucesso idempotente; qualquer outro erro precisa aparecer para o mentor.
+    if (!/no active conference|does not have an active|no longer active|already ended/i.test(raw)) {
+      throw new Error(humanizeMeetApiError(endData));
     }
-    throw new Error(humanizeMeetApiError(endData));
   }
+
+  for (let check = 0; check < 3; check++) {
+    await sleep(1_500);
+    if (!(await getSpace(accessToken, code)).hasActiveConference) return;
+  }
+  throw new Error("O Google ainda mostra a call ativa. Tente Encerrar de novo em alguns segundos.");
 }
 
 type MeetArtifactsResult = {
@@ -462,6 +478,299 @@ async function notifyMentorArtifactsReady(
   });
 }
 
+type SessionSummary = {
+  resumo: string;
+  pontos_principais: string[];
+  decisoes: string[];
+  proximos_passos: string[];
+};
+
+const SUMMARY_CLAIM_MS = 5 * 60 * 1000;
+
+function summaryToText(s: SessionSummary): string {
+  const section = (title: string, items: string[]) =>
+    items.length ? `\n\n${title}\n${items.map((i) => `• ${i}`).join("\n")}` : "";
+  return (
+    // Linha em branco separa seções (tela e e-mail dependem disso), então parágrafos do resumo usam \n simples.
+    `Resumo\n${s.resumo.trim().replace(/\n{2,}/g, "\n")}` +
+    section("Pontos principais", s.pontos_principais) +
+    section("Decisões", s.decisoes) +
+    section("Próximos passos", s.proximos_passos)
+  ).trim();
+}
+
+async function generateSessionSummary(
+  transcript: string,
+  ctx: { sessionName: string; memberName: string; mentorName: string },
+): Promise<SessionSummary> {
+  const systemPrompt = `Você recebe a transcrição automática do Google Meet de uma sessão de mentoria da Liberty Mentoria.
+Escreva um resumo curto e fiel para o mentor revisar depois da call.
+
+Campos:
+- "resumo": 1 a 2 parágrafos curtos com o foco da sessão e o principal desafio do mentorado.
+- "pontos_principais": até 6 itens com o que foi discutido de mais importante.
+- "decisoes": o que ficou definido na call (vazio se nada foi decidido; sugestão não é decisão).
+- "proximos_passos": ações concretas combinadas para o mentorado, começando com verbo no infinitivo.
+
+Regras: use os nomes reais das pessoas; não invente nada que não esteja na transcrição; ignore conversa informal e problemas técnicos; linguagem profissional e simples, em português do Brasil; cada item com até 160 caracteres.`;
+
+  const userPrompt = `Sessão: ${ctx.sessionName}\nMentorado: ${ctx.memberName}\nMentor: ${ctx.mentorName}\n\nTranscrição:\n${transcript.slice(0, 120_000)}`;
+
+  const response = await chatCompletions(
+    {
+      messages: [
+        { role: "system", content: systemPrompt },
+        { role: "user", content: userPrompt },
+      ],
+      tools: [
+        {
+          type: "function",
+          function: {
+            name: "build_summary",
+            description: "Resumo estruturado da sessão de mentoria.",
+            parameters: {
+              type: "object",
+              properties: {
+                resumo: { type: "string" },
+                pontos_principais: { type: "array", items: { type: "string" } },
+                decisoes: { type: "array", items: { type: "string" } },
+                proximos_passos: { type: "array", items: { type: "string" } },
+              },
+              required: ["resumo", "pontos_principais", "decisoes", "proximos_passos"],
+              additionalProperties: false,
+            },
+          },
+        },
+      ],
+      tool_choice: { type: "function", function: { name: "build_summary" } },
+    },
+    { timeoutMs: 120_000 },
+  );
+  if (!response.ok) {
+    const txt = await response.text().catch(() => "");
+    throw new Error(`IA falhou (${response.status}): ${txt.slice(0, 200)}`);
+  }
+  const data = await response.json();
+  const args = data.choices?.[0]?.message?.tool_calls?.[0]?.function?.arguments;
+  if (!args) throw new Error("Resposta da IA sem estrutura esperada");
+  const parsed = JSON.parse(args) as Partial<SessionSummary>;
+  const list = (v: unknown) =>
+    Array.isArray(v) ? v.map((i) => String(i || "").replace(/\s+/g, " ").trim()).filter(Boolean) : [];
+  const resumo = String(parsed.resumo || "").trim();
+  if (!resumo) throw new Error("IA devolveu resumo vazio");
+  return {
+    resumo,
+    pontos_principais: list(parsed.pontos_principais),
+    decisoes: list(parsed.decisoes),
+    proximos_passos: list(parsed.proximos_passos),
+  };
+}
+
+function escapeHtml(s: string): string {
+  return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+}
+
+function base64Utf8(s: string): string {
+  const bytes = new TextEncoder().encode(s);
+  let bin = "";
+  for (let i = 0; i < bytes.length; i += 0x8000) bin += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
+  return btoa(bin);
+}
+
+/** Envia pelo Gmail da conta host (escopo gmail.send). */
+async function sendGmail(
+  accessToken: string,
+  from: string,
+  to: string[],
+  subject: string,
+  html: string,
+): Promise<void> {
+  const mime = [
+    `From: Liberty Mentoria <${from}>`,
+    `To: ${to.join(", ")}`,
+    `Subject: =?UTF-8?B?${base64Utf8(subject)}?=`,
+    "MIME-Version: 1.0",
+    'Content-Type: text/html; charset="UTF-8"',
+    "Content-Transfer-Encoding: base64",
+    "",
+    base64Utf8(html).replace(/.{76}/g, "$&\r\n"),
+  ].join("\r\n");
+  const raw = base64Utf8(mime).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+
+  const res = await fetch("https://gmail.googleapis.com/gmail/v1/users/me/messages/send", {
+    method: "POST",
+    headers: { Authorization: `Bearer ${accessToken}`, "Content-Type": "application/json" },
+    body: JSON.stringify({ raw }),
+  });
+  if (res.ok) return;
+  const body = await res.text().catch(() => "");
+  console.warn("[meeting-control] gmail send", res.status, body);
+  if (/has not been used|SERVICE_DISABLED|accessNotConfigured/i.test(body)) {
+    throw new Error(
+      "A API do Gmail está desativada no Google Cloud. Ative em https://console.cloud.google.com/apis/library/gmail.googleapis.com?project=430819812839",
+    );
+  }
+  if (res.status === 401 || res.status === 403) {
+    throw new Error("A conta host precisa reconectar o Google (Perfil → Google Agenda) para liberar o envio de e-mail.");
+  }
+  throw new Error(`Gmail recusou o envio (${res.status}): ${body.slice(0, 200)}`);
+}
+
+function buildSummaryEmailHtml(p: {
+  sessionName: string;
+  memberName: string;
+  mentorName: string;
+  dateLabel: string;
+  summaryText: string | null;
+  smartNotesUrl: string | null;
+  reportUrl: string;
+}): string {
+  // summaryText vem de summaryToText: blocos separados por linha em branco, título na 1ª linha, itens com "• ".
+  const block = (raw: string) => {
+    const [title, ...lines] = raw.split("\n");
+    const bullets = lines.filter((l) => l.startsWith("• "));
+    const content = bullets.length === lines.length && bullets.length
+      ? `<ul style="margin:0;padding-left:20px">${bullets
+          .map((l) => `<li style="margin:4px 0">${escapeHtml(l.slice(2))}</li>`)
+          .join("")}</ul>`
+      : `<p style="margin:0 0 10px">${escapeHtml(lines.join("\n")).replace(/\n/g, "<br>")}</p>`;
+    return `<h3 style="margin:20px 0 8px;font-size:15px">${escapeHtml(title)}</h3>${content}`;
+  };
+  const body = p.summaryText
+    ? p.summaryText.split(/\n{2,}/).map(block).join("")
+    : `<p>O Google gerou as anotações da call no Google Docs.</p>`;
+  const notes = p.smartNotesUrl
+    ? `<p style="margin:16px 0 0"><a href="${escapeHtml(p.smartNotesUrl)}">Abrir anotações do Gemini</a></p>`
+    : "";
+  return `<!doctype html><html><body style="font-family:Arial,Helvetica,sans-serif;color:#1f2937;line-height:1.5;max-width:640px;margin:0 auto;padding:16px">
+<p style="margin:0 0 4px;color:#6b7280;font-size:13px">Liberty Mentoria · Resumo da sessão</p>
+<h2 style="margin:0 0 4px;font-size:18px">${escapeHtml(p.sessionName)} — ${escapeHtml(p.memberName)}</h2>
+<p style="margin:0 0 8px;color:#6b7280;font-size:13px">${escapeHtml(p.dateLabel)} · Mentor: ${escapeHtml(p.mentorName)}</p>
+${body}${notes}
+<p style="margin:24px 0 0"><a href="${escapeHtml(p.reportUrl)}" style="background:#111827;color:#fff;padding:10px 16px;border-radius:6px;text-decoration:none;display:inline-block">Abrir a sessão no Liberty</a></p>
+<p style="margin:16px 0 0;color:#6b7280;font-size:12px">Resumo gerado automaticamente a partir da transcrição do Meet. Revise antes de enviar o relatório.</p>
+</body></html>`;
+}
+
+function mentorEmails(mentor: { email?: string | null; google_calendar_email?: string | null } | null): string[] {
+  return [...new Set(
+    [mentor?.google_calendar_email, mentor?.email]
+      .map((e) => (typeof e === "string" ? e.trim().toLowerCase() : ""))
+      .filter((e) => e.includes("@")),
+  )];
+}
+
+/**
+ * Transcrição pronta → resumo por IA (salvo na sessão) → e-mail para o mentor (co-host) pelo Gmail da host.
+ * Idempotente: a trava meeting_summary_claimed_at evita que poll, varredura e tela façam isso em dobro.
+ */
+async function finalizeSessionSummary(admin: AdminClient, bookingId: string): Promise<void> {
+  const now = new Date();
+  const claimCutoff = new Date(now.getTime() - SUMMARY_CLAIM_MS).toISOString();
+  const { data: claimed, error: claimErr } = await admin
+    .from("bookings")
+    .update({ meeting_summary_claimed_at: now.toISOString() })
+    .eq("id", bookingId)
+    .is("meeting_summary_emailed_at", null)
+    .or(`meeting_summary_claimed_at.is.null,meeting_summary_claimed_at.lt.${claimCutoff}`)
+    .select("id");
+  if (claimErr) throw new Error("Falha ao travar resumo: " + claimErr.message);
+  if (!claimed?.length) return;
+
+  const { data: b } = await admin
+    .from("bookings")
+    .select("id, mentor_id, liberty_id, guest_name, session_id, scheduled_date, start_time, meeting_host_id, meeting_transcript_text, meeting_smart_notes_url, meeting_summary_text")
+    .eq("id", bookingId)
+    .maybeSingle();
+  if (!b) return;
+
+  const transcript = String(b.meeting_transcript_text || "").trim();
+  if (transcript.length < 30 && !b.meeting_smart_notes_url) {
+    await admin.from("bookings").update({ meeting_summary_claimed_at: null }).eq("id", bookingId);
+    return;
+  }
+
+  const fail = async (msg: string) => {
+    console.warn("[meeting-control] resumo", bookingId, msg);
+    await admin.from("bookings").update({ meeting_summary_email_error: msg.slice(0, 500) }).eq("id", bookingId);
+  };
+
+  const [{ data: mentor }, { data: member }, { data: session }] = await Promise.all([
+    b.mentor_id
+      ? admin.from("profiles").select("full_name, email, google_calendar_email").eq("id", b.mentor_id).maybeSingle()
+      : Promise.resolve({ data: null }),
+    b.liberty_id
+      ? admin.from("profiles").select("full_name").eq("id", b.liberty_id).maybeSingle()
+      : Promise.resolve({ data: null }),
+    b.session_id
+      ? admin.from("sessions").select("name").eq("id", b.session_id).maybeSingle()
+      : Promise.resolve({ data: null }),
+  ]);
+  const names = {
+    sessionName: session?.name || "Sessão de mentoria",
+    memberName: member?.full_name || b.guest_name || "Mentorado",
+    mentorName: mentor?.full_name || "Mentor",
+  };
+
+  let summaryText: string | null = b.meeting_summary_text || null;
+  if (!summaryText && transcript.length >= 30) {
+    try {
+      summaryText = summaryToText(await generateSessionSummary(transcript, names));
+    } catch (e) {
+      return fail("Falha ao gerar resumo: " + (e instanceof Error ? e.message : String(e)));
+    }
+    await admin.from("bookings").update({
+      meeting_summary_text: summaryText,
+      meeting_summary_generated_at: new Date().toISOString(),
+      meeting_summary_email_error: null,
+    }).eq("id", bookingId);
+  }
+
+  const to = mentorEmails(mentor);
+  if (!to.length) return fail("Mentor sem e-mail cadastrado para receber o resumo.");
+
+  const hostTok = await resolveHostAccessToken(admin, b.meeting_host_id);
+  if ("error" in hostTok) return fail(hostTok.error);
+
+  const appUrl = (Deno.env.get("APP_URL") || "https://begin.libertymentoria.com.br").replace(/\/+$/, "");
+  const [y, m, d] = String(b.scheduled_date).split("-");
+  const dateLabel = `${d}/${m}/${y}${b.start_time ? ` às ${String(b.start_time).slice(0, 5)}` : ""}`;
+  try {
+    await sendGmail(
+      hostTok.accessToken,
+      hostTok.hostEmail,
+      to,
+      `Resumo da sessão: ${names.sessionName} — ${names.memberName} (${d}/${m})`,
+      buildSummaryEmailHtml({
+        ...names,
+        dateLabel,
+        summaryText,
+        smartNotesUrl: b.meeting_smart_notes_url || null,
+        reportUrl: `${appUrl}/mentor/sessoes/${bookingId}/relatorio`,
+      }),
+    );
+  } catch (e) {
+    return fail(e instanceof Error ? e.message : String(e));
+  }
+
+  await admin.from("bookings").update({
+    meeting_summary_emailed_at: new Date().toISOString(),
+    meeting_summary_email_error: null,
+  }).eq("id", bookingId);
+}
+
+async function onArtifactsReady(
+  admin: AdminClient,
+  bookingId: string,
+  mentorId: string | null | undefined,
+  artifacts: MeetArtifactsResult,
+): Promise<void> {
+  await notifyMentorArtifactsReady(admin, mentorId, bookingId, artifacts);
+  await finalizeSessionSummary(admin, bookingId).catch((e) =>
+    console.error("[meeting-control] finalizeSessionSummary", bookingId, e),
+  );
+}
+
 /**
  * Poll após Encerrar: ~6 min (limite de wall-clock do EdgeRuntime ~400s).
  * Para cedo se ready (transcrição ≥30 ou Doc Gemini) ou unavailable definitivo.
@@ -507,7 +816,7 @@ async function pollArtifactsAfterEnd(
 
     const hasTranscript = !!(artifacts.transcript && artifacts.transcript.trim().length >= 30);
     if (artifacts.status === "ready" && (hasTranscript || artifacts.smart_notes_url)) {
-      await notifyMentorArtifactsReady(admin, mentorId, bookingId, artifacts);
+      await onArtifactsReady(admin, bookingId, mentorId, artifacts);
       return;
     }
     if (artifacts.status === "unavailable") return;
@@ -603,7 +912,7 @@ async function sweepEndedMeetings(admin: AdminClient): Promise<{ checked: number
       );
       const hasTranscript = !!(artifacts.transcript && artifacts.transcript.trim().length >= 30);
       if (artifacts.status === "ready" && (hasTranscript || artifacts.smart_notes_url)) {
-        await notifyMentorArtifactsReady(admin, b.mentor_id, b.id, artifacts);
+        await onArtifactsReady(admin, b.id, b.mentor_id, artifacts);
         ready++;
       }
     } catch (e) {
@@ -611,6 +920,25 @@ async function sweepEndedMeetings(admin: AdminClient): Promise<{ checked: number
       console.warn("[meeting-control] sweep", b.id, e);
     }
   }
+
+  // Transcrição já chegou mas o resumo não foi gerado/enviado (IA ou Gmail falharam): tenta de novo.
+  const { data: unsent } = await admin
+    .from("bookings")
+    .select("id, meeting_ended_at, scheduled_date, end_time")
+    .eq("meeting_provider", "meet")
+    .in("scheduled_date", [spYesterday, spToday])
+    .neq("status", "cancelled")
+    .eq("meeting_artifacts_status", "ready")
+    .is("meeting_summary_emailed_at", null)
+    .limit(20);
+  for (const b of (unsent || []) as SweepBooking[]) {
+    if (now - bookingEndMs(b) > SWEEP_WINDOW_MS) continue;
+    await finalizeSessionSummary(admin, b.id).catch((e) => {
+      errors++;
+      console.warn("[meeting-control] sweep resumo", b.id, e);
+    });
+  }
+
   return { checked: due.length, ready, errors };
 }
 
@@ -659,7 +987,7 @@ Deno.serve(async (req) => {
 
     const { data: booking, error: bErr } = await admin
       .from("bookings")
-      .select("id, mentor_id, zoom_join_url, meeting_space_name, meeting_host_id, meeting_ended_at, meeting_transcript_text, meeting_artifacts_status, meeting_smart_notes_url")
+      .select("id, mentor_id, zoom_join_url, meeting_space_name, meeting_host_id, meeting_ended_at, meeting_transcript_text, meeting_artifacts_status, meeting_smart_notes_url, meeting_summary_emailed_at")
       .eq("id", bookingId)
       .single();
     if (bErr || !booking) return errorJson("Agendamento não encontrado", 404);
@@ -677,10 +1005,8 @@ Deno.serve(async (req) => {
       try {
         await endActiveMeetConference(hostTok.accessToken, meetingCode);
       } catch (e) {
-        const msg = e instanceof Error ? e.message : String(e);
-        if (!/FAILED_PRECONDITION|no active|not found|already ended|does not have an active/i.test(msg)) {
-          return errorJson(msg, 500);
-        }
+        // endActiveMeetConference já trata "não há call ativa" como sucesso; o resto é falha real.
+        return errorJson(e instanceof Error ? e.message : String(e), 500);
       }
       const endedAt = new Date().toISOString();
       const nextArtifactsStatus = booking.meeting_artifacts_status === "ready" ? "ready" : "pending";
@@ -706,6 +1032,9 @@ Deno.serve(async (req) => {
     }
 
     if (booking.meeting_transcript_text && String(booking.meeting_transcript_text).trim().length >= 30) {
+      if (!booking.meeting_summary_emailed_at) {
+        scheduleBackground(() => finalizeSessionSummary(admin, bookingId));
+      }
       return json({
         ok: true,
         status: "ready",
@@ -730,7 +1059,7 @@ Deno.serve(async (req) => {
 
     await persistArtifacts(admin, bookingId, artifacts);
     if (artifacts.status === "ready") {
-      await notifyMentorArtifactsReady(admin, booking.mentor_id, bookingId, artifacts);
+      scheduleBackground(() => onArtifactsReady(admin, bookingId, booking.mentor_id, artifacts));
     }
 
     return json({

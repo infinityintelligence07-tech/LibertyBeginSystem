@@ -273,7 +273,7 @@ async function configureMeetSpace(accessToken: string, meetingCode: string): Pro
   );
   if (!notesRes.ok) {
     const notesData = await notesRes.json().catch(() => ({}));
-    console.warn("autoSmartNotes indisponível para a host:", humanizeMeetApiError(notesData));
+    console.warn("autoSmartNotes indisponível para a host:", notesRes.status, JSON.stringify(notesData));
   }
 }
 
@@ -299,17 +299,25 @@ async function addMentorCohosts(accessToken: string, meetingCode: string, emails
   });
   if (!modRes.ok) console.warn("moderation ON falhou", await modRes.text().catch(() => ""));
 
+  // Members ainda é Developer Preview: o v2 responde 403 "Permission denied on resource Member".
+  // Tenta v2beta primeiro (exige o projeto Google Cloud no Workspace Developer Preview Program) e cai no v2.
   const failures: string[] = [];
   for (const email of emails) {
-    const res = await fetch(`https://meet.googleapis.com/v2/${spaceName}/members`, {
-      method: "POST",
-      headers: { Authorization: `Bearer ${accessToken}`, "Content-Type": "application/json" },
-      body: JSON.stringify({ email, role: "COHOST" }),
-    });
-    if (res.ok || res.status === 409) continue;
-    const body = await res.text().catch(() => "");
-    console.warn("co-host falhou", email, body);
-    failures.push(email);
+    let added = false;
+    for (const version of ["v2beta", "v2"]) {
+      const res = await fetch(`https://meet.googleapis.com/${version}/${spaceName}/members`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${accessToken}`, "Content-Type": "application/json" },
+        body: JSON.stringify({ email, role: "COHOST" }),
+      });
+      if (res.ok || res.status === 409) {
+        added = true;
+        break;
+      }
+      const body = await res.text().catch(() => "");
+      console.warn("co-host falhou", version, email, res.status, body);
+    }
+    if (!added) failures.push(email);
   }
   return failures.length
     ? `Não foi possível tornar co-host: ${failures.join(", ")}. A transcrição automática só começa quando um co-host entra.`
@@ -331,7 +339,8 @@ function humanizeMeetApiError(data: unknown): string {
     (data as { message?: string })?.message ||
     raw;
 
-  if (/Meet API has not been used|SERVICE_DISABLED|accessNotConfigured|meet\.googleapis\.com/i.test(msg + raw)) {
+  // Não casar só "meet.googleapis.com": todo erro do Google traz esse domínio nos details.
+  if (/has not been used|SERVICE_DISABLED|accessNotConfigured/i.test(msg + raw)) {
     return (
       "A API Google Meet está desativada no Google Cloud. " +
       "Ative em: https://console.cloud.google.com/apis/library/meet.googleapis.com?project=430819812839 " +
