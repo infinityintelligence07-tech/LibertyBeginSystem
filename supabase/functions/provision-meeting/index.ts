@@ -247,28 +247,33 @@ async function configureMeetSpace(accessToken: string, meetingCode: string): Pro
     throw new Error(humanizeMeetApiError(openData));
   }
 
-  // Notas/transcrição: best-effort (plano Gemini já ok na host).
-  const notesRes = await fetch(
-    `https://meet.googleapis.com/v2/${spaceName}?updateMask=config.artifactConfig.smartNotesConfig.autoSmartNotesGeneration,config.artifactConfig.transcriptionConfig.autoTranscriptionGeneration`,
-    {
+  // Separados: se o plano não tiver notas Gemini, o Google rejeita o PATCH inteiro e a transcrição ficaria desligada.
+  const patchArtifact = (mask: string, artifactConfig: Record<string, unknown>) =>
+    fetch(`https://meet.googleapis.com/v2/${spaceName}?updateMask=${mask}`, {
       method: "PATCH",
       headers: {
         Authorization: `Bearer ${accessToken}`,
         "Content-Type": "application/json",
       },
-      body: JSON.stringify({
-        config: {
-          artifactConfig: {
-            smartNotesConfig: { autoSmartNotesGeneration: "ON" },
-            transcriptionConfig: { autoTranscriptionGeneration: "ON" },
-          },
-        },
-      }),
-    },
+      body: JSON.stringify({ config: { artifactConfig } }),
+    });
+
+  const transcriptRes = await patchArtifact(
+    "config.artifactConfig.transcriptionConfig.autoTranscriptionGeneration",
+    { transcriptionConfig: { autoTranscriptionGeneration: "ON" } },
+  );
+  if (!transcriptRes.ok) {
+    const transcriptData = await transcriptRes.json().catch(() => ({}));
+    throw new Error(humanizeMeetApiError(transcriptData));
+  }
+
+  const notesRes = await patchArtifact(
+    "config.artifactConfig.smartNotesConfig.autoSmartNotesGeneration",
+    { smartNotesConfig: { autoSmartNotesGeneration: "ON" } },
   );
   if (!notesRes.ok) {
     const notesData = await notesRes.json().catch(() => ({}));
-    throw new Error(humanizeMeetApiError(notesData));
+    console.warn("autoSmartNotes indisponível para a host:", humanizeMeetApiError(notesData));
   }
 }
 
