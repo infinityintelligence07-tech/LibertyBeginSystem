@@ -158,59 +158,82 @@ async function createMeetViaCalendar(
     endISO: string;
     attendeeEmails: string[];
     existingEventId?: string | null;
+    space: MeetSpace;
   },
-): Promise<{ eventId: string; meetUrl: string; meetingCode: string | null }> {
-  const requestId = crypto.randomUUID();
-  const body = {
+): Promise<{ eventId: string; meetUrl: string; meetingCode: string }> {
+  const baseBody = {
     summary: opts.title,
-    description: opts.description,
+    description: `${opts.description}\n\nEntrar no Meet: ${opts.space.meetingUri}`,
+    location: opts.space.meetingUri,
     start: { dateTime: opts.startISO, timeZone: "America/Sao_Paulo" },
     end: { dateTime: opts.endISO, timeZone: "America/Sao_Paulo" },
     attendees: opts.attendeeEmails.map((email) => ({ email })),
     guestsCanModify: false,
     guestsCanInviteOthers: true,
     guestsCanSeeOtherGuests: true,
-    conferenceData: {
-      createRequest: {
-        requestId,
-        conferenceSolutionKey: { type: "hangoutsMeet" },
+  };
+  // Anexa a sala já criada pela Meet API (não pede ao Calendar uma sala nova).
+  const conferenceData = {
+    conferenceSolution: { key: { type: "hangoutsMeet" } },
+    conferenceId: opts.space.meetingCode,
+    entryPoints: [
+      {
+        entryPointType: "video",
+        uri: opts.space.meetingUri,
+        label: opts.space.meetingUri.replace(/^https?:\/\//, ""),
       },
-    },
+    ],
   };
 
   const url = opts.existingEventId
     ? `https://www.googleapis.com/calendar/v3/calendars/primary/events/${encodeURIComponent(opts.existingEventId)}?conferenceDataVersion=1&sendUpdates=all`
     : `https://www.googleapis.com/calendar/v3/calendars/primary/events?conferenceDataVersion=1&sendUpdates=all`;
+  const send = (body: Record<string, unknown>) =>
+    fetch(url, {
+      method: opts.existingEventId ? "PATCH" : "POST",
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(body),
+    });
 
-  const res = await fetch(url, {
-    method: opts.existingEventId ? "PATCH" : "POST",
-    headers: {
-      Authorization: `Bearer ${accessToken}`,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify(body),
-  });
-  const data = await res.json();
+  let res = await send({ ...baseBody, conferenceData });
+  let data = await res.json();
   if (!res.ok) {
-    throw new Error(humanizeCalendarApiError(data));
+    // Se o Calendar recusar anexar a sala, o link continua no local e na descrição do convite.
+    console.warn("Calendar recusou conferenceData da sala Meet API", res.status, JSON.stringify(data));
+    res = await send(baseBody);
+    data = await res.json();
+    if (!res.ok) throw new Error(humanizeCalendarApiError(data));
   }
 
-  const meetUrl =
-    data.hangoutLink ||
-    data.conferenceData?.entryPoints?.find((e: { entryPointType?: string }) => e.entryPointType === "video")
-      ?.uri ||
-    null;
+  return { eventId: data.id as string, meetUrl: opts.space.meetingUri, meetingCode: opts.space.meetingCode };
+}
 
-  if (!meetUrl || typeof meetUrl !== "string") {
-    throw new Error("Evento criado sem link Meet. Verifique se a conta host tem Google Meet habilitado.");
+type MeetSpace = { name: string; meetingUri: string; meetingCode: string };
+
+/**
+ * Cria a sala pela Meet API (não pelo Calendar): só salas criadas pelo app aceitam
+ * spaces.members.create, que é o que deixa o mentor co-host antes da call começar.
+ */
+async function createMeetSpace(accessToken: string): Promise<MeetSpace> {
+  const res = await fetch("https://meet.googleapis.com/v2/spaces", {
+    method: "POST",
+    headers: { Authorization: `Bearer ${accessToken}`, "Content-Type": "application/json" },
+    body: JSON.stringify({ config: { accessType: "OPEN" } }),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    console.warn("spaces.create", res.status, JSON.stringify(data));
+    throw new Error(humanizeMeetApiError(data));
   }
-
-  const meetingCode =
-    (typeof data.conferenceData?.conferenceId === "string" && data.conferenceData.conferenceId) ||
-    meetUrl.replace(/^https?:\/\/meet\.google\.com\//, "").split("?")[0] ||
-    null;
-
-  return { eventId: data.id as string, meetUrl, meetingCode };
+  const meetingUri = typeof data.meetingUri === "string" ? data.meetingUri : "";
+  const meetingCode = typeof data.meetingCode === "string" ? data.meetingCode : "";
+  if (!meetingUri || !meetingCode || typeof data.name !== "string") {
+    throw new Error("A Meet API criou a sala sem link. Tente Recriar sala.");
+  }
+  return { name: data.name, meetingUri, meetingCode };
 }
 
 /**
@@ -299,28 +322,21 @@ async function addMentorCohosts(accessToken: string, meetingCode: string, emails
   });
   if (!modRes.ok) console.warn("moderation ON falhou", await modRes.text().catch(() => ""));
 
-  // Members ainda é Developer Preview: o v2 responde 403 "Permission denied on resource Member".
-  // Tenta v2beta primeiro (exige o projeto Google Cloud no Workspace Developer Preview Program) e cai no v2.
+  // spaces.members.create só aceita salas criadas pelo app (spaces.create); salas antigas, feitas pelo Calendar, dão 403.
   const failures: string[] = [];
   for (const email of emails) {
-    let added = false;
-    for (const version of ["v2beta", "v2"]) {
-      const res = await fetch(`https://meet.googleapis.com/${version}/${spaceName}/members`, {
-        method: "POST",
-        headers: { Authorization: `Bearer ${accessToken}`, "Content-Type": "application/json" },
-        body: JSON.stringify({ email, role: "COHOST" }),
-      });
-      if (res.ok || res.status === 409) {
-        added = true;
-        break;
-      }
-      const body = await res.text().catch(() => "");
-      console.warn("co-host falhou", version, email, res.status, body);
-    }
-    if (!added) failures.push(email);
+    const res = await fetch(`https://meet.googleapis.com/v2/${spaceName}/members`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${accessToken}`, "Content-Type": "application/json" },
+      body: JSON.stringify({ email, role: "COHOST" }),
+    });
+    if (res.ok || res.status === 409) continue;
+    const body = await res.text().catch(() => "");
+    console.warn("co-host falhou", email, res.status, body);
+    failures.push(email);
   }
   return failures.length
-    ? `Não foi possível tornar co-host: ${failures.join(", ")}. A transcrição automática só começa quando um co-host entra.`
+    ? `Não foi possível tornar co-host: ${failures.join(", ")}. Se a sala foi criada antes desta versão, use Recriar sala.`
     : null;
 }
 
@@ -907,6 +923,7 @@ Deno.serve(async (req) => {
     let meetingCode: string | null = null;
     let accessWarning: string | null = null;
     try {
+      const space = await createMeetSpace(accessToken);
       const created = await createMeetViaCalendar(accessToken, {
         title: `Sessão: ${sessionName} — ${memberName}`,
         description: [
@@ -922,6 +939,7 @@ Deno.serve(async (req) => {
         endISO,
         attendeeEmails,
         existingEventId: payload.force ? null : booking.meeting_calendar_event_id,
+        space,
       });
       meetUrl = created.meetUrl;
       eventId = created.eventId;
