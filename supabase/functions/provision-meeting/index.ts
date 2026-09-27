@@ -277,6 +277,53 @@ async function configureMeetSpace(accessToken: string, meetingCode: string): Pro
   }
 }
 
+/**
+ * Transcrição/gravação automáticas só começam quando host ou co-host entra (pela web).
+ * A host é uma conta de serviço que não entra; o mentor vira co-host para disparar e poder encerrar.
+ */
+async function addMentorCohosts(accessToken: string, meetingCode: string, emails: string[]): Promise<string | null> {
+  const code = meetingCode.trim();
+  if (!code || !emails.length) return null;
+
+  const getRes = await fetch(`https://meet.googleapis.com/v2/spaces/${encodeURIComponent(code)}`, {
+    headers: { Authorization: `Bearer ${accessToken}` },
+  });
+  const getData = await getRes.json().catch(() => ({}));
+  if (!getRes.ok) return humanizeMeetApiError(getData);
+  const spaceName = typeof getData.name === "string" ? getData.name : `spaces/${code}`;
+
+  const modRes = await fetch(`https://meet.googleapis.com/v2/${spaceName}?updateMask=config.moderation`, {
+    method: "PATCH",
+    headers: { Authorization: `Bearer ${accessToken}`, "Content-Type": "application/json" },
+    body: JSON.stringify({ config: { moderation: "ON" } }),
+  });
+  if (!modRes.ok) console.warn("moderation ON falhou", await modRes.text().catch(() => ""));
+
+  const failures: string[] = [];
+  for (const email of emails) {
+    const res = await fetch(`https://meet.googleapis.com/v2/${spaceName}/members`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${accessToken}`, "Content-Type": "application/json" },
+      body: JSON.stringify({ email, role: "COHOST" }),
+    });
+    if (res.ok || res.status === 409) continue;
+    const body = await res.text().catch(() => "");
+    console.warn("co-host falhou", email, body);
+    failures.push(email);
+  }
+  return failures.length
+    ? `Não foi possível tornar co-host: ${failures.join(", ")}. A transcrição automática só começa quando um co-host entra.`
+    : null;
+}
+
+function mentorGoogleEmails(mentor: { email?: string | null; google_calendar_email?: string | null } | null): string[] {
+  return [...new Set(
+    [mentor?.google_calendar_email, mentor?.email]
+      .map((e) => (typeof e === "string" ? e.trim().toLowerCase() : ""))
+      .filter((e) => e.includes("@")),
+  )];
+}
+
 function humanizeMeetApiError(data: unknown): string {
   const raw = typeof data === "string" ? data : JSON.stringify(data ?? {});
   const msg =
@@ -672,7 +719,7 @@ Deno.serve(async (req) => {
       if (!owns) return errorJson("Forbidden", 403);
     }
 
-    const meetingCode =
+    const existingMeetingCode =
       (typeof booking.meeting_space_name === "string" && booking.meeting_space_name) ||
       (booking.zoom_join_url || "").replace(/^https?:\/\/meet\.google\.com\//, "").split("?")[0] ||
       "";
@@ -681,13 +728,13 @@ Deno.serve(async (req) => {
     if (payload.action === "end") {
       const denied = await assertCanEndOrFetchArtifacts(admin, ctx, booking);
       if (denied) return denied;
-      if (!meetingCode) {
+      if (!existingMeetingCode) {
         return errorJson("Esta sessão ainda não tem sala Meet para encerrar.", 400);
       }
       const hostTok = await resolveHostAccessToken(admin);
       if ("error" in hostTok) return errorJson(hostTok.error, 400);
       try {
-        await endActiveMeetConference(hostTok.accessToken, meetingCode);
+        await endActiveMeetConference(hostTok.accessToken, existingMeetingCode);
       } catch (e) {
         const msg = e instanceof Error ? e.message : String(e);
         // Se a API falhar mas a call já não existe, ainda marcamos como encerrada na plataforma.
@@ -716,7 +763,7 @@ Deno.serve(async (req) => {
     if (payload.action === "artifacts") {
       const denied = await assertCanEndOrFetchArtifacts(admin, ctx, booking);
       if (denied) return denied;
-      if (!meetingCode) {
+      if (!existingMeetingCode) {
         return errorJson("Esta sessão ainda não tem sala Meet.", 400);
       }
       if (booking.meeting_transcript_text && String(booking.meeting_transcript_text).trim().length >= 30) {
@@ -732,7 +779,7 @@ Deno.serve(async (req) => {
       if ("error" in hostTok) return errorJson(hostTok.error, 400);
       let artifacts: MeetArtifactsResult;
       try {
-        artifacts = await fetchMeetArtifacts(hostTok.accessToken, meetingCode);
+        artifacts = await fetchMeetArtifacts(hostTok.accessToken, existingMeetingCode);
       } catch (e) {
         const msg = e instanceof Error ? e.message : String(e);
         return errorJson(msg, 500);
@@ -770,10 +817,16 @@ Deno.serve(async (req) => {
 
     if (booking.zoom_join_url?.includes("meet.google.com") && !payload.force) {
       const { data: session } = await admin.from("sessions").select("name").eq("id", booking.session_id).maybeSingle();
-      const { data: mentor } = await admin.from("profiles").select("full_name, phone, email").eq("id", booking.mentor_id).maybeSingle();
+      const { data: mentor } = await admin.from("profiles").select("full_name, phone, email, google_calendar_email").eq("id", booking.mentor_id).maybeSingle();
       const { data: liberty } = booking.liberty_id
         ? await admin.from("profiles").select("full_name, phone, email").eq("id", booking.liberty_id).maybeSingle()
         : { data: null };
+      const reuseCode = booking.zoom_join_url.replace(/^https?:\/\/meet\.google\.com\//, "").split("?")[0];
+      const reuseTok = await resolveHostAccessToken(admin);
+      if (!("error" in reuseTok) && reuseCode) {
+        const warn = await addMentorCohosts(reuseTok.accessToken, reuseCode, mentorGoogleEmails(mentor)).catch((e) => String(e));
+        if (warn) console.warn("co-host na sala reaproveitada", bookingId, warn);
+      }
       const texts = buildWaTexts({
         bookingId,
         memberName: liberty?.full_name || booking.guest_name || "Aluno",
@@ -820,7 +873,7 @@ Deno.serve(async (req) => {
     const { data: session } = await admin.from("sessions").select("name, description").eq("id", booking.session_id).maybeSingle();
     const { data: mentor } = await admin
       .from("profiles")
-      .select("full_name, phone, email")
+      .select("full_name, phone, email, google_calendar_email")
       .eq("id", booking.mentor_id)
       .maybeSingle();
     const { data: liberty } = booking.liberty_id
@@ -876,6 +929,12 @@ Deno.serve(async (req) => {
       } catch (e) {
         accessWarning = e instanceof Error ? e.message : String(e);
         console.warn("configureMeetSpace", accessWarning);
+      }
+      try {
+        const cohostWarning = await addMentorCohosts(accessToken, meetingCode, mentorGoogleEmails(mentor));
+        if (cohostWarning) accessWarning = accessWarning ? `${accessWarning} ${cohostWarning}` : cohostWarning;
+      } catch (e) {
+        console.warn("addMentorCohosts", e);
       }
     }
 
