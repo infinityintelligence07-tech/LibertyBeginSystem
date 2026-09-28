@@ -25,14 +25,17 @@ export const defaultMentorFeeRates = (): MentorFeeRates => ({
   kickoffValue: DEFAULT_KICKOFF_SESSION_VALUE,
 });
 
-/** Detecta a sessão de mapeamento/kickoff pelo nome (fallback quando não há flag). */
+/**
+ * Detecta a sessão de mapeamento/kickoff pelo nome (fallback quando não há flag).
+ * "Mapa do Negócio" NÃO é kickoff: era uma sessão comum da jornada antiga (antes de 08/2026).
+ */
 export const isKickoffSessionName = (name?: string | null): boolean => {
   if (!name) return false;
   const n = name
     .normalize("NFD")
     .replace(/[\u0300-\u036f]/g, "")
     .toLowerCase();
-  return n.includes("mapeamento do negocio") || n.includes("mapa do negocio") || n.includes("kickoff");
+  return n.includes("mapeamento do negocio") || n.includes("kickoff");
 };
 
 /** Sessões não remuneradas (ex.: Onboarding / boas-vindas). */
