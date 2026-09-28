@@ -1,0 +1,208 @@
+nizeMeetApiError(getData));
+  }
+  const spaceName = typeof getData.name === "string" ? getData.name : `spaces/${code}`;
+
+  // OPEN primeiro (crítico para convidado externo entrar sem “aguardar admissão”).
+  const openRes = await fetch(
+    `https://meet.googleapis.com/v2/${spaceName}?updateMask=config.accessType`,
+    {
+      method: "PATCH",
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ config: { accessType: "OPEN" } }),
+    },
+  );
+  const openData = await openRes.json().catch(() => ({}));
+  if (!openRes.ok) {
+    throw new Error(humanizeMeetApiError(openData));
+  }
+
+  // Notas/transcrição: best-effort (plano Gemini já ok na host).
+  const notesRes = await fetch(
+    `https://meet.googleapis.com/v2/${spaceName}?updateMask=config.artifactConfig.smartNotesConfig.autoSmartNotesGeneration,config.artifactConfig.transcriptionConfig.autoTranscriptionGeneration`,
+    {
+      method: "PATCH",
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        config: {
+          artifactConfig: {
+            smartNotesConfig: { autoSmartNotesGeneration: "ON" },
+            transcriptionConfig: { autoTranscriptionGeneration: "ON" },
+          },
+        },
+      }),
+    },
+  );
+  if (!notesRes.ok) {
+    const notesData = await notesRes.json().catch(() => ({}));
+    throw new Error(humanizeMeetApiError(notesData));
+  }
+}
+
+function humanizeMeetApiError(data: unknown): string {
+  const raw = typeof data === "string" ? data : JSON.stringify(data ?? {});
+  const msg =
+    (data as { error?: { message?: string; status?: string } })?.error?.message ||
+    (data as { message?: string })?.message ||
+    raw;
+
+  if (/Meet API has not been used|SERVICE_DISABLED|accessNotConfigured|meet\.googleapis\.com/i.test(msg + raw)) {
+    return (
+      "A API Google Meet está desativada no Google Cloud. " +
+      "Ative em: https://console.cloud.google.com/apis/library/meet.googleapis.com?project=430819812839 " +
+      "Espere 1–2 min e clique em Criar sala Meet."
+    );
+  }
+  if (/insufficientPermissions|Insufficient Permission|PERMISSION_DENIED/i.test(msg + raw)) {
+    return (
+      "Sem permissão para abrir a sala Meet / notas automáticas. " +
+      "Reconecte o Google da conta host aceitando os escopos de Meet (settings)."
+    );
+  }
+  if (/smartNotes|Smart notes|Gemini|not.*supported|FAILED_PRECONDITION|not enabled|not available/i.test(msg + raw)) {
+    return (
+      "A conta host não tem “Anota pra Mim” / Gemini liberado no plano Google. " +
+      "Sem isso o Meet abre, mas notas/transcrição automáticas não ligam. " +
+      "Confira o plano em https://one.google.com (Google AI) na conta membrosLiberty."
+    );
+  }
+  return `Falha ao configurar acesso do Meet: ${String(msg).slice(0, 240)}`;
+}
+
+async function resolveHostAccessToken(
+  admin: Awaited<ReturnType<typeof requireRole>>["supabaseAdmin"],
+): Promise<{ accessToken: string; hostEmail: string } | { error: string }> {
+  const { data: hosts } = await admin
+    .from("meeting_hosts")
+    .select("id, email, label, profile_id")
+    .eq("is_active", true)
+    .order("sort_order", { ascending: true })
+    .limit(5);
+
+  let host = (hosts?.[0] || null) as HostRow | null;
+  if (!host) {
+    const { data: cfg } = await admin.from("system_config").select("value").eq("key", "meeting_host_email").maybeSingle();
+    const email = (cfg?.value || "membrosliberty@gmail.com").trim();
+    const { data: inserted } = await admin
+      .from("meeting_hosts")
+      .upsert({ label: "Liberty Meet", email, is_active: true, sort_order: 0 }, { onConflict: "email" })
+      .select("id, email, label, profile_id")
+      .single();
+    host = inserted as HostRow;
+  }
+
+  let profileId = host.profile_id;
+  if (!profileId) {
+    const { data: p } = await admin.from("profiles").select("id").ilike("email", host.email).maybeSingle();
+    profileId = p?.id ?? null;
+    if (profileId) {
+      await admin.from("meeting_hosts").update({ profile_id: profileId }).eq("id", host.id);
+    }
+  }
+  if (!profileId) {
+    return { error: `Conta host ${host.email} não tem perfil no Liberty. Conecte o Google (OAuth).` };
+  }
+
+  const { data: tokenRow } = await admin
+    .from("user_oauth_tokens")
+    .select("google_refresh_token")
+    .eq("profile_id", profileId)
+    .maybeSingle();
+  if (!tokenRow?.google_refresh_token) {
+    return { error: `Conecte o Google da conta host (${host.email}) em Perfil → Google Agenda.` };
+  }
+
+  try {
+    const accessToken = await refreshAccessToken(tokenRow.google_refresh_token, admin);
+    return { accessToken, hostEmail: host.email };
+  } catch (e) {
+    return { error: e instanceof Error ? e.message : String(e) };
+  }
+}
+
+/** Encerra a call ativa para todos (sem precisar entrar como membrosLiberty). */
+async function endActiveMeetConference(accessToken: string, meetingCode: string): Promise<void> {
+  const code = meetingCode.trim();
+  if (!code) throw new Error("Código da sala Meet ausente.");
+
+  const getRes = await fetch(`https://meet.googleapis.com/v2/spaces/${encodeURIComponent(code)}`, {
+    headers: { Authorization: `Bearer ${accessToken}` },
+  });
+  const getData = await getRes.json().catch(() => ({}));
+  if (!getRes.ok) throw new Error(humanizeMeetApiError(getData));
+
+  const spaceName = typeof getData.name === "string" ? getData.name : `spaces/${code}`;
+  const endRes = await fetch(`https://meet.googleapis.com/v2/${spaceName}:endActiveConference`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+      "Content-Type": "application/json",
+    },
+    body: "{}",
+  });
+  if (!endRes.ok) {
+    const endData = await endRes.json().catch(() => ({}));
+    // Sem call ativa / já encerrada = sucesso idempotente (não exige 2º clique).
+    const msg = JSON.stringify(endData);
+    if (
+      endRes.status === 404 ||
+      endRes.status === 400 ||
+      endRes.status === 409 ||
+      endRes.status === 412 ||
+      /FAILED_PRECONDITION|no active|not found|ACTIVE_CONFERENCE|does not have an active|no longer active|already ended/i.test(msg)
+    ) {
+      return;
+    }
+    throw new Error(humanizeMeetApiError(endData));
+  }
+}
+
+type MeetArtifactsResult = {
+  status: "pending" | "ready" | "unavailable";
+  transcript: string | null;
+  smart_notes_url: string | null;
+  conference_record: string | null;
+  message: string;
+};
+
+function normalizeMeetingCode(raw: string): string {
+  return raw
+    .trim()
+    .replace(/^spaces\//i, "")
+    .replace(/^https?:\/\/meet\.google\.com\//i, "")
+    .split("?")[0]
+    .trim();
+}
+
+async function listAllTranscriptEntries(accessToken: string, transcriptName: string): Promise<string[]> {
+  const lines: string[] = [];
+  let pageToken: string | undefined;
+  for (let page = 0; page < 40; page++) {
+    const url = new URL(`https://meet.googleapis.com/v2/${transcriptName}/entries`);
+    url.searchParams.set("pageSize", "100");
+    if (pageToken) url.searchParams.set("pageToken", pageToken);
+    const res = await fetch(url.toString(), { headers: { Authorization: `Bearer ${accessToken}` } });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(humanizeMeetApiError(data));
+    const entries = Array.isArray(data.transcriptEntries) ? data.transcriptEntries : [];
+    for (const e of entries) {
+      const text = typeof e?.text === "string" ? e.text.trim() : "";
+      if (text) lines.push(text);
+    }
+    pageToken = typeof data.nextPageToken === "string" ? data.nextPageToken : undefined;
+    if (!pageToken) break;
+  }
+  return lines;
+}
+
+/**
+ * Busca conferenceRecord da sala + transcrição (entries) e link do Doc de smart notes.
+ * Não é instantâneo: enquanto state !== FILE_GENERATED devolve pending.
+ */
+async function fetchMeetArtifacts(accessToken: string, meetingCodeRaw: string): Promise<MeetArtifactsResult> {
+  const meetingCode = normalizeMeetingCode(meetingCodeRaw);

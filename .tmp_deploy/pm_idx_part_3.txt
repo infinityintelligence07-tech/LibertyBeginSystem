@@ -1,0 +1,201 @@
+oles.some((r) => STAFF_ROLES.includes(r));
+    if (!isStaff) {
+      const { data: myProfile } = await admin
+        .from("profiles")
+        .select("id")
+        .eq("user_id", ctx.user?.id || "")
+        .maybeSingle();
+      const owns =
+        (myProfile?.id && booking.liberty_id === myProfile.id) ||
+        booking.created_by === ctx.user?.id;
+      if (!owns) return errorJson("Forbidden", 403);
+    }
+
+    const meetingCode =
+      (typeof booking.meeting_space_name === "string" && booking.meeting_space_name) ||
+      (booking.zoom_join_url || "").replace(/^https?:\/\/meet\.google\.com\//, "").split("?")[0] ||
+      "";
+
+    // Encerrar call para todos via API da host — mentor da sessão ou admin.
+    if (payload.action === "end") {
+      const denied = await assertCanEndOrFetchArtifacts(admin, ctx, booking);
+      if (denied) return denied;
+      if (!meetingCode) {
+        return errorJson("Esta sessão ainda não tem sala Meet para encerrar.", 400);
+      }
+      const hostTok = await resolveHostAccessToken(admin);
+      if ("error" in hostTok) return errorJson(hostTok.error, 400);
+      try {
+        await endActiveMeetConference(hostTok.accessToken, meetingCode);
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : String(e);
+        // Se a API falhar mas a call já não existe, ainda marcamos como encerrada na plataforma.
+        if (!/FAILED_PRECONDITION|no active|not found|already ended|does not have an active/i.test(msg)) {
+          return errorJson(msg, 500);
+        }
+      }
+      const endedAt = new Date().toISOString();
+      await admin
+        .from("bookings")
+        .update({
+          meeting_ended_at: endedAt,
+          meeting_artifacts_status: booking.meeting_artifacts_status === "ready" ? "ready" : "pending",
+        })
+        .eq("id", bookingId);
+      return json({
+        ok: true,
+        ended: true,
+        meeting_ended_at: endedAt,
+        message:
+          "Reunião encerrada. Buscando transcrição/resumo Gemini automaticamente — costuma levar 1–5 minutos.",
+      });
+    }
+
+    // Poll da transcrição / smart notes após Encerrar.
+    if (payload.action === "artifacts") {
+      const denied = await assertCanEndOrFetchArtifacts(admin, ctx, booking);
+      if (denied) return denied;
+      if (!meetingCode) {
+        return errorJson("Esta sessão ainda não tem sala Meet.", 400);
+      }
+      if (booking.meeting_transcript_text && String(booking.meeting_transcript_text).trim().length >= 30) {
+        return json({
+          ok: true,
+          status: "ready",
+          transcript: booking.meeting_transcript_text,
+          smart_notes_url: null,
+          message: "Transcrição já salva nesta sessão.",
+        });
+      }
+      const hostTok = await resolveHostAccessToken(admin);
+      if ("error" in hostTok) return errorJson(hostTok.error, 400);
+      let artifacts: MeetArtifactsResult;
+      try {
+        artifacts = await fetchMeetArtifacts(hostTok.accessToken, meetingCode);
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : String(e);
+        return errorJson(msg, 500);
+      }
+      const patch: Record<string, unknown> = {
+        meeting_artifacts_status: artifacts.status,
+        meeting_artifacts_fetched_at: new Date().toISOString(),
+      };
+      if (artifacts.transcript && artifacts.transcript.trim().length >= 30) {
+        patch.meeting_transcript_text = artifacts.transcript.trim();
+      }
+      await admin.from("bookings").update(patch).eq("id", bookingId);
+      return json({
+        ok: true,
+        status: artifacts.status,
+        transcript: artifacts.transcript,
+        smart_notes_url: artifacts.smart_notes_url,
+        conference_record: artifacts.conference_record,
+        message: artifacts.message,
+      });
+    }
+
+    if (booking.is_retroactive) {
+      return json({ ok: true, skipped: true, reason: "retroactive" });
+    }
+
+    if (booking.status !== "scheduled") {
+      return json({
+        ok: false,
+        skipped: true,
+        reason: "status_not_scheduled",
+        message: "Sala Meet só é criada quando a sessão está confirmada (scheduled).",
+      });
+    }
+
+    if (booking.zoom_join_url?.includes("meet.google.com") && !payload.force) {
+      const { data: session } = await admin.from("sessions").select("name").eq("id", booking.session_id).maybeSingle();
+      const { data: mentor } = await admin.from("profiles").select("full_name, phone, email").eq("id", booking.mentor_id).maybeSingle();
+      const { data: liberty } = booking.liberty_id
+        ? await admin.from("profiles").select("full_name, phone, email").eq("id", booking.liberty_id).maybeSingle()
+        : { data: null };
+      const texts = buildWaTexts({
+        bookingId,
+        memberName: liberty?.full_name || booking.guest_name || "Aluno",
+        mentorName: mentor?.full_name || "Mentor",
+        sessionName: session?.name || "Mentoria",
+        date: booking.scheduled_date,
+        start: booking.start_time,
+        end: booking.end_time,
+        meetUrl: booking.zoom_join_url,
+      });
+      await admin
+        .from("bookings")
+        .update({
+          meeting_wa_member_text: texts.member,
+          meeting_wa_mentor_text: texts.mentor,
+          meeting_provision_error: null,
+        })
+        .eq("id", bookingId);
+      return json({
+        ok: true,
+        reused: true,
+        meet_url: booking.zoom_join_url,
+        wa_member: texts.member,
+        wa_mentor: texts.mentor,
+      });
+    }
+
+    const hostTok = await resolveHostAccessToken(admin);
+    if ("error" in hostTok) {
+      await admin.from("bookings").update({ meeting_provision_error: hostTok.error }).eq("id", bookingId);
+      return errorJson(hostTok.error, 400);
+    }
+    const accessToken = hostTok.accessToken;
+    const hostEmail = hostTok.hostEmail;
+
+    const { data: hosts } = await admin
+      .from("meeting_hosts")
+      .select("id, email, label, profile_id")
+      .eq("is_active", true)
+      .order("sort_order", { ascending: true })
+      .limit(1);
+    const host = (hosts?.[0] || { id: null, email: hostEmail }) as HostRow;
+
+    const { data: session } = await admin.from("sessions").select("name, description").eq("id", booking.session_id).maybeSingle();
+    const { data: mentor } = await admin
+      .from("profiles")
+      .select("full_name, phone, email")
+      .eq("id", booking.mentor_id)
+      .maybeSingle();
+    const { data: liberty } = booking.liberty_id
+      ? await admin.from("profiles").select("full_name, phone, email").eq("id", booking.liberty_id).maybeSingle()
+      : { data: null };
+
+    const memberName = liberty?.full_name || booking.guest_name || "Aluno";
+    const mentorName = mentor?.full_name || "Mentor";
+    const sessionName = session?.name || "Mentoria";
+    const startISO = `${booking.scheduled_date}T${booking.start_time}-03:00`;
+    const endISO = `${booking.scheduled_date}T${booking.end_time}-03:00`;
+    const guestEmail =
+      typeof booking.guest_email === "string" ? booking.guest_email.trim().toLowerCase() : "";
+    const attendeeEmails = [...new Set(
+      [mentor?.email, liberty?.email, guestEmail || null]
+        .map((e) => (typeof e === "string" ? e.trim().toLowerCase() : ""))
+        .filter((e) => e.includes("@")),
+    )];
+
+    let meetUrl: string;
+    let eventId: string;
+    let meetingCode: string | null = null;
+    let accessWarning: string | null = null;
+    try {
+      const created = await createMeetViaCalendar(accessToken, {
+        title: `Sessão: ${sessionName} — ${memberName}`,
+        description: [
+          `Mentoria Liberty Begin`,
+          `Aluno: ${memberName}`,
+          `Mentor: ${mentorName}`,
+          session?.description || "",
+          ``,
+          `Sala aberta: quem tem o link entra sem aguardar admissão.`,
+          `Notas Gemini + transcrição: ligadas automaticamente na criação da sala (se o plano Google da host permitir).`,
+        ].join("\n"),
+        startISO,
+        endISO,
+        attendeeEmails,
+        existingEven

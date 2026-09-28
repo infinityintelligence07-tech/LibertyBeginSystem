@@ -40,6 +40,7 @@ import {
   translateBookingError,
   useMentorBookingActions,
 } from "@/components/mentor/MentorBookingActions";
+import { EndMeetingDialog } from "@/components/mentor/EndMeetingDialog";
 
 type Suggestion = { id: string; text: string; approved: boolean };
 
@@ -68,6 +69,8 @@ const MentorRelatorioPage = () => {
   const [loaded, setLoaded] = useState(false);
   const [deliverableOpen, setDeliverableOpen] = useState(false);
   const [endingMeet, setEndingMeet] = useState(false);
+  const [endConfirmOpen, setEndConfirmOpen] = useState(false);
+  const [waitSeconds, setWaitSeconds] = useState(0);
   const [artifactsStatus, setArtifactsStatus] = useState<"idle" | "polling" | "ready" | "unavailable">("idle");
   const [artifactsHint, setArtifactsHint] = useState<string | null>(null);
   const [smartNotesUrl, setSmartNotesUrl] = useState<string | null>(null);
@@ -315,7 +318,7 @@ const MentorRelatorioPage = () => {
     if (url && !smartNotesUrl) setSmartNotesUrl(url);
   }, [booking, smartNotesUrl]);
 
-  // Após Encerrar: poll Meet API até a transcrição ficar pronta (máx ~8 min).
+  // Após Encerrar: poll Meet API até a transcrição ficar pronta (máx ~15 min; sessões longas demoram mais).
   // O servidor também busca em background; este poll só atualiza a UI mais rápido.
   useEffect(() => {
     if (!bookingId || !canEdit) return;
@@ -325,7 +328,7 @@ const MentorRelatorioPage = () => {
     let cancelled = false;
     let attempts = 0;
     let done = false;
-    const maxAttempts = 32;
+    const maxAttempts = 60;
 
     const tick = async () => {
       if (cancelled || done) return;
@@ -369,6 +372,34 @@ const MentorRelatorioPage = () => {
       window.clearInterval(id);
     };
   }, [bookingId, canEdit, meetEndedFromNav, booking?.meeting_ended_at]);
+
+  useEffect(() => {
+    if (artifactsStatus !== "polling" && artifactsStatus !== "idle") return;
+    if (!(meetEndedFromNav || booking?.meeting_ended_at)) return;
+    const endedAtMs = booking?.meeting_ended_at ? Date.parse(booking.meeting_ended_at) : Date.now();
+    const update = () => setWaitSeconds(Math.max(0, Math.round((Date.now() - endedAtMs) / 1000)));
+    update();
+    const id = window.setInterval(update, 1000);
+    return () => window.clearInterval(id);
+  }, [artifactsStatus, meetEndedFromNav, booking?.meeting_ended_at]);
+
+  const endMeeting = async () => {
+    if (!booking || endingMeet) return;
+    setEndingMeet(true);
+    try {
+      const r = await invokeEndMeeting(booking.id);
+      if (r.ok === false || r.error) {
+        toast.error(r.error || "Não foi possível encerrar o Meet");
+        return;
+      }
+      toast.success("Sessão encerrada", { description: "A transcrição chega em instantes aqui no relatório." });
+      await queryClient.invalidateQueries({ queryKey: ["booking-detail", bookingId] });
+      navigate(location.pathname, { replace: true, state: { meetEnded: true } });
+    } finally {
+      setEndingMeet(false);
+      setEndConfirmOpen(false);
+    }
+  };
 
   useEffect(() => {
     if (!autoOrganizeOnce || organizing) return;
@@ -547,23 +578,7 @@ const MentorRelatorioPage = () => {
                       variant="outline"
                       size="sm"
                       disabled={endingMeet}
-                      onClick={async () => {
-                        if (endingMeet) return;
-                        setEndingMeet(true);
-                        try {
-                          const r = await invokeEndMeeting(booking.id);
-                          if (r.ok === false || r.error) {
-                            toast.error(r.error || "Não foi possível encerrar o Meet");
-                            return;
-                          }
-                          toast.success("Sessão encerrada", {
-                            description: "Cole o resumo Gemini abaixo e organize com a IA.",
-                          });
-                          navigate(location.pathname, { replace: true, state: { meetEnded: true } });
-                        } finally {
-                          setEndingMeet(false);
-                        }
-                      }}
+                      onClick={() => setEndConfirmOpen(true)}
                     >
                       <PhoneOff /> {endingMeet ? "Encerrando…" : "Encerrar Meet"}
                     </Button>
@@ -595,15 +610,25 @@ const MentorRelatorioPage = () => {
           <Callout
             tone="success"
             icon={CheckCircle2}
-            title="Meet encerrado — buscando resumo automaticamente"
+            title={
+              artifactsStatus === "ready"
+                ? "Transcrição recebida"
+                : artifactsStatus === "unavailable"
+                  ? "Sessão encerrada — transcrição não disponível"
+                  : "Sessão encerrada — recebendo a transcrição"
+            }
           >
             <ol className="mt-1 list-decimal list-inside space-y-1 text-sm text-muted-foreground">
               <li>
-                {artifactsStatus === "polling" && (artifactsHint || "Consultando a API do Meet… (1–5 min em geral). Pode sair desta tela — o servidor continua buscando.")}
-                {artifactsStatus === "ready" && "Transcrição/resumo chegou — revise o rascunho abaixo e refine o que quiser."}
+                {(artifactsStatus === "polling" || artifactsStatus === "idle") && (
+                  <span className="inline-flex items-center gap-1.5">
+                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                    {`O Google está gerando a transcrição (${Math.floor(waitSeconds / 60)}:${String(waitSeconds % 60).padStart(2, "0")}, em geral 2–5 min). Pode sair desta tela — avisamos quando chegar.`}
+                  </span>
+                )}
+                {artifactsStatus === "ready" && "A transcrição chegou — revise o rascunho abaixo e ajuste o que quiser."}
                 {artifactsStatus === "unavailable" &&
-                  (artifactsHint || "Não veio pela API. Cole o Gemini do e-mail da conta Liberty abaixo e organize com IA.")}
-                {artifactsStatus === "idle" && "Iniciando busca da transcrição…"}
+                  "O Google não gerou transcrição desta sessão (o mentor precisa entrar no Meet pelo computador, logado no Gmail cadastrado). Escreva um resumo abaixo e organize com a IA."}
               </li>
               <li>A IA monta o rascunho do relatório — você só ajusta e salva.</li>
               {smartNotesUrl && (
@@ -926,6 +951,12 @@ const MentorRelatorioPage = () => {
       </div>
       </PageContainer>
 
+      <EndMeetingDialog
+        open={endConfirmOpen}
+        onOpenChange={(open) => { if (!open && !endingMeet) setEndConfirmOpen(false); }}
+        busy={endingMeet}
+        onConfirm={endMeeting}
+      />
       <ConfirmDialog
         open={!!swapTargetId}
         onOpenChange={(open) => { if (!open && !swapping) setSwapTargetId(null); }}

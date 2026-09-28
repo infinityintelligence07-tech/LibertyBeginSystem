@@ -1,0 +1,229 @@
+/**
+ * Cria sala Google Meet exclusiva por booking + textos WhatsApp.
+ * Usa Calendar conferenceData (link único por evento) na conta host.
+ * Cada booking = um meet.google.com distinto (sem interferência).
+ */
+import { handleOptions, json, errorJson } from "../_shared/cors.ts";
+import { requireRole, toResponse, STAFF_ROLES, type AppRole } from "../_shared/auth.ts";
+import { resolveGoogleOAuthCredentials } from "../_shared/googleOAuth.ts";
+
+const PROVISION_ROLES: AppRole[] = [...STAFF_ROLES, "liberty"];
+
+type HostRow = {
+  id: string;
+  email: string;
+  label: string;
+  profile_id: string | null;
+};
+
+async function refreshAccessToken(refreshToken: string, admin: Parameters<typeof resolveGoogleOAuthCredentials>[0]): Promise<string> {
+  const { clientId, clientSecret } = await resolveGoogleOAuthCredentials(admin);
+  const res = await fetch("https://oauth2.googleapis.com/token", {
+    method: "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body: new URLSearchParams({
+      client_id: clientId,
+      client_secret: clientSecret,
+      refresh_token: refreshToken,
+      grant_type: "refresh_token",
+    }),
+  });
+  const data = await res.json();
+  if (!res.ok) throw new Error("Falha ao renovar token Google: " + JSON.stringify(data));
+  return data.access_token as string;
+}
+
+function formatBrTime(time: string): string {
+  return time.slice(0, 5);
+}
+
+const APP_ORIGIN_DEFAULT = "https://begin.libertymentoria.com.br";
+
+function ymdInSaoPaulo(d: Date): string {
+  return new Intl.DateTimeFormat("en-CA", {
+    timeZone: "America/Sao_Paulo",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(d);
+}
+
+function relativeSessionDayLabel(dateYmd: string, now = new Date()): string {
+  const today = ymdInSaoPaulo(now);
+  if (dateYmd === today) return "HOJE";
+  const tomorrowBase = new Date(`${today}T12:00:00-03:00`);
+  tomorrowBase.setTime(tomorrowBase.getTime() + 24 * 60 * 60 * 1000);
+  if (dateYmd === ymdInSaoPaulo(tomorrowBase)) return "AMANHÃ";
+  return new Intl.DateTimeFormat("pt-BR", {
+    weekday: "long",
+    timeZone: "America/Sao_Paulo",
+  })
+    .format(new Date(`${dateYmd}T12:00:00-03:00`))
+    .toUpperCase()
+    .replace("-FEIRA", "");
+}
+
+function sessionPhrase(sessionName: string): string {
+  const n = sessionName.trim() || "Mentoria";
+  if (/^sess[aã]o\b/i.test(n)) return n;
+  return `Sessão de ${n}`;
+}
+
+/** Copy WA: aluno sem NPS; mentor com lembrete + link NPS da plataforma. */
+function buildWaTexts(opts: {
+  bookingId: string;
+  memberName: string;
+  mentorName: string;
+  sessionName: string;
+  date: string;
+  start: string;
+  end: string;
+  meetUrl: string;
+  appOrigin?: string;
+}): { member: string; mentor: string } {
+  const origin = (opts.appOrigin || Deno.env.get("APP_URL") || APP_ORIGIN_DEFAULT).replace(/\/$/, "");
+  const day = relativeSessionDayLabel(opts.date);
+  const [, m, d] = opts.date.split("-");
+  const dateShort = `${d}/${m}`;
+  const timeH = `${formatBrTime(opts.start)}H`;
+  const session = sessionPhrase(opts.sessionName);
+  const meetUrl = (opts.meetUrl || "").trim();
+  const npsUrl = `${origin}/nps/${opts.bookingId}`;
+
+  const headline = "Estou passando para lembrá-lo da sua Sessão do Liberty Begin.";
+  const mentorSessionLine = [
+    day,
+    dateShort,
+    timeH,
+    "membro Liberty Begin",
+    opts.memberName.trim() || "Aluno",
+    session,
+  ].join(" - ");
+  const memberSessionLine = [
+    day,
+    dateShort,
+    timeH,
+    "mentor",
+    opts.mentorName.trim() || "Mentor",
+    session,
+  ].join(" - ");
+  const meetBlock = meetUrl
+    ? `Ingressar na reunião Meet\n${meetUrl}`
+    : "O link da reunião Meet será enviado em breve.";
+  const npsBlock = [
+    `🚨 Lembrete`,
+    `Confira com o Liberty Begin se abriu corretamente o link para a pesquisa de NPS 🙏🏼😊`,
+    `Link para a pesquisa 👇🏼👇🏼`,
+    ``,
+    `📝 Clique aqui para avaliar a sessão: ${npsUrl}`,
+  ].join("\n");
+
+  return {
+    member: [headline, ``, memberSessionLine, ``, meetBlock].join("\n"),
+    mentor: [headline, ``, mentorSessionLine, ``, meetBlock, ``, npsBlock].join("\n"),
+  };
+}
+
+/** Traduz erros da Calendar API para mensagem curta e acionável. */
+function humanizeCalendarApiError(data: unknown): string {
+  const raw = typeof data === "string" ? data : JSON.stringify(data ?? {});
+  const msg =
+    (data as { error?: { message?: string; status?: string } })?.error?.message ||
+    (data as { message?: string })?.message ||
+    raw;
+
+  if (/Calendar API has not been used|SERVICE_DISABLED|accessNotConfigured|calendar-json\.googleapis\.com/i.test(msg + raw)) {
+    return (
+      "A API Google Calendar está desativada no Google Cloud. " +
+      "Ative em: https://console.cloud.google.com/apis/library/calendar-json.googleapis.com?project=430819812839 " +
+      "Espere 1–2 min e clique em Criar sala Meet."
+    );
+  }
+  if (/invalid_grant|Token has been expired or revoked/i.test(msg)) {
+    return "Token Google da conta host expirou. Entre como membrosliberty@gmail.com e reconecte o Google Agenda.";
+  }
+  if (/insufficientPermissions|Insufficient Permission/i.test(msg)) {
+    return "A conta host não tem permissão de Calendar/Meet. Reconecte o Google Agenda aceitando todos os escopos.";
+  }
+  const short = String(msg).slice(0, 240);
+  return `Falha ao criar Meet: ${short}`;
+}
+
+async function createMeetViaCalendar(
+  accessToken: string,
+  opts: {
+    title: string;
+    description: string;
+    startISO: string;
+    endISO: string;
+    attendeeEmails: string[];
+    existingEventId?: string | null;
+  },
+): Promise<{ eventId: string; meetUrl: string; meetingCode: string | null }> {
+  const requestId = crypto.randomUUID();
+  const body = {
+    summary: opts.title,
+    description: opts.description,
+    start: { dateTime: opts.startISO, timeZone: "America/Sao_Paulo" },
+    end: { dateTime: opts.endISO, timeZone: "America/Sao_Paulo" },
+    attendees: opts.attendeeEmails.map((email) => ({ email })),
+    guestsCanModify: false,
+    guestsCanInviteOthers: true,
+    guestsCanSeeOtherGuests: true,
+    conferenceData: {
+      createRequest: {
+        requestId,
+        conferenceSolutionKey: { type: "hangoutsMeet" },
+      },
+    },
+  };
+
+  const url = opts.existingEventId
+    ? `https://www.googleapis.com/calendar/v3/calendars/primary/events/${encodeURIComponent(opts.existingEventId)}?conferenceDataVersion=1&sendUpdates=all`
+    : `https://www.googleapis.com/calendar/v3/calendars/primary/events?conferenceDataVersion=1&sendUpdates=all`;
+
+  const res = await fetch(url, {
+    method: opts.existingEventId ? "PATCH" : "POST",
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(body),
+  });
+  const data = await res.json();
+  if (!res.ok) {
+    throw new Error(humanizeCalendarApiError(data));
+  }
+
+  const meetUrl =
+    data.hangoutLink ||
+    data.conferenceData?.entryPoints?.find((e: { entryPointType?: string }) => e.entryPointType === "video")
+      ?.uri ||
+    null;
+
+  if (!meetUrl || typeof meetUrl !== "string") {
+    throw new Error("Evento criado sem link Meet. Verifique se a conta host tem Google Meet habilitado.");
+  }
+
+  const meetingCode =
+    (typeof data.conferenceData?.conferenceId === "string" && data.conferenceData.conferenceId) ||
+    meetUrl.replace(/^https?:\/\/meet\.google\.com\//, "").split("?")[0] ||
+    null;
+
+  return { eventId: data.id as string, meetUrl, meetingCode };
+}
+
+/**
+ * Abre a sala (OPEN) e liga notas Gemini + transcrição automáticas.
+ * Feito na criação — não exige alguém entrar com membrosLiberty a cada sessão.
+ */
+async function configureMeetSpace(accessToken: string, meetingCode: string): Promise<void> {
+  const code = meetingCode.trim();
+  if (!code) return;
+
+  const getRes = await fetch(`https://meet.googleapis.com/v2/spaces/${encodeURIComponent(code)}`, {
+    headers: { Authorization: `Bearer ${accessToken}` },
+  });
+  const getData = await getRes.json().catch(() => ({}));
+  if (!getRes.ok) {
+    throw new Error(huma

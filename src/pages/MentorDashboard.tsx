@@ -29,6 +29,7 @@ import {
   NotRealizedDialog,
   useMentorBookingActions,
 } from "@/components/mentor/MentorBookingActions";
+import { EndMeetingDialog } from "@/components/mentor/EndMeetingDialog";
 import { differenceInDays } from "date-fns";
 import { useAuth } from "@/hooks/useAuth";
 import { supabase } from "@/integrations/supabase/client";
@@ -69,6 +70,7 @@ const MentorDashboardPage = () => {
   const [viewMode, setViewMode] = useState<ViewMode>("month");
   const [notRealizedTarget, setNotRealizedTarget] = useState<string | null>(null);
   const [endingMeetId, setEndingMeetId] = useState<string | null>(null);
+  const [endConfirmId, setEndConfirmId] = useState<string | null>(null);
   /** Esconde o card Ao vivo na hora, mesmo antes do refetch. */
   const [locallyEndedMeetIds, setLocallyEndedMeetIds] = useState<Set<string>>(() => new Set());
   const queryClient = useQueryClient();
@@ -86,11 +88,12 @@ const MentorDashboardPage = () => {
       setLocallyEndedMeetIds((prev) => new Set(prev).add(bookingId));
       await queryClient.invalidateQueries({ queryKey: ["mentor-dash-bookings", profile?.id] });
       toast.success("Sessão encerrada", {
-        description: "Abrindo o relatório — buscamos o resumo Gemini automaticamente.",
+        description: "Abrindo o relatório — a transcrição chega em instantes.",
       });
       navigate(`/mentor/sessoes/${bookingId}/relatorio`, { state: { meetEnded: true } });
     } finally {
       setEndingMeetId(null);
+      setEndConfirmId(null);
     }
   };
 
@@ -544,7 +547,7 @@ const MentorDashboardPage = () => {
                         size="default"
                         variant="outline"
                         disabled={endingMeetId === b.id}
-                        onClick={() => endMeetForAll(b.id)}
+                        onClick={() => setEndConfirmId(b.id)}
                         title="Encerra a call para todos, libera o resumo Gemini e abre o relatório"
                       >
                         <PhoneOff /> {endingMeetId === b.id ? "Encerrando…" : "Encerrar sessão"}
@@ -731,7 +734,7 @@ const MentorDashboardPage = () => {
                             size="sm"
                             variant="outline"
                             disabled={endingMeetId === b.id}
-                            onClick={() => endMeetForAll(b.id)}
+                            onClick={() => setEndConfirmId(b.id)}
                             title="Encerra a call para todos, libera o resumo Gemini e abre o relatório"
                           >
                             <PhoneOff /> {endingMeetId === b.id ? "Encerrando…" : "Encerrar"}
@@ -829,6 +832,12 @@ const MentorDashboardPage = () => {
         onOpenChange={(open) => { if (!open) setNotRealizedTarget(null); }}
         busy={!!notRealizedTarget && actingId === notRealizedTarget}
         onConfirm={async (reason) => (notRealizedTarget ? markNotRealized(notRealizedTarget, reason) : false)}
+      />
+      <EndMeetingDialog
+        open={!!endConfirmId}
+        onOpenChange={(open) => { if (!open && !endingMeetId) setEndConfirmId(null); }}
+        busy={!!endingMeetId}
+        onConfirm={() => (endConfirmId ? endMeetForAll(endConfirmId) : undefined)}
       />
     </AppLayout>
   );

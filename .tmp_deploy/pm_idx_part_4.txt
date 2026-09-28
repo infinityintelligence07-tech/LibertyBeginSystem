@@ -1,0 +1,79 @@
+tId: payload.force ? null : booking.meeting_calendar_event_id,
+      });
+      meetUrl = created.meetUrl;
+      eventId = created.eventId;
+      meetingCode = created.meetingCode;
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      await admin.from("bookings").update({ meeting_provision_error: msg }).eq("id", bookingId);
+      return errorJson(msg, 500);
+    }
+
+    if (meetingCode) {
+      try {
+        await configureMeetSpace(accessToken, meetingCode);
+      } catch (e) {
+        accessWarning = e instanceof Error ? e.message : String(e);
+        console.warn("configureMeetSpace", accessWarning);
+      }
+    }
+
+    const texts = buildWaTexts({
+      bookingId,
+      memberName,
+      mentorName,
+      sessionName,
+      date: booking.scheduled_date,
+      start: booking.start_time,
+      end: booking.end_time,
+      meetUrl,
+    });
+
+    const { error: upErr } = await admin
+      .from("bookings")
+      .update({
+        zoom_join_url: meetUrl,
+        zoom_link: meetUrl,
+        meeting_provider: "meet",
+        meeting_host_id: host.id,
+        meeting_space_name: meetUrl.replace(/^https?:\/\/meet\.google\.com\//, "").split("?")[0] || null,
+        meeting_calendar_event_id: eventId,
+        meeting_wa_member_text: texts.member,
+        meeting_wa_mentor_text: texts.mentor,
+        meeting_provisioned_at: new Date().toISOString(),
+        meeting_provision_error: accessWarning,
+      })
+      .eq("id", bookingId);
+
+    if (upErr) {
+      return errorJson("Meet criado, mas falhou ao salvar no banco: " + upErr.message, 500);
+    }
+
+    try {
+      const syncUrl = `${Deno.env.get("SUPABASE_URL")}/functions/v1/google-calendar-sync`;
+      await fetch(syncUrl, {
+        method: "POST",
+        headers: {
+          Authorization: req.headers.get("Authorization") || "",
+          apikey: Deno.env.get("SUPABASE_ANON_KEY") || "",
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ booking_id: bookingId }),
+      });
+    } catch (e) {
+      console.warn("google-calendar-sync after meet", e);
+    }
+
+    return json({
+      ok: true,
+      meet_url: meetUrl,
+      event_id: eventId,
+      host_email: hostEmail,
+      wa_member: texts.member,
+      wa_mentor: texts.mentor,
+      access_warning: accessWarning,
+    });
+  } catch (e) {
+    return toResponse(e);
+  }
+});
