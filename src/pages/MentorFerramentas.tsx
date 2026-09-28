@@ -46,6 +46,7 @@ const MentorFerramentasPage = ({ role = "mentor" }: { role?: "mentor" | "admin" 
   const [phase, setPhase] = useState<"inicial" | "final">("inicial");
   const [templateId, setTemplateId] = useState("");
   const [search, setSearch] = useState("");
+  const [memberSearch, setMemberSearch] = useState("");
   const [toDelete, setToDelete] = useState<any>(null);
   const [statusFilter, setStatusFilter] = useState<"all" | "completed" | "in_progress">("all");
   const [openMemberId, setOpenMemberId] = useState<string | null>(null);
@@ -89,6 +90,14 @@ const MentorFerramentasPage = ({ role = "mentor" }: { role?: "mentor" | "admin" 
     members.forEach((x: any) => m.set(x.id, x));
     return m;
   }, [members]);
+
+  const memberOptions = useMemo(() => {
+    const q = norm(memberSearch);
+    if (!q) return members;
+    return members.filter((m: any) => norm(m.full_name || "").includes(q) || norm(m.company_name || "").includes(q));
+  }, [members, memberSearch]);
+
+  const selectedMember = memberId ? memberById.get(memberId) : null;
 
   const filtered = useMemo(() => {
     const q = norm(search);
@@ -171,6 +180,7 @@ const MentorFerramentasPage = ({ role = "mentor" }: { role?: "mentor" | "admin" 
   const openNew = () => {
     setTemplateId(templates[0]?.id || "");
     setPhase("inicial");
+    setMemberSearch("");
     setOpen(true);
   };
 
@@ -408,14 +418,44 @@ const MentorFerramentasPage = ({ role = "mentor" }: { role?: "mentor" | "admin" 
               <option key={t.id} value={t.id}>{t.name}</option>
             ))}
           </SelectField>
-          <SelectField label="Aluno" value={memberId} onChange={(e) => setMemberId(e.target.value)} required>
-            <option value="" disabled>Selecione o aluno</option>
-            {members.map((m: any) => (
-              <option key={m.id} value={m.id}>
-                {shortName(m.full_name)}{m.company_name ? ` · ${m.company_name}` : ""}
-              </option>
-            ))}
-          </SelectField>
+          <div className="space-y-2">
+            <TextField
+              label="Aluno"
+              type="search"
+              value={memberSearch}
+              onChange={(e) => setMemberSearch(e.target.value)}
+              placeholder="Buscar por nome ou empresa..."
+              leading={<Search />}
+              autoComplete="off"
+              required
+            />
+            {selectedMember && (
+              <p className="text-sm text-muted-foreground">
+                Selecionado: <span className="font-medium text-foreground">{shortName(selectedMember.full_name)}</span>
+                {selectedMember.company_name ? ` · ${selectedMember.company_name}` : ""}
+              </p>
+            )}
+            {memberOptions.length === 0 ? (
+              <EmptyState compact icon={Search} title="Nenhum resultado" description="Tente outro nome ou empresa." />
+            ) : (
+              <div className="max-h-60 overflow-y-auto rounded-ds-lg border border-border" role="listbox" aria-label="Alunos">
+                {memberOptions.map((m: any, i: number) => (
+                  <ListRow
+                    key={m.id}
+                    role="option"
+                    aria-selected={memberId === m.id}
+                    onPress={() => setMemberId(m.id)}
+                    active={memberId === m.id}
+                    chevron={false}
+                    leading={<UserAvatar name={m.full_name} avatarUrl={m.avatar_url} size={32} />}
+                    title={shortName(m.full_name)}
+                    subtitle={m.company_name || "Sem empresa"}
+                    last={i === memberOptions.length - 1}
+                  />
+                ))}
+              </div>
+            )}
+          </div>
           <SelectField label="Momento" value={phase} onChange={(e) => setPhase(e.target.value as "inicial" | "final")}>
             <option value="inicial">Diagnóstico inicial (kickoff)</option>
             <option value="final">Diagnóstico final (encerramento)</option>
