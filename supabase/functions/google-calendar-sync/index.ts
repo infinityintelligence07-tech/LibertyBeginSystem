@@ -94,11 +94,47 @@ async function syncBooking(admin: any, booking_id: string) {
   const startISO = `${booking.scheduled_date}T${booking.start_time}-03:00`;
   const endISO = `${booking.scheduled_date}T${booking.end_time}-03:00`;
   const title = `Sessão: ${session?.name || "Mentoria"} — Liberty Begin`;
-  const description = `Sessão de mentoria Liberty Begin.\n\n${session?.description || ""}\n\n${booking.zoom_join_url ? `Zoom: ${booking.zoom_join_url}` : ""}`.trim();
+  const meetingLabel = booking.meeting_provider === "meet" ? "Google Meet" : "Link da sessão";
+  const description = `Sessão de mentoria Liberty Begin.\n\n${session?.description || ""}\n\n${booking.zoom_join_url ? `${meetingLabel}: ${booking.zoom_join_url}` : ""}`.trim();
   const attendees = [liberty?.email && { email: liberty.email }, mentor?.email && { email: mentor.email }].filter(Boolean);
 
   const isCancelled = booking.status === "cancelled";
   const updates: Record<string, string | null> = {};
+
+  // Convite do Meet na agenda da conta host: é o evento que mentor e aluno recebem.
+  // Remarcar/cancelar a sessão precisa refletir nele, senão o convite fica com horário antigo.
+  const hasHostEvent = !!(booking.meeting_calendar_event_id && booking.meeting_host_id);
+  if (hasHostEvent) {
+    const { data: host } = await admin
+      .from("meeting_hosts").select("profile_id").eq("id", booking.meeting_host_id).maybeSingle();
+    const { data: hostToken } = host?.profile_id
+      ? await admin.from("user_oauth_tokens").select("google_refresh_token").eq("profile_id", host.profile_id).maybeSingle()
+      : { data: null };
+    if (hostToken?.google_refresh_token) {
+      try {
+        const at = await refreshAccessToken(hostToken.google_refresh_token);
+        if (isCancelled) {
+          await deleteEvent(at, booking.meeting_calendar_event_id);
+          updates.meeting_calendar_event_id = null;
+        } else {
+          const guestEmail = typeof booking.guest_email === "string" ? booking.guest_email.trim().toLowerCase() : "";
+          await patchEvent(at, booking.meeting_calendar_event_id, {
+            start: { dateTime: startISO, timeZone: "America/Sao_Paulo" },
+            end: { dateTime: endISO, timeZone: "America/Sao_Paulo" },
+            attendees: guestEmail ? [...attendees, { email: guestEmail }] : attendees,
+          });
+        }
+      } catch (e) {
+        console.error("meeting_calendar_event_id sync error", e);
+      }
+    }
+  }
+
+  /** Token recusado pelo Google: marca desconectado para o Perfil pedir reconexão. */
+  const markGoogleDisconnected = async (profileId: string, err: unknown) => {
+    if (!/unauthorized_client|invalid_grant/i.test(String(err))) return;
+    await admin.from("profiles").update({ google_connected: false }).eq("id", profileId);
+  };
 
   const handleCalendar = async (
     profileId: string | undefined,
@@ -109,8 +145,13 @@ async function syncBooking(admin: any, booking_id: string) {
     if (!profileId) return;
     const refresh = tokenMap.get(profileId);
     if (!refresh) return;
+    // Mentor e aluno já recebem o convite do Meet da conta host; não cria um segundo evento igual.
+    if (hasHostEvent && !existingEventId && !isCancelled) return;
     try {
-      const at = await refreshAccessToken(refresh);
+      const at = await refreshAccessToken(refresh).catch(async (e) => {
+        await markGoogleDisconnected(profileId, e);
+        throw e;
+      });
       if (isCancelled) {
         if (existingEventId) {
           await deleteEvent(at, existingEventId);
@@ -124,7 +165,7 @@ async function syncBooking(admin: any, booking_id: string) {
           description,
           start: { dateTime: startISO, timeZone: "America/Sao_Paulo" },
           end: { dateTime: endISO, timeZone: "America/Sao_Paulo" },
-          ...(withAttendees ? { attendees } : {}),
+          ...(withAttendees && !hasHostEvent ? { attendees } : {}),
         });
       } else {
         const id = await createEvent(at, {
@@ -132,7 +173,7 @@ async function syncBooking(admin: any, booking_id: string) {
           description,
           start: { dateTime: startISO, timeZone: "America/Sao_Paulo" },
           end: { dateTime: endISO, timeZone: "America/Sao_Paulo" },
-          ...(withAttendees ? { attendees } : {}),
+          ...(withAttendees && !hasHostEvent ? { attendees } : {}),
         });
         if (id) updates[updateField] = id;
       }
