@@ -4,7 +4,7 @@
  * Cada booking = um meet.google.com distinto (sem interferência).
  */
 import { handleOptions, json, errorJson } from "../_shared/cors.ts";
-import { requireRole, toResponse, STAFF_ROLES, type AppRole } from "../_shared/auth.ts";
+import { getAdminClient, requireRole, timingSafeEqual, toResponse, STAFF_ROLES, type AppRole, type AuthContext } from "../_shared/auth.ts";
 import { resolveGoogleOAuthCredentials } from "../_shared/googleOAuth.ts";
 
 const PROVISION_ROLES: AppRole[] = [...STAFF_ROLES, "liberty"];
@@ -708,318 +708,383 @@ async function assertCanEndOrFetchArtifacts(
   return null;
 }
 
+/** Cria/reabre a sala de um booking. Mesmo caminho para a tela (usuário logado) e para a varredura do cron. */
+async function handleProvision(req: Request, ctx: AuthContext, payload: Record<string, unknown>): Promise<Response> {
+  const admin = ctx.supabaseAdmin;
+
+  const bookingId = payload.booking_id as string | undefined;
+  if (!bookingId) return errorJson("booking_id obrigatório", 400);
+
+  const { data: booking, error: bErr } = await admin
+    .from("bookings")
+    .select(
+      "id, status, scheduled_date, start_time, end_time, mentor_id, liberty_id, guest_name, guest_email, session_id, zoom_join_url, meeting_space_name, meeting_calendar_event_id, is_retroactive, created_by, meeting_ended_at, meeting_transcript_text, meeting_artifacts_status",
+    )
+    .eq("id", bookingId)
+    .single();
+
+  if (bErr || !booking) return errorJson("Agendamento não encontrado", 404);
+
+  // Membro só pode provisionar a própria sessão; staff pode qualquer uma.
+  const isStaff = ctx.roles.some((r) => STAFF_ROLES.includes(r));
+  if (!isStaff) {
+    const { data: myProfile } = await admin
+      .from("profiles")
+      .select("id")
+      .eq("user_id", ctx.user?.id || "")
+      .maybeSingle();
+    const owns =
+      (myProfile?.id && booking.liberty_id === myProfile.id) ||
+      booking.created_by === ctx.user?.id;
+    if (!owns) return errorJson("Forbidden", 403);
+  }
+
+  const existingMeetingCode =
+    (typeof booking.meeting_space_name === "string" && booking.meeting_space_name) ||
+    (booking.zoom_join_url || "").replace(/^https?:\/\/meet\.google\.com\//, "").split("?")[0] ||
+    "";
+
+  // Encerrar call para todos via API da host — mentor da sessão ou admin.
+  if (payload.action === "end") {
+    const denied = await assertCanEndOrFetchArtifacts(admin, ctx, booking);
+    if (denied) return denied;
+    if (!existingMeetingCode) {
+      return errorJson("Esta sessão ainda não tem sala Meet para encerrar.", 400);
+    }
+    const hostTok = await resolveHostAccessToken(admin);
+    if ("error" in hostTok) return errorJson(hostTok.error, 400);
+    try {
+      await endActiveMeetConference(hostTok.accessToken, existingMeetingCode);
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      // Se a API falhar mas a call já não existe, ainda marcamos como encerrada na plataforma.
+      if (!/FAILED_PRECONDITION|no active|not found|already ended|does not have an active/i.test(msg)) {
+        return errorJson(msg, 500);
+      }
+    }
+    const endedAt = new Date().toISOString();
+    await admin
+      .from("bookings")
+      .update({
+        meeting_ended_at: endedAt,
+        meeting_artifacts_status: booking.meeting_artifacts_status === "ready" ? "ready" : "pending",
+      })
+      .eq("id", bookingId);
+    return json({
+      ok: true,
+      ended: true,
+      meeting_ended_at: endedAt,
+      message:
+        "Reunião encerrada. Buscando transcrição/resumo Gemini automaticamente — costuma levar 1–5 minutos.",
+    });
+  }
+
+  // Poll da transcrição / smart notes após Encerrar.
+  if (payload.action === "artifacts") {
+    const denied = await assertCanEndOrFetchArtifacts(admin, ctx, booking);
+    if (denied) return denied;
+    if (!existingMeetingCode) {
+      return errorJson("Esta sessão ainda não tem sala Meet.", 400);
+    }
+    if (booking.meeting_transcript_text && String(booking.meeting_transcript_text).trim().length >= 30) {
+      return json({
+        ok: true,
+        status: "ready",
+        transcript: booking.meeting_transcript_text,
+        smart_notes_url: null,
+        message: "Transcrição já salva nesta sessão.",
+      });
+    }
+    const hostTok = await resolveHostAccessToken(admin);
+    if ("error" in hostTok) return errorJson(hostTok.error, 400);
+    let artifacts: MeetArtifactsResult;
+    try {
+      artifacts = await fetchMeetArtifacts(hostTok.accessToken, existingMeetingCode);
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      return errorJson(msg, 500);
+    }
+    const patch: Record<string, unknown> = {
+      meeting_artifacts_status: artifacts.status,
+      meeting_artifacts_fetched_at: new Date().toISOString(),
+    };
+    if (artifacts.transcript && artifacts.transcript.trim().length >= 30) {
+      patch.meeting_transcript_text = artifacts.transcript.trim();
+    }
+    await admin.from("bookings").update(patch).eq("id", bookingId);
+    return json({
+      ok: true,
+      status: artifacts.status,
+      transcript: artifacts.transcript,
+      smart_notes_url: artifacts.smart_notes_url,
+      conference_record: artifacts.conference_record,
+      message: artifacts.message,
+    });
+  }
+
+  if (booking.is_retroactive) {
+    return json({ ok: true, skipped: true, reason: "retroactive" });
+  }
+
+  if (booking.status !== "scheduled") {
+    return json({
+      ok: false,
+      skipped: true,
+      reason: "status_not_scheduled",
+      message: "Sala Meet só é criada quando a sessão está confirmada (scheduled).",
+    });
+  }
+
+  if (booking.zoom_join_url?.includes("meet.google.com") && !payload.force) {
+    const { data: session } = await admin.from("sessions").select("name").eq("id", booking.session_id).maybeSingle();
+    const { data: mentor } = await admin.from("profiles").select("full_name, phone, email, google_calendar_email").eq("id", booking.mentor_id).maybeSingle();
+    const { data: liberty } = booking.liberty_id
+      ? await admin.from("profiles").select("full_name, phone, email").eq("id", booking.liberty_id).maybeSingle()
+      : { data: null };
+    const reuseCode = booking.zoom_join_url.replace(/^https?:\/\/meet\.google\.com\//, "").split("?")[0];
+    const reuseTok = await resolveHostAccessToken(admin);
+    if (!("error" in reuseTok) && reuseCode) {
+      const warn = await addMentorCohosts(reuseTok.accessToken, reuseCode, mentorGoogleEmails(mentor)).catch((e) => String(e));
+      if (warn) console.warn("co-host na sala reaproveitada", bookingId, warn);
+    }
+    const texts = buildWaTexts({
+      bookingId,
+      memberName: liberty?.full_name || booking.guest_name || "Aluno",
+      mentorName: mentor?.full_name || "Mentor",
+      sessionName: session?.name || "Mentoria",
+      date: booking.scheduled_date,
+      start: booking.start_time,
+      end: booking.end_time,
+      meetUrl: booking.zoom_join_url,
+    });
+    await admin
+      .from("bookings")
+      .update({
+        meeting_wa_member_text: texts.member,
+        meeting_wa_mentor_text: texts.mentor,
+        meeting_provision_error: null,
+      })
+      .eq("id", bookingId);
+    return json({
+      ok: true,
+      reused: true,
+      meet_url: booking.zoom_join_url,
+      wa_member: texts.member,
+      wa_mentor: texts.mentor,
+    });
+  }
+
+  const hostTok = await resolveHostAccessToken(admin);
+  if ("error" in hostTok) {
+    await admin.from("bookings").update({ meeting_provision_error: hostTok.error }).eq("id", bookingId);
+    return errorJson(hostTok.error, 400);
+  }
+  const accessToken = hostTok.accessToken;
+  const hostEmail = hostTok.hostEmail;
+
+  const { data: hosts } = await admin
+    .from("meeting_hosts")
+    .select("id, email, label, profile_id")
+    .eq("is_active", true)
+    .order("sort_order", { ascending: true })
+    .limit(1);
+  const host = (hosts?.[0] || { id: null, email: hostEmail }) as HostRow;
+
+  const { data: session } = await admin.from("sessions").select("name, description").eq("id", booking.session_id).maybeSingle();
+  const { data: mentor } = await admin
+    .from("profiles")
+    .select("full_name, phone, email, google_calendar_email")
+    .eq("id", booking.mentor_id)
+    .maybeSingle();
+  const { data: liberty } = booking.liberty_id
+    ? await admin.from("profiles").select("full_name, phone, email").eq("id", booking.liberty_id).maybeSingle()
+    : { data: null };
+
+  const memberName = liberty?.full_name || booking.guest_name || "Aluno";
+  const mentorName = mentor?.full_name || "Mentor";
+  const sessionName = session?.name || "Mentoria";
+  const startISO = `${booking.scheduled_date}T${booking.start_time}-03:00`;
+  const endISO = `${booking.scheduled_date}T${booking.end_time}-03:00`;
+  const guestEmail =
+    typeof booking.guest_email === "string" ? booking.guest_email.trim().toLowerCase() : "";
+  const attendeeEmails = [...new Set(
+    [mentor?.google_calendar_email || mentor?.email, liberty?.email, guestEmail || null]
+      .map((e) => (typeof e === "string" ? e.trim().toLowerCase() : ""))
+      .filter((e) => e.includes("@")),
+  )];
+
+  let meetUrl: string;
+  let eventId: string;
+  let meetingCode: string | null = null;
+  let accessWarning: string | null = null;
+  try {
+    const space = await createMeetSpace(accessToken);
+    const created = await createMeetViaCalendar(accessToken, {
+      title: `Sessão: ${sessionName} — ${memberName}`,
+      description: [
+        `Mentoria Liberty Begin`,
+        `Aluno: ${memberName}`,
+        `Mentor: ${mentorName}`,
+        session?.description || "",
+        ``,
+        `Sala aberta: quem tem o link entra sem aguardar admissão.`,
+        `Notas Gemini + transcrição: ligadas automaticamente na criação da sala (se o plano Google da host permitir).`,
+      ].join("\n"),
+      startISO,
+      endISO,
+      attendeeEmails,
+      existingEventId: payload.force ? null : booking.meeting_calendar_event_id,
+      space,
+    });
+    meetUrl = created.meetUrl;
+    eventId = created.eventId;
+    meetingCode = created.meetingCode;
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    await admin.from("bookings").update({ meeting_provision_error: msg }).eq("id", bookingId);
+    return errorJson(msg, 500);
+  }
+
+  if (meetingCode) {
+    try {
+      await configureMeetSpace(accessToken, meetingCode);
+    } catch (e) {
+      accessWarning = e instanceof Error ? e.message : String(e);
+      console.warn("configureMeetSpace", accessWarning);
+    }
+    try {
+      const cohostWarning = await addMentorCohosts(accessToken, meetingCode, mentorGoogleEmails(mentor));
+      if (cohostWarning) accessWarning = accessWarning ? `${accessWarning} ${cohostWarning}` : cohostWarning;
+    } catch (e) {
+      console.warn("addMentorCohosts", e);
+    }
+  }
+
+  const texts = buildWaTexts({
+    bookingId,
+    memberName,
+    mentorName,
+    sessionName,
+    date: booking.scheduled_date,
+    start: booking.start_time,
+    end: booking.end_time,
+    meetUrl,
+  });
+
+  const { error: upErr } = await admin
+    .from("bookings")
+    .update({
+      zoom_join_url: meetUrl,
+      zoom_link: meetUrl,
+      meeting_provider: "meet",
+      meeting_host_id: host.id,
+      meeting_space_name: meetUrl.replace(/^https?:\/\/meet\.google\.com\//, "").split("?")[0] || null,
+      meeting_calendar_event_id: eventId,
+      meeting_wa_member_text: texts.member,
+      meeting_wa_mentor_text: texts.mentor,
+      meeting_provisioned_at: new Date().toISOString(),
+      meeting_provision_error: accessWarning,
+    })
+    .eq("id", bookingId);
+
+  if (upErr) {
+    return errorJson("Meet criado, mas falhou ao salvar no banco: " + upErr.message, 500);
+  }
+
+  try {
+    const syncUrl = `${Deno.env.get("SUPABASE_URL")}/functions/v1/google-calendar-sync`;
+    await fetch(syncUrl, {
+      method: "POST",
+      headers: {
+        Authorization: req.headers.get("Authorization") || "",
+        apikey: Deno.env.get("SUPABASE_ANON_KEY") || "",
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ booking_id: bookingId }),
+    });
+  } catch (e) {
+    console.warn("google-calendar-sync after meet", e);
+  }
+
+  return json({
+    ok: true,
+    meet_url: meetUrl,
+    event_id: eventId,
+    host_email: hostEmail,
+    wa_member: texts.member,
+    wa_mentor: texts.mentor,
+    access_warning: accessWarning,
+  });
+}
+
+async function isValidSweepSecret(admin: AuthContext["supabaseAdmin"], req: Request): Promise<boolean> {
+  const provided = (req.headers.get("x-sweep-secret") || "").trim();
+  if (!provided) return false;
+  const { data } = await admin.from("system_config").select("value").eq("key", "meeting_sweep_secret").maybeSingle();
+  const expected = String(data?.value || "").trim();
+  return expected.length >= 32 && timingSafeEqual(provided, expected);
+}
+
+const SWEEP_BATCH = 10;
+const SWEEP_DAYS_AHEAD = 60;
+
+/**
+ * Cron: sessões agendadas (hoje em diante) que ficaram sem sala — criadas antes do Meet,
+ * ou quando a chamada da tela falhou — recebem o link e o convite na agenda.
+ */
+async function sweepUnprovisioned(req: Request, admin: AuthContext["supabaseAdmin"]) {
+  const todayBrt = new Intl.DateTimeFormat("en-CA", { timeZone: "America/Sao_Paulo" }).format(new Date());
+  const until = new Date(Date.now() + SWEEP_DAYS_AHEAD * 86_400_000).toISOString().slice(0, 10);
+  const { data: rows, error } = await admin
+    .from("bookings")
+    .select("id, scheduled_date, start_time, end_time")
+    .eq("status", "scheduled")
+    .eq("is_retroactive", false)
+    .gte("scheduled_date", todayBrt)
+    .lte("scheduled_date", until)
+    .or("zoom_join_url.is.null,zoom_join_url.not.ilike.%meet.google.com%")
+    .order("scheduled_date")
+    .order("start_time")
+    .limit(SWEEP_BATCH * 3);
+  if (error) throw new Error("Falha ao listar sessões sem sala: " + error.message);
+
+  const nowMs = Date.now();
+  // Não cria sala para sessão de hoje que já terminou.
+  const pending = (rows || []).filter((b) => {
+    const end = new Date(`${b.scheduled_date}T${String(b.end_time || b.start_time || "23:59").slice(0, 5)}:00-03:00`);
+    return end.getTime() > nowMs;
+  }).slice(0, SWEEP_BATCH);
+
+  const sweepCtx: AuthContext = { user: null, roles: ["admin"], supabaseAdmin: admin, isServiceRole: true };
+  let provisioned = 0;
+  let errors = 0;
+  for (const b of pending) {
+    try {
+      const res = await handleProvision(req, sweepCtx, { booking_id: b.id });
+      if (res.ok) provisioned++;
+      else errors++;
+    } catch (e) {
+      errors++;
+      console.warn("[provision-meeting] sweep", b.id, e);
+    }
+  }
+  return { checked: pending.length, provisioned, errors };
+}
+
 Deno.serve(async (req) => {
   const preflight = handleOptions(req);
   if (preflight) return preflight;
 
   try {
+    if (req.headers.get("x-sweep-secret")) {
+      const sweepAdmin = getAdminClient();
+      if (!(await isValidSweepSecret(sweepAdmin, req))) return errorJson("Forbidden", 403);
+      return json({ ok: true, ...(await sweepUnprovisioned(req, sweepAdmin)) });
+    }
+
     const ctx = await requireRole(req, PROVISION_ROLES);
-    const admin = ctx.supabaseAdmin;
-
     const payload = await req.json().catch(() => ({}));
-    const bookingId = payload.booking_id as string | undefined;
-    if (!bookingId) return errorJson("booking_id obrigatório", 400);
-
-    const { data: booking, error: bErr } = await admin
-      .from("bookings")
-      .select(
-        "id, status, scheduled_date, start_time, end_time, mentor_id, liberty_id, guest_name, guest_email, session_id, zoom_join_url, meeting_space_name, meeting_calendar_event_id, is_retroactive, created_by, meeting_ended_at, meeting_transcript_text, meeting_artifacts_status",
-      )
-      .eq("id", bookingId)
-      .single();
-
-    if (bErr || !booking) return errorJson("Agendamento não encontrado", 404);
-
-    // Membro só pode provisionar a própria sessão; staff pode qualquer uma.
-    const isStaff = ctx.roles.some((r) => STAFF_ROLES.includes(r));
-    if (!isStaff) {
-      const { data: myProfile } = await admin
-        .from("profiles")
-        .select("id")
-        .eq("user_id", ctx.user?.id || "")
-        .maybeSingle();
-      const owns =
-        (myProfile?.id && booking.liberty_id === myProfile.id) ||
-        booking.created_by === ctx.user?.id;
-      if (!owns) return errorJson("Forbidden", 403);
-    }
-
-    const existingMeetingCode =
-      (typeof booking.meeting_space_name === "string" && booking.meeting_space_name) ||
-      (booking.zoom_join_url || "").replace(/^https?:\/\/meet\.google\.com\//, "").split("?")[0] ||
-      "";
-
-    // Encerrar call para todos via API da host — mentor da sessão ou admin.
-    if (payload.action === "end") {
-      const denied = await assertCanEndOrFetchArtifacts(admin, ctx, booking);
-      if (denied) return denied;
-      if (!existingMeetingCode) {
-        return errorJson("Esta sessão ainda não tem sala Meet para encerrar.", 400);
-      }
-      const hostTok = await resolveHostAccessToken(admin);
-      if ("error" in hostTok) return errorJson(hostTok.error, 400);
-      try {
-        await endActiveMeetConference(hostTok.accessToken, existingMeetingCode);
-      } catch (e) {
-        const msg = e instanceof Error ? e.message : String(e);
-        // Se a API falhar mas a call já não existe, ainda marcamos como encerrada na plataforma.
-        if (!/FAILED_PRECONDITION|no active|not found|already ended|does not have an active/i.test(msg)) {
-          return errorJson(msg, 500);
-        }
-      }
-      const endedAt = new Date().toISOString();
-      await admin
-        .from("bookings")
-        .update({
-          meeting_ended_at: endedAt,
-          meeting_artifacts_status: booking.meeting_artifacts_status === "ready" ? "ready" : "pending",
-        })
-        .eq("id", bookingId);
-      return json({
-        ok: true,
-        ended: true,
-        meeting_ended_at: endedAt,
-        message:
-          "Reunião encerrada. Buscando transcrição/resumo Gemini automaticamente — costuma levar 1–5 minutos.",
-      });
-    }
-
-    // Poll da transcrição / smart notes após Encerrar.
-    if (payload.action === "artifacts") {
-      const denied = await assertCanEndOrFetchArtifacts(admin, ctx, booking);
-      if (denied) return denied;
-      if (!existingMeetingCode) {
-        return errorJson("Esta sessão ainda não tem sala Meet.", 400);
-      }
-      if (booking.meeting_transcript_text && String(booking.meeting_transcript_text).trim().length >= 30) {
-        return json({
-          ok: true,
-          status: "ready",
-          transcript: booking.meeting_transcript_text,
-          smart_notes_url: null,
-          message: "Transcrição já salva nesta sessão.",
-        });
-      }
-      const hostTok = await resolveHostAccessToken(admin);
-      if ("error" in hostTok) return errorJson(hostTok.error, 400);
-      let artifacts: MeetArtifactsResult;
-      try {
-        artifacts = await fetchMeetArtifacts(hostTok.accessToken, existingMeetingCode);
-      } catch (e) {
-        const msg = e instanceof Error ? e.message : String(e);
-        return errorJson(msg, 500);
-      }
-      const patch: Record<string, unknown> = {
-        meeting_artifacts_status: artifacts.status,
-        meeting_artifacts_fetched_at: new Date().toISOString(),
-      };
-      if (artifacts.transcript && artifacts.transcript.trim().length >= 30) {
-        patch.meeting_transcript_text = artifacts.transcript.trim();
-      }
-      await admin.from("bookings").update(patch).eq("id", bookingId);
-      return json({
-        ok: true,
-        status: artifacts.status,
-        transcript: artifacts.transcript,
-        smart_notes_url: artifacts.smart_notes_url,
-        conference_record: artifacts.conference_record,
-        message: artifacts.message,
-      });
-    }
-
-    if (booking.is_retroactive) {
-      return json({ ok: true, skipped: true, reason: "retroactive" });
-    }
-
-    if (booking.status !== "scheduled") {
-      return json({
-        ok: false,
-        skipped: true,
-        reason: "status_not_scheduled",
-        message: "Sala Meet só é criada quando a sessão está confirmada (scheduled).",
-      });
-    }
-
-    if (booking.zoom_join_url?.includes("meet.google.com") && !payload.force) {
-      const { data: session } = await admin.from("sessions").select("name").eq("id", booking.session_id).maybeSingle();
-      const { data: mentor } = await admin.from("profiles").select("full_name, phone, email, google_calendar_email").eq("id", booking.mentor_id).maybeSingle();
-      const { data: liberty } = booking.liberty_id
-        ? await admin.from("profiles").select("full_name, phone, email").eq("id", booking.liberty_id).maybeSingle()
-        : { data: null };
-      const reuseCode = booking.zoom_join_url.replace(/^https?:\/\/meet\.google\.com\//, "").split("?")[0];
-      const reuseTok = await resolveHostAccessToken(admin);
-      if (!("error" in reuseTok) && reuseCode) {
-        const warn = await addMentorCohosts(reuseTok.accessToken, reuseCode, mentorGoogleEmails(mentor)).catch((e) => String(e));
-        if (warn) console.warn("co-host na sala reaproveitada", bookingId, warn);
-      }
-      const texts = buildWaTexts({
-        bookingId,
-        memberName: liberty?.full_name || booking.guest_name || "Aluno",
-        mentorName: mentor?.full_name || "Mentor",
-        sessionName: session?.name || "Mentoria",
-        date: booking.scheduled_date,
-        start: booking.start_time,
-        end: booking.end_time,
-        meetUrl: booking.zoom_join_url,
-      });
-      await admin
-        .from("bookings")
-        .update({
-          meeting_wa_member_text: texts.member,
-          meeting_wa_mentor_text: texts.mentor,
-          meeting_provision_error: null,
-        })
-        .eq("id", bookingId);
-      return json({
-        ok: true,
-        reused: true,
-        meet_url: booking.zoom_join_url,
-        wa_member: texts.member,
-        wa_mentor: texts.mentor,
-      });
-    }
-
-    const hostTok = await resolveHostAccessToken(admin);
-    if ("error" in hostTok) {
-      await admin.from("bookings").update({ meeting_provision_error: hostTok.error }).eq("id", bookingId);
-      return errorJson(hostTok.error, 400);
-    }
-    const accessToken = hostTok.accessToken;
-    const hostEmail = hostTok.hostEmail;
-
-    const { data: hosts } = await admin
-      .from("meeting_hosts")
-      .select("id, email, label, profile_id")
-      .eq("is_active", true)
-      .order("sort_order", { ascending: true })
-      .limit(1);
-    const host = (hosts?.[0] || { id: null, email: hostEmail }) as HostRow;
-
-    const { data: session } = await admin.from("sessions").select("name, description").eq("id", booking.session_id).maybeSingle();
-    const { data: mentor } = await admin
-      .from("profiles")
-      .select("full_name, phone, email, google_calendar_email")
-      .eq("id", booking.mentor_id)
-      .maybeSingle();
-    const { data: liberty } = booking.liberty_id
-      ? await admin.from("profiles").select("full_name, phone, email").eq("id", booking.liberty_id).maybeSingle()
-      : { data: null };
-
-    const memberName = liberty?.full_name || booking.guest_name || "Aluno";
-    const mentorName = mentor?.full_name || "Mentor";
-    const sessionName = session?.name || "Mentoria";
-    const startISO = `${booking.scheduled_date}T${booking.start_time}-03:00`;
-    const endISO = `${booking.scheduled_date}T${booking.end_time}-03:00`;
-    const guestEmail =
-      typeof booking.guest_email === "string" ? booking.guest_email.trim().toLowerCase() : "";
-    const attendeeEmails = [...new Set(
-      [mentor?.email, liberty?.email, guestEmail || null]
-        .map((e) => (typeof e === "string" ? e.trim().toLowerCase() : ""))
-        .filter((e) => e.includes("@")),
-    )];
-
-    let meetUrl: string;
-    let eventId: string;
-    let meetingCode: string | null = null;
-    let accessWarning: string | null = null;
-    try {
-      const space = await createMeetSpace(accessToken);
-      const created = await createMeetViaCalendar(accessToken, {
-        title: `Sessão: ${sessionName} — ${memberName}`,
-        description: [
-          `Mentoria Liberty Begin`,
-          `Aluno: ${memberName}`,
-          `Mentor: ${mentorName}`,
-          session?.description || "",
-          ``,
-          `Sala aberta: quem tem o link entra sem aguardar admissão.`,
-          `Notas Gemini + transcrição: ligadas automaticamente na criação da sala (se o plano Google da host permitir).`,
-        ].join("\n"),
-        startISO,
-        endISO,
-        attendeeEmails,
-        existingEventId: payload.force ? null : booking.meeting_calendar_event_id,
-        space,
-      });
-      meetUrl = created.meetUrl;
-      eventId = created.eventId;
-      meetingCode = created.meetingCode;
-    } catch (e) {
-      const msg = e instanceof Error ? e.message : String(e);
-      await admin.from("bookings").update({ meeting_provision_error: msg }).eq("id", bookingId);
-      return errorJson(msg, 500);
-    }
-
-    if (meetingCode) {
-      try {
-        await configureMeetSpace(accessToken, meetingCode);
-      } catch (e) {
-        accessWarning = e instanceof Error ? e.message : String(e);
-        console.warn("configureMeetSpace", accessWarning);
-      }
-      try {
-        const cohostWarning = await addMentorCohosts(accessToken, meetingCode, mentorGoogleEmails(mentor));
-        if (cohostWarning) accessWarning = accessWarning ? `${accessWarning} ${cohostWarning}` : cohostWarning;
-      } catch (e) {
-        console.warn("addMentorCohosts", e);
-      }
-    }
-
-    const texts = buildWaTexts({
-      bookingId,
-      memberName,
-      mentorName,
-      sessionName,
-      date: booking.scheduled_date,
-      start: booking.start_time,
-      end: booking.end_time,
-      meetUrl,
-    });
-
-    const { error: upErr } = await admin
-      .from("bookings")
-      .update({
-        zoom_join_url: meetUrl,
-        zoom_link: meetUrl,
-        meeting_provider: "meet",
-        meeting_host_id: host.id,
-        meeting_space_name: meetUrl.replace(/^https?:\/\/meet\.google\.com\//, "").split("?")[0] || null,
-        meeting_calendar_event_id: eventId,
-        meeting_wa_member_text: texts.member,
-        meeting_wa_mentor_text: texts.mentor,
-        meeting_provisioned_at: new Date().toISOString(),
-        meeting_provision_error: accessWarning,
-      })
-      .eq("id", bookingId);
-
-    if (upErr) {
-      return errorJson("Meet criado, mas falhou ao salvar no banco: " + upErr.message, 500);
-    }
-
-    try {
-      const syncUrl = `${Deno.env.get("SUPABASE_URL")}/functions/v1/google-calendar-sync`;
-      await fetch(syncUrl, {
-        method: "POST",
-        headers: {
-          Authorization: req.headers.get("Authorization") || "",
-          apikey: Deno.env.get("SUPABASE_ANON_KEY") || "",
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({ booking_id: bookingId }),
-      });
-    } catch (e) {
-      console.warn("google-calendar-sync after meet", e);
-    }
-
-    return json({
-      ok: true,
-      meet_url: meetUrl,
-      event_id: eventId,
-      host_email: hostEmail,
-      wa_member: texts.member,
-      wa_mentor: texts.mentor,
-      access_warning: accessWarning,
-    });
+    return await handleProvision(req, ctx, payload);
   } catch (e) {
     return toResponse(e);
   }

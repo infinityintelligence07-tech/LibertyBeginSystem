@@ -638,7 +638,9 @@ function buildSummaryEmailHtml(p: {
   };
   const body = p.summaryText
     ? p.summaryText.split(/\n{2,}/).map(block).join("")
-    : `<p>O Google gerou as anotações da call no Google Docs.</p>`;
+    : p.smartNotesUrl
+      ? `<p>O Google gerou as anotações da call no Google Docs.</p>`
+      : `<p>O resumo automático não pôde ser gerado agora. A transcrição completa está na página da sessão.</p>`;
   const notes = p.smartNotesUrl
     ? `<p style="margin:16px 0 0"><a href="${escapeHtml(p.smartNotesUrl)}">Abrir anotações do Gemini</a></p>`
     : "";
@@ -713,17 +715,20 @@ async function finalizeSessionSummary(admin: AdminClient, bookingId: string): Pr
   };
 
   let summaryText: string | null = b.meeting_summary_text || null;
+  // Se a IA falhar (ex.: sem créditos), o e-mail sai mesmo assim com o link das anotações / da transcrição.
+  let aiError: string | null = null;
   if (!summaryText && transcript.length >= 30) {
     try {
       summaryText = summaryToText(await generateSessionSummary(transcript, names));
+      await admin.from("bookings").update({
+        meeting_summary_text: summaryText,
+        meeting_summary_generated_at: new Date().toISOString(),
+        meeting_summary_email_error: null,
+      }).eq("id", bookingId);
     } catch (e) {
-      return fail("Falha ao gerar resumo: " + (e instanceof Error ? e.message : String(e)));
+      aiError = "Falha ao gerar resumo: " + (e instanceof Error ? e.message : String(e));
+      console.warn("[meeting-control] resumo", bookingId, aiError);
     }
-    await admin.from("bookings").update({
-      meeting_summary_text: summaryText,
-      meeting_summary_generated_at: new Date().toISOString(),
-      meeting_summary_email_error: null,
-    }).eq("id", bookingId);
   }
 
   const to = mentorEmails(mentor);
@@ -755,7 +760,7 @@ async function finalizeSessionSummary(admin: AdminClient, bookingId: string): Pr
 
   await admin.from("bookings").update({
     meeting_summary_emailed_at: new Date().toISOString(),
-    meeting_summary_email_error: null,
+    meeting_summary_email_error: aiError ? aiError.slice(0, 500) : null,
   }).eq("id", bookingId);
 }
 

@@ -171,11 +171,30 @@ const NpsForm = () => {
 
     setSubmitting(true);
     try {
+      // O membro pode trocar mentor/sessão no formulário: nesse caso a avaliação não é da reserva do link.
+      // Procura a reserva dele com esse mentor e sessão; se não houver, grava sem reserva.
+      let targetBookingId: string | null = null;
+      if (booking && booking.mentor_id === selectedMentorId && booking.session_id === selectedSessionId) {
+        targetBookingId = booking.id;
+      } else {
+        const { data: match } = await supabase
+          .from("bookings")
+          .select("id")
+          .eq("liberty_id", profile.id)
+          .eq("mentor_id", selectedMentorId)
+          .eq("session_id", selectedSessionId)
+          .not("status", "in", "(cancelled,not_realized)")
+          .order("scheduled_date", { ascending: false })
+          .limit(1)
+          .maybeSingle();
+        targetBookingId = match?.id ?? null;
+      }
+
       const { error } = await supabase.from("nps_responses").insert({
         liberty_id: profile.id,
         mentor_id: selectedMentorId,
         session_id: selectedSessionId,
-        booking_id: booking?.id ?? null,
+        booking_id: targetBookingId,
         liberty_name: profile.full_name ?? null,
         liberty_whatsapp: (profile as any)?.phone ?? null,
         session_name: sessionName,

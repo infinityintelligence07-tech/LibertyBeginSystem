@@ -92,16 +92,23 @@ const MentorAlunosPage = () => {
 
   // Membros do programa que o mentor pode acompanhar (D5: todos).
   // Fora da lista: perfis de mentor, inativos e programa já encerrado.
+  // Quem ainda tem sessão pela frente continua na lista mesmo com o programa vencido no cadastro.
   const today = todayPlatformDate();
+  const libertyIdsWithUpcoming = useMemo(
+    () => new Set(allBookings.filter((b) => b.liberty_id && isFutureScheduledBooking(b)).map((b) => b.liberty_id)),
+    [allBookings],
+  );
   const memberProfiles = useMemo(
     () =>
       allLiberties.filter((p) => {
         if (excludedMentorProfileIds.has(p.id)) return false;
         if (p.is_active === false) return false;
-        if (p.program_end_date && p.program_end_date < today) return false;
+        // Fim antes do início é erro de cadastro: não usa a data para esconder o membro.
+        const endDateValid = !p.program_start_date || !p.program_end_date || p.program_end_date >= p.program_start_date;
+        if (endDateValid && p.program_end_date && p.program_end_date < today && !libertyIdsWithUpcoming.has(p.id)) return false;
         return true;
       }),
-    [allLiberties, excludedMentorProfileIds, today],
+    [allLiberties, excludedMentorProfileIds, today, libertyIdsWithUpcoming],
   );
 
   const allLibertyIds = useMemo(() => memberProfiles.map((p) => p.id), [memberProfiles]);

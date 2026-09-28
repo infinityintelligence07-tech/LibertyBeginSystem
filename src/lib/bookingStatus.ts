@@ -5,7 +5,7 @@
  * - `pending_confirmation` → passou do horário depois de 01/08/2026 e o mentor ainda não marcou como realizada.
  *                            NÃO conta como realizada e NÃO pede relatório.
  * - `awaiting_report`      → status bruto `completed` e ainda falta o relatório (só sessões a partir de 01/08/2026).
- * - `completed`            → realizada (com relatório, ou sem exigir: mapeamento, retroativa ou anterior a 01/08/2026)
+ * - `completed`            → realizada (status `completed`; ou retroativa / anterior a 01/08/2026 mesmo sem fechamento)
  * - `cancelled` / `not_realized` / `pending_approval` → status bruto do banco
  */
 export type EffectiveBookingStatus =
@@ -46,6 +46,10 @@ const requiresReport = (booking: BookingTiming) => {
   if (booking.scheduled_date && booking.scheduled_date < REPORTS_REQUIRED_SINCE) return false;
   return booking.report_required !== false;
 };
+
+/** Histórico lançado pelo admin ou anterior ao app: conta como realizada mesmo sem o mentor fechar. */
+const isPreMigrationOrRetroactive = (booking: BookingTiming) =>
+  !!booking.is_retroactive || (!!booking.scheduled_date && booking.scheduled_date < REPORTS_REQUIRED_SINCE);
 
 /** Sessões de mapeamento (3h) e registros retroativos não exigem relatório do mentor. */
 export const bookingRequiresReport = (booking: BookingTiming) => requiresReport(booking);
@@ -140,13 +144,11 @@ export const getEffectiveBookingStatus = (
   }
   if (rawStatus === "pending_approval") return "pending_approval";
   // scheduled / rescheduled que já passaram:
-  // - antes de 01/08/2026 (pré-migração): conta como realizada, sem relatório
-  // - a partir daí: NÃO é realizada e NÃO pede relatório enquanto o mentor não marcar `completed`
-  //   (desmarcada / não realizada nunca pode aparecer como feita para o aluno)
+  // - antes de 01/08/2026 (pré-migração) ou retroativa: conta como realizada, sem relatório
+  // - a partir daí (inclusive Mapeamento, que não exige relatório): NÃO é realizada enquanto o mentor
+  //   não marcar `completed` — senão a sessão entra no repasse sem confirmação e o membro não ganha pontos.
   if ((rawStatus === "scheduled" || rawStatus === "rescheduled") && isBookingPast(booking, now)) {
-    // Pré-migração, retroativa ou sem relatório exigido (ex.: mapeamento): realizada, sem pendência.
-    if (!requiresReport(booking)) return "completed";
-    // Depois de 01/08/2026: não conta como realizada nem como "sem relatório" até o mentor marcar `completed`.
+    if (isPreMigrationOrRetroactive(booking)) return "completed";
     return "pending_confirmation";
   }
 
