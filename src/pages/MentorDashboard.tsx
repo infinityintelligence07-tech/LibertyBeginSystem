@@ -513,7 +513,18 @@ const MentorDashboardPage = () => {
                 >
                   <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
                     <div className="flex items-start gap-3 min-w-0">
-                      <UserAvatar name={memberName} avatarUrl={memberAvatar} size={48} />
+                      {b.liberty_id ? (
+                        <button
+                          type="button"
+                          onClick={() => navigate(`/mentor/alunos/${b.liberty_id}`)}
+                          className="shrink-0 rounded-full focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                          aria-label={`Abrir ficha de ${memberName}`}
+                        >
+                          <UserAvatar name={memberName} avatarUrl={memberAvatar} size={48} />
+                        </button>
+                      ) : (
+                        <UserAvatar name={memberName} avatarUrl={memberAvatar} size={48} />
+                      )}
                       <div className="min-w-0 space-y-1">
                         <div className="flex items-center gap-2 flex-wrap">
                           <StatusPill tone="success" withDot={false} className="gap-1.5">
@@ -527,7 +538,18 @@ const MentorDashboardPage = () => {
                             {b.start_time?.slice(0, 5)}–{b.end_time?.slice(0, 5)}
                           </span>
                         </div>
-                        <p className="text-base font-semibold text-foreground truncate">{memberName}</p>
+                        {b.liberty_id ? (
+                          <button
+                            type="button"
+                            onClick={() => navigate(`/mentor/alunos/${b.liberty_id}`)}
+                            className="block max-w-full truncate text-left text-base font-semibold text-foreground underline-offset-2 hover:underline focus-visible:outline-none focus-visible:underline"
+                            title="Abrir ficha do aluno"
+                          >
+                            {memberName}
+                          </button>
+                        ) : (
+                          <p className="text-base font-semibold text-foreground truncate">{memberName}</p>
+                        )}
                         <p className="text-sm text-muted-foreground truncate">{sessionName(b.session_id)}</p>
                       </div>
                     </div>
