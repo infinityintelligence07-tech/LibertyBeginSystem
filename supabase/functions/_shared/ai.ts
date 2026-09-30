@@ -1,7 +1,9 @@
-// Cliente de IA sem Lovable: OpenAI ou Google Gemini (endpoint OpenAI-compat).
-// Secrets suportados (Edge Functions → Secrets, ou private.app_secrets via get_app_secret):
+// Cliente de IA sem Lovable. Três APIs, o mesmo pedido (mensagens, ferramentas e instrução).
+// Se uma responde sem crédito, limite ou indisponível, a próxima é tentada.
+// Secrets (Edge Functions → Secrets, ou private.app_secrets via get_app_secret):
 //   - OPENAI_API_KEY (+ opcional OPENAI_MODEL, default gpt-4o-mini)
 //   - GEMINI_API_KEY ou GOOGLE_AI_API_KEY (+ opcional GEMINI_MODEL, default gemini-2.5-flash)
+//   - ANTHROPIC_API_KEY (+ opcional ANTHROPIC_MODEL, default claude-sonnet-4-5)
 
 export type ChatRole = "system" | "user" | "assistant";
 
@@ -18,8 +20,10 @@ export type ChatCompletionsRequest = {
   temperature?: number;
 };
 
+export type AiProviderName = "openai" | "gemini" | "anthropic";
+
 export type AiProviderConfig = {
-  provider: "openai" | "gemini";
+  provider: AiProviderName;
   apiKey: string;
   baseUrl: string;
   model: string;
@@ -33,7 +37,7 @@ export class AiConfigError extends Error {
 }
 
 const QUOTA_ERROR =
-  "Sem créditos de IA. Verifique o plano da chave OpenAI ou Gemini.";
+  "Sem créditos de IA. Verifique o plano da chave OpenAI, Gemini ou Anthropic.";
 
 type AttemptKind = "quota" | "rate_limit" | "other";
 
@@ -98,16 +102,37 @@ async function loadGeminiConfig(): Promise<AiProviderConfig | null> {
   };
 }
 
+async function loadAnthropicConfig(): Promise<AiProviderConfig | null> {
+  const key =
+    Deno.env.get("ANTHROPIC_API_KEY")?.trim() ||
+    (await loadSecretFromDb("ANTHROPIC_API_KEY"));
+  if (!key) return null;
+  return {
+    provider: "anthropic",
+    apiKey: key,
+    baseUrl: "https://api.anthropic.com/v1/messages",
+    model: Deno.env.get("ANTHROPIC_MODEL")?.trim() || "claude-sonnet-4-5",
+  };
+}
+
+/** Ordem fixa: OpenAI, Gemini, Anthropic. Chave ausente é pulada. */
+export async function loadProviders(): Promise<AiProviderConfig[]> {
+  const [openai, gemini, anthropic] = await Promise.all([
+    loadOpenAiConfig(),
+    loadGeminiConfig(),
+    loadAnthropicConfig(),
+  ]);
+  return [openai, gemini, anthropic].filter((p): p is AiProviderConfig => p != null);
+}
+
 export async function resolveAiConfig(): Promise<AiProviderConfig> {
-  const openai = await loadOpenAiConfig();
-  if (openai) return openai;
-
-  const gemini = await loadGeminiConfig();
-  if (gemini) return gemini;
-
-  throw new AiConfigError(
-    "Chave de IA ausente. Configure GEMINI_API_KEY ou OPENAI_API_KEY nos secrets do Supabase.",
-  );
+  const providers = await loadProviders();
+  if (!providers.length) {
+    throw new AiConfigError(
+      "Chave de IA ausente. Configure OPENAI_API_KEY, GEMINI_API_KEY ou ANTHROPIC_API_KEY nos secrets do Supabase.",
+    );
+  }
+  return providers[0];
 }
 
 function jsonError(
@@ -172,8 +197,66 @@ export function classifyProviderFailure(
   return { retry: false, kind: "other" };
 }
 
-function providerLabel(provider: AiProviderConfig["provider"]): string {
-  return provider === "openai" ? "OpenAI" : "Gemini";
+function providerLabel(provider: AiProviderName): string {
+  if (provider === "openai") return "OpenAI";
+  if (provider === "gemini") return "Gemini";
+  return "Anthropic";
+}
+
+type OpenAITool = {
+  type?: string;
+  function?: { name?: string; description?: string; parameters?: unknown };
+};
+
+/** O mesmo pedido das outras APIs, no formato da Anthropic. A resposta volta no formato OpenAI. */
+function anthropicPayload(body: ChatCompletionsRequest, model: string): Record<string, unknown> {
+  const system = body.messages.filter((m) => m.role === "system").map((m) => m.content).join("\n\n");
+  const messages = body.messages
+    .filter((m) => m.role !== "system")
+    .map((m) => ({ role: m.role === "assistant" ? "assistant" : "user", content: m.content }));
+  const tools = ((body.tools as OpenAITool[] | undefined) || [])
+    .map((t) => t.function)
+    .filter((fn): fn is NonNullable<OpenAITool["function"]> => !!fn?.name)
+    .map((fn) => ({
+      name: fn.name,
+      description: fn.description || "",
+      input_schema: fn.parameters || { type: "object", properties: {} },
+    }));
+  const choice = body.tool_choice as { function?: { name?: string } } | undefined;
+  const payload: Record<string, unknown> = {
+    model,
+    max_tokens: 4096,
+    messages: messages.length ? messages : [{ role: "user", content: system || "Responda." }],
+  };
+  if (system) payload.system = system;
+  if (tools.length) {
+    payload.tools = tools;
+    payload.tool_choice = choice?.function?.name
+      ? { type: "tool", name: choice.function.name }
+      : { type: "any" };
+  }
+  return payload;
+}
+
+function anthropicToOpenAI(data: { content?: Array<{ type?: string; text?: string; name?: string; input?: unknown }> }) {
+  const blocks = Array.isArray(data?.content) ? data.content : [];
+  const tool = blocks.find((b) => b.type === "tool_use" && b.name);
+  if (tool) {
+    return {
+      choices: [{
+        message: {
+          tool_calls: [{
+            function: {
+              name: tool.name,
+              arguments: JSON.stringify(tool.input ?? {}),
+            },
+          }],
+        },
+      }],
+    };
+  }
+  const text = blocks.filter((b) => b.type === "text").map((b) => b.text || "").join("\n");
+  return { choices: [{ message: { content: text } }] };
 }
 
 function failureResponse(
@@ -206,6 +289,25 @@ async function postChatCompletions(
   body: ChatCompletionsRequest,
   timeoutMs: number,
 ): Promise<Response> {
+  if (cfg.provider === "anthropic") {
+    const res = await fetch(cfg.baseUrl, {
+      method: "POST",
+      headers: {
+        "x-api-key": cfg.apiKey,
+        "anthropic-version": "2023-06-01",
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(anthropicPayload(body, cfg.model)),
+      signal: AbortSignal.timeout(timeoutMs),
+    });
+    if (!res.ok) return res;
+    const data = await res.json();
+    return new Response(JSON.stringify(anthropicToOpenAI(data)), {
+      status: 200,
+      headers: { "Content-Type": "application/json" },
+    });
+  }
+
   return fetch(`${cfg.baseUrl}/chat/completions`, {
     method: "POST",
     headers: {
@@ -224,30 +326,24 @@ export async function chatCompletions(
   body: ChatCompletionsRequest,
   opts?: { timeoutMs?: number },
 ): Promise<Response> {
-  const cfg = await resolveAiConfig();
-  const timeoutMs = opts?.timeoutMs ?? 90_000;
-  return postChatCompletions(cfg, body, timeoutMs);
+  return chatCompletionsWithFallback(body, { timeoutMs: opts?.timeoutMs });
 }
 
 /**
- * Tries OpenAI (if a key exists) then Gemini (if a key exists).
- * Fails over only on 402, 429, or a clear quota/billing/rate-limit error.
- * On total failure, returns a Portuguese JSON error. Never logs keys or Authorization.
+ * Envia o mesmo pedido para OpenAI, Gemini e Anthropic, nessa ordem.
+ * Sem crédito, no limite, chave recusada ou provedor fora: tenta a próxima.
+ * Nunca registra chaves nem o header Authorization.
  */
 export async function chatCompletionsWithFallback(
   body: ChatCompletionsRequest,
   opts?: { timeoutMs?: number; corsHeaders?: Record<string, string> },
 ): Promise<Response> {
   const corsHeaders = opts?.corsHeaders ?? {};
-  const providers: AiProviderConfig[] = [];
-  const openai = await loadOpenAiConfig();
-  if (openai) providers.push(openai);
-  const gemini = await loadGeminiConfig();
-  if (gemini) providers.push(gemini);
+  const providers = await loadProviders();
   if (providers.length === 0) return missingAiKeyResponse(corsHeaders);
 
   const requested = opts?.timeoutMs ?? 90_000;
-  const timeoutMs = providers.length > 1 ? Math.min(requested, 45_000) : requested;
+  const timeoutMs = providers.length > 1 ? Math.min(requested, 40_000) : requested;
 
   const attempts: ProviderAttempt[] = [];
   for (const cfg of providers) {
@@ -257,7 +353,7 @@ export async function chatCompletionsWithFallback(
     } catch {
       console.error("AI provider request failed", cfg.provider);
       attempts.push({ provider: cfg.provider, status: 0, kind: "other" });
-      break;
+      continue;
     }
 
     if (response.ok) return response;
@@ -275,7 +371,6 @@ export async function chatCompletionsWithFallback(
       status: response.status,
       kind: classified.kind,
     });
-    if (!classified.retry) break;
   }
 
   return failureResponse(attempts, corsHeaders);
@@ -285,7 +380,7 @@ export function missingAiKeyResponse(corsHeaders: Record<string, string>): Respo
   return new Response(
     JSON.stringify({
       error:
-        "Chave de IA ausente. Configure GEMINI_API_KEY ou OPENAI_API_KEY nos secrets do Supabase (Edge Functions → Secrets).",
+        "Chave de IA ausente. Configure OPENAI_API_KEY, GEMINI_API_KEY ou ANTHROPIC_API_KEY nos secrets do Supabase (Edge Functions → Secrets).",
     }),
     {
       status: 500,
