@@ -1,0 +1,35 @@
+name: Check Supabase CLI on VPS
+
+on:
+  workflow_dispatch:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Inspect without printing secrets
+        uses: appleboy/ssh-action@v1.2.2
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USER }}
+          key: ${{ secrets.VPS_SSH_KEY }}
+          port: ${{ secrets.VPS_PORT || 22 }}
+          script_stop: true
+          command_timeout: 3m
+          script: |
+            set +e
+            echo "head=$(cd /opt/libertybegin && git rev-parse --short HEAD 2>/dev/null)"
+            echo "supabase_bin=$(command -v supabase || echo missing)"
+            echo "npx_bin=$(command -v npx || echo missing)"
+            echo "deno_bin=$(command -v deno || echo missing)"
+            if [ -n "$SUPABASE_ACCESS_TOKEN" ]; then echo "access_token_env=set"; else echo "access_token_env=missing"; fi
+            if [ -f /root/.supabase/access-token ]; then echo "access_token_file=set"; else echo "access_token_file=missing"; fi
+            if [ -d /root/.supabase ]; then echo "supabase_dir=yes"; ls /root/.supabase; else echo "supabase_dir=no"; fi
+            if [ -f /opt/libertybegin/.env ]; then
+              echo "env_keys:"
+              grep -E '^[A-Za-z0-9_]+=' /opt/libertybegin/.env | cut -d= -f1
+            else
+              echo "env_file=missing"
+            fi
+            echo "done"
