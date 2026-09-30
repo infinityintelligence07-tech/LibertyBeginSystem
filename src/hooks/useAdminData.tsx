@@ -274,13 +274,13 @@ export const useMembers = () => {
           if (!libertyUserIds.has(id)) excludeUserIds.add(id);
         });
       }
-      const memberProfileIds = new Set(
+      const libertyProfileIds = new Set(
         profileRows.filter((p) => p.user_id && libertyUserIds.has(p.user_id)).map((p) => p.id),
       );
       if (candidateProfileIds.length > 0) {
         const candidateSet = new Set(candidateProfileIds);
         const markMentorOnly = (mentorId: string | null | undefined) => {
-          if (!mentorId || !candidateSet.has(mentorId) || memberProfileIds.has(mentorId)) return;
+          if (!mentorId || !candidateSet.has(mentorId) || libertyProfileIds.has(mentorId)) return;
           excludeProfileIds.add(mentorId);
         };
         bookings.forEach((b) => markMentorOnly(b.mentor_id));
