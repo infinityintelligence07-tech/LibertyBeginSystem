@@ -3,7 +3,7 @@ import { useNavigate } from "react-router-dom";
 import { AppLayout } from "@/components/AppLayout";
 import { useMembers } from "@/hooks/useAdminData";
 import { UserAvatar } from "@/components/UserAvatar";
-import { toTitleCase } from "@/lib/formatName";
+import { shortName, toTitleCase } from "@/lib/formatName";
 import { supabase } from "@/integrations/supabase/client";
 import { useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
@@ -193,23 +193,14 @@ const AdminEncerramentosPage = () => {
                                 last={index === items.length - 1}
                                 onPress={() => navigate(`/admin/membros/${m.id}`)}
                                 leading={<UserAvatar name={m.full_name} avatarUrl={m.avatar_url || undefined} size={40} />}
-                                title={toTitleCase(m.full_name || "")}
+                                title={shortName(m.full_name || "")}
                                 subtitle={
-                                  <span className="flex flex-col items-start gap-1">
-                                    <span className="tabular-nums">{m.total_completed}/12 sessões</span>
-                                    {(dayLabel || m.company_name) && (
-                                      <span className="break-words">
-                                        {dayLabel}
-                                        {dayLabel && m.company_name ? " · " : null}
-                                        {m.company_name}
-                                      </span>
-                                    )}
-                                    <span className="flex flex-wrap gap-x-2 gap-y-0.5">
-                                      <StatusPill tone={pace.tone}>{pace.label}</StatusPill>
-                                      {!m.has_next_session && (
-                                        <StatusPill tone="danger" withDot={false} className="whitespace-normal">Sem próxima sessão</StatusPill>
-                                      )}
-                                    </span>
+                                  <span className="inline-flex flex-wrap items-center gap-x-1.5 gap-y-0.5">
+                                    <span className="tabular-nums">{m.total_completed}/12</span>
+                                    {dayLabel && <span>{dayLabel}</span>}
+                                    <StatusPill tone={!m.has_next_session ? "danger" : pace.tone}>
+                                      {!m.has_next_session ? "Sem próxima" : pace.label}
+                                    </StatusPill>
                                   </span>
                                 }
                               />
