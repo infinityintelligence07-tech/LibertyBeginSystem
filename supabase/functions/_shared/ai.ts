@@ -4,6 +4,7 @@
 //   - OPENAI_API_KEY (+ opcional OPENAI_MODEL, default gpt-4o-mini)
 //   - GEMINI_API_KEY ou GOOGLE_AI_API_KEY (+ opcional GEMINI_MODEL, default gemini-2.5-flash)
 //   - ANTHROPIC_API_KEY (+ opcional ANTHROPIC_MODEL, default claude-sonnet-4-5)
+//   - ANTHROPIC_WORKSPACE_ID (obrigatório se a chave do Claude não estiver presa a um workspace)
 
 export type ChatRole = "system" | "user" | "assistant";
 
@@ -27,6 +28,7 @@ export type AiProviderConfig = {
   apiKey: string;
   baseUrl: string;
   model: string;
+  workspaceId?: string;
 };
 
 export class AiConfigError extends Error {
@@ -107,11 +109,16 @@ async function loadAnthropicConfig(): Promise<AiProviderConfig | null> {
     Deno.env.get("ANTHROPIC_API_KEY")?.trim() ||
     (await loadSecretFromDb("ANTHROPIC_API_KEY"));
   if (!key) return null;
+  const workspaceId =
+    Deno.env.get("ANTHROPIC_WORKSPACE_ID")?.trim() ||
+    (await loadSecretFromDb("ANTHROPIC_WORKSPACE_ID")) ||
+    undefined;
   return {
     provider: "anthropic",
     apiKey: key,
     baseUrl: "https://api.anthropic.com/v1/messages",
     model: Deno.env.get("ANTHROPIC_MODEL")?.trim() || "claude-sonnet-4-5",
+    workspaceId,
   };
 }
 
@@ -296,6 +303,7 @@ async function postChatCompletions(
         "x-api-key": cfg.apiKey,
         "anthropic-version": "2023-06-01",
         "Content-Type": "application/json",
+        ...(cfg.workspaceId ? { "anthropic-workspace-id": cfg.workspaceId } : {}),
       },
       body: JSON.stringify(anthropicPayload(body, cfg.model)),
       signal: AbortSignal.timeout(timeoutMs),
