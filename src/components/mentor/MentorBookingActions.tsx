@@ -62,6 +62,10 @@ export const formatDaysSince = (days: number) => {
   return `há ${days} dias`;
 };
 
+/** Verde leve: o check de que a sessão aconteceu, sem o peso de um botão sólido. */
+export const markCompletedButtonClass =
+  "min-h-11 border-status-green/30 bg-status-green/10 text-status-green hover:bg-status-green/20 hover:text-status-green";
+
 /**
  * Ações do mentor sobre uma sessão (marcar realizada / não realizada), com
  * invalidação de todas as queries afetadas e tradução de erros do banco.
@@ -235,7 +239,13 @@ export const MentorPendingActions = ({
           </Button>
         )}
         {action === "confirm" && !requiresReport && (
-          <Button size="sm" disabled={busy} onClick={(e) => { e.stopPropagation(); onMarkCompleted(); }}>
+          <Button
+            size="sm"
+            variant="outline"
+            disabled={busy}
+            className={markCompletedButtonClass}
+            onClick={(e) => { e.stopPropagation(); onMarkCompleted(); }}
+          >
             {busy ? <Loader2 className="animate-spin" /> : <CheckCircle2 />} Marcar realizada
           </Button>
         )}
