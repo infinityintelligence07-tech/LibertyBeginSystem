@@ -56,6 +56,13 @@ interface Props {
   pendingConfirmationSessions?: EditorBookingDetail[];
   /** Called after any booking add/edit/delete so callers can refresh local state. */
   onChanged?: () => void;
+  /**
+   * Admin e super_admin: true. Mentor: false (só a própria sessão).
+   * Omitido mantém o controle total.
+   */
+  canManageAll?: boolean;
+  /** profiles.id de quem está vendo. Usado quando canManageAll é false. */
+  actorProfileId?: string | null;
 }
 
 type EditingBooking = {
@@ -225,6 +232,8 @@ const fetchMemberEditorBookings = async (memberId: string): Promise<{
 
 export const MemberSessionEditor = ({
   member, sessions, mentors, filterKey, onReportClick, pendingConfirmationSessions, onChanged,
+  canManageAll = true,
+  actorProfileId = null,
 }: Props) => {
   const queryClient = useQueryClient();
   const [editing, setEditing] = useState<EditingBooking | null>(null);
@@ -284,7 +293,17 @@ export const MemberSessionEditor = ({
   const kickoffAllowed = realizedForKickoff <= KICKOFF_MAX_REALIZED_SESSIONS;
   const sessionById = useMemo(() => new Map(sessions.map((s) => [s.id, s])), [sessions]);
 
+  /** Admin altera qualquer sessão. Mentor só a sessão cujo mentor_id é o próprio perfil. */
+  const canManageBooking = (booking: { mentor_id?: string | null }) =>
+    canManageAll || (actorProfileId != null && booking.mentor_id === actorProfileId);
+
+  const actorMentorName = useMemo(() => {
+    if (!actorProfileId) return "";
+    return mentors.find((m) => m.id === actorProfileId)?.full_name || "Você";
+  }, [mentors, actorProfileId]);
+
   const startEdit = (b: EditorBookingDetail) => {
+    if (!canManageBooking(b)) return;
     setEditing({
       booking_id: b.booking_id,
       session_id: b.session_id,
@@ -310,8 +329,10 @@ export const MemberSessionEditor = ({
 
   const handleSave = async () => {
     if (!editing) return;
-    if (!editMentor) {
-      toast.error("Selecione o mentor da sessão.");
+    if (!canManageBooking(editing)) return;
+    const mentorId = canManageAll ? editMentor : actorProfileId;
+    if (!mentorId) {
+      toast.error(canManageAll ? "Selecione o mentor da sessão." : "Não foi possível identificar o seu perfil de mentor.");
       return;
     }
     setSaving(true);
@@ -328,7 +349,7 @@ export const MemberSessionEditor = ({
         .from("bookings")
         .update({
           scheduled_date: dateStr,
-          mentor_id: editMentor,
+          mentor_id: mentorId,
           session_id: nextSessionId,
           // Grava sempre o status bruto do enum; o efetivo (awaiting_report / pending_confirmation) é derivado.
           status: editStatus,
@@ -355,11 +376,17 @@ export const MemberSessionEditor = ({
   };
 
   /** Abre o diálogo de confirmação; a ação em si roda em `performDelete` / `performClosePending`. */
-  const handleDelete = (cs: EditorBookingDetail) => setPendingAction({ kind: "delete", cs });
-  const handleClosePending = (cs: EditorBookingDetail, status: "completed" | "not_realized") =>
+  const handleDelete = (cs: EditorBookingDetail) => {
+    if (!canManageBooking(cs)) return;
+    setPendingAction({ kind: "delete", cs });
+  };
+  const handleClosePending = (cs: EditorBookingDetail, status: "completed" | "not_realized") => {
+    if (!canManageBooking(cs)) return;
     setPendingAction({ kind: "close", cs, status });
+  };
 
   const performDelete = async (cs: BookingDetail) => {
+    if (!canManageBooking(cs)) return;
     setDeleting(cs.booking_id);
     try {
       // booking_reports e session_tasks são apagados em cascata pelo banco.
@@ -377,6 +404,7 @@ export const MemberSessionEditor = ({
 
   /** Fechamento de uma sessão "A confirmar": realizada (sem relatório) ou não realizada. */
   const performClosePending = async (cs: EditorBookingDetail, status: "completed" | "not_realized") => {
+    if (!canManageBooking(cs)) return;
     setClosing(cs.booking_id);
     try {
       const { error } = await supabase
@@ -394,8 +422,22 @@ export const MemberSessionEditor = ({
     }
   };
 
+  const openAdd = () => {
+    if (!canManageAll && !actorProfileId) return;
+    setNewBooking((prev) => ({
+      ...prev,
+      mentor_id: canManageAll ? prev.mentor_id : (actorProfileId ?? ""),
+    }));
+    setAddOpen(true);
+  };
+
   const handleAdd = async () => {
-    if (!newBooking.session_id || !newBooking.mentor_id || !newBooking.date) {
+    if (!canManageAll && !actorProfileId) {
+      toast.error("Não foi possível identificar o seu perfil de mentor.");
+      return;
+    }
+    const mentorId = canManageAll ? newBooking.mentor_id : actorProfileId;
+    if (!newBooking.session_id || !mentorId || !newBooking.date) {
       toast.error("Preencha todos os campos");
       return;
     }
@@ -412,7 +454,7 @@ export const MemberSessionEditor = ({
       const startTime = "09:00";
       const { data: created, error } = await supabase.from("bookings").insert({
         liberty_id: member.id,
-        mentor_id: newBooking.mentor_id,
+        mentor_id: mentorId,
         session_id: newBooking.session_id,
         scheduled_date: format(newBooking.date, "yyyy-MM-dd"),
         start_time: startTime,
@@ -434,7 +476,12 @@ export const MemberSessionEditor = ({
       }
       toast.success("Sessão adicionada");
       setAddOpen(false);
-      setNewBooking({ session_id: "", mentor_id: "", date: undefined, status: "completed" });
+      setNewBooking({
+        session_id: "",
+        mentor_id: canManageAll ? "" : (actorProfileId ?? ""),
+        date: undefined,
+        status: "completed",
+      });
       invalidateAll();
     } catch (e) {
       const err = e as BackendError;
@@ -448,6 +495,11 @@ export const MemberSessionEditor = ({
 
   const requiresReport = (cs: EditorBookingDetail) => !cs.is_retroactive && cs.report_required !== false;
 
+  const openReport = (cs: EditorBookingDetail) => {
+    if (!canManageBooking(cs)) return;
+    onReportClick(cs.booking_id, cs.session_name);
+  };
+
   const editStatusOptions = editStatus === "pending_approval"
     ? [...STATUS_OPTIONS, { value: "pending_approval" as PersistableStatus, label: "Aguardando confirmação" }]
     : STATUS_OPTIONS;
@@ -459,6 +511,7 @@ export const MemberSessionEditor = ({
   ) => {
     const isDeleting = deleting === cs.booking_id;
     const isClosing = closing === cs.booking_id;
+    const manageable = canManageBooking(cs);
 
     return (
       <ListRow
@@ -476,51 +529,53 @@ export const MemberSessionEditor = ({
           </span>
         }
         trailing={
-          <>
-            {type === "completed" && (
-              <Button variant="ghost" size="sm" onClick={() => onReportClick(cs.booking_id, cs.session_name)}>
-                Relatório
-              </Button>
-            )}
-            {type === "pending_confirmation" && (
-              <>
-                {requiresReport(cs) ? (
-                  <Button variant="ghost" size="sm" onClick={() => onReportClick(cs.booking_id, cs.session_name)}>
-                    Preencher relatório
-                  </Button>
-                ) : (
+          manageable ? (
+            <>
+              {type === "completed" && (
+                <Button variant="ghost" size="sm" onClick={() => openReport(cs)}>
+                  Relatório
+                </Button>
+              )}
+              {type === "pending_confirmation" && (
+                <>
+                  {requiresReport(cs) ? (
+                    <Button variant="ghost" size="sm" onClick={() => openReport(cs)}>
+                      Preencher relatório
+                    </Button>
+                  ) : (
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      disabled={isClosing}
+                      onClick={() => handleClosePending(cs, "completed")}
+                    >
+                      Marcar realizada
+                    </Button>
+                  )}
                   <Button
                     variant="ghost"
                     size="sm"
                     disabled={isClosing}
-                    onClick={() => handleClosePending(cs, "completed")}
+                    onClick={() => handleClosePending(cs, "not_realized")}
                   >
-                    Marcar realizada
+                    Não realizada
                   </Button>
-                )}
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  disabled={isClosing}
-                  onClick={() => handleClosePending(cs, "not_realized")}
-                >
-                  Não realizada
-                </Button>
-              </>
-            )}
-            <IconButton aria-label={`Editar sessão ${cs.session_name}`} size="sm" onClick={() => startEdit(cs)}>
-              <Pencil className="h-4 w-4" />
-            </IconButton>
-            <IconButton
-              aria-label={`Excluir sessão ${cs.session_name}`}
-              size="sm"
-              disabled={isDeleting}
-              onClick={() => handleDelete(cs)}
-              className="text-destructive hover:text-destructive"
-            >
-              {isDeleting ? <RotateCcw className="h-4 w-4 animate-spin" /> : <Trash2 className="h-4 w-4" />}
-            </IconButton>
-          </>
+                </>
+              )}
+              <IconButton aria-label={`Editar sessão ${cs.session_name}`} size="sm" onClick={() => startEdit(cs)}>
+                <Pencil className="h-4 w-4" />
+              </IconButton>
+              <IconButton
+                aria-label={`Excluir sessão ${cs.session_name}`}
+                size="sm"
+                disabled={isDeleting}
+                onClick={() => handleDelete(cs)}
+                className="text-destructive hover:text-destructive"
+              >
+                {isDeleting ? <RotateCcw className="h-4 w-4 animate-spin" /> : <Trash2 className="h-4 w-4" />}
+              </IconButton>
+            </>
+          ) : undefined
         }
       />
     );
@@ -585,6 +640,10 @@ export const MemberSessionEditor = ({
 
   const runPendingAction = async () => {
     if (!pendingAction) return;
+    if (!canManageBooking(pendingAction.cs)) {
+      setPendingAction(null);
+      return;
+    }
     const action = pendingAction;
     setPendingAction(null);
     if (action.kind === "delete") await performDelete(action.cs);
@@ -646,7 +705,12 @@ export const MemberSessionEditor = ({
       )}
 
       <div>
-        <Button variant="outline" size="sm" onClick={(e) => { e.stopPropagation(); setAddOpen(true); }}>
+        <Button
+          variant="outline"
+          size="sm"
+          disabled={!canManageAll && !actorProfileId}
+          onClick={(e) => { e.stopPropagation(); openAdd(); }}
+        >
           <Plus className="h-4 w-4" /> Adicionar sessão
         </Button>
       </div>
@@ -687,12 +751,23 @@ export const MemberSessionEditor = ({
               <option key={o.value} value={o.value}>{o.label}</option>
             ))}
           </SelectField>
-          <SelectField label="Mentor" value={editMentor} onChange={(e) => setEditMentor(e.target.value)}>
-            <option value="" disabled>Selecione o mentor</option>
-            {mentorOptions.map((m) => (
-              <option key={m.id} value={m.id}>{m.full_name}</option>
-            ))}
-          </SelectField>
+          {canManageAll ? (
+            <SelectField label="Mentor" value={editMentor} onChange={(e) => setEditMentor(e.target.value)}>
+              <option value="" disabled>Selecione o mentor</option>
+              {mentorOptions.map((m) => (
+                <option key={m.id} value={m.id}>{m.full_name}</option>
+              ))}
+            </SelectField>
+          ) : (
+            <SelectField
+              label="Mentor"
+              value={actorProfileId ?? ""}
+              disabled
+              hint="A sessão fica registrada no seu nome."
+            >
+              <option value={actorProfileId ?? ""}>{actorMentorName}</option>
+            </SelectField>
+          )}
           <TextField
             label="Data"
             type="date"
@@ -731,7 +806,11 @@ export const MemberSessionEditor = ({
           <SelectField
             label="Sessão"
             value={newBooking.session_id}
-            onChange={(e) => setNewBooking((p) => ({ ...p, session_id: e.target.value, mentor_id: "" }))}
+            onChange={(e) => setNewBooking((p) => ({
+              ...p,
+              session_id: e.target.value,
+              mentor_id: canManageAll ? "" : (actorProfileId ?? ""),
+            }))}
             hint={newBooking.status === "scheduled" && !kickoffAllowed ? KICKOFF_NOT_ALLOWED_MESSAGE : undefined}
           >
             <option value="" disabled>Selecione a sessão</option>
@@ -744,16 +823,27 @@ export const MemberSessionEditor = ({
               );
             })}
           </SelectField>
-          <SelectField
-            label="Mentor"
-            value={newBooking.mentor_id}
-            onChange={(e) => setNewBooking((p) => ({ ...p, mentor_id: e.target.value }))}
-          >
-            <option value="" disabled>Selecione o mentor</option>
-            {mentors.map((m) => (
-              <option key={m.id} value={m.id}>{m.full_name}</option>
-            ))}
-          </SelectField>
+          {canManageAll ? (
+            <SelectField
+              label="Mentor"
+              value={newBooking.mentor_id}
+              onChange={(e) => setNewBooking((p) => ({ ...p, mentor_id: e.target.value }))}
+            >
+              <option value="" disabled>Selecione o mentor</option>
+              {mentors.map((m) => (
+                <option key={m.id} value={m.id}>{m.full_name}</option>
+              ))}
+            </SelectField>
+          ) : (
+            <SelectField
+              label="Mentor"
+              value={actorProfileId ?? ""}
+              disabled
+              hint="A sessão fica registrada no seu nome."
+            >
+              <option value={actorProfileId ?? ""}>{actorMentorName}</option>
+            </SelectField>
+          )}
           <TextField
             label="Data"
             type="date"

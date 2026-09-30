@@ -3,12 +3,7 @@
 // ai_insights, suggested_tasks[].
 import { corsHeaders, handleOptions } from "../_shared/cors.ts";
 import { requireRole, toResponse, STAFF_ROLES } from "../_shared/auth.ts";
-import {
-  AiConfigError,
-  chatCompletions,
-  missingAiKeyResponse,
-  resolveAiConfig,
-} from "../_shared/ai.ts";
+import { chatCompletionsWithFallback } from "../_shared/ai.ts";
 
 Deno.serve(async (req) => {
   const preflight = handleOptions(req);
@@ -25,13 +20,6 @@ Deno.serve(async (req) => {
         JSON.stringify({ error: "Transcrição muito curta. Cole o resumo completo do Zoom." }),
         { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } },
       );
-    }
-
-    try {
-      await resolveAiConfig();
-    } catch (e) {
-      if (e instanceof AiConfigError) return missingAiKeyResponse(corsHeaders);
-      throw e;
     }
 
     const systemPrompt = `Você receberá a transcrição, recapitulação ou resumo automático de uma sessão de mentoria realizada pelo Zoom. Sua tarefa é transformar esse conteúdo em um registro curto, claro e estratégico para que o próximo mentor consiga entender rapidamente:
@@ -73,7 +61,7 @@ Antes de responder, analise silenciosamente: qual era o verdadeiro problema disc
 
     const userPrompt = `Sessão: ${session_name || "(sem nome)"}\nAluno: ${liberty_name || "(sem nome)"}\nDor principal do aluno: ${main_pain || "(não informada)"}\n\nResumo / transcrição do Zoom (bruto, pode estar desorganizado):\n${transcript.trim()}`;
 
-    const response = await chatCompletions({
+    const response = await chatCompletionsWithFallback({
       messages: [
         { role: "system", content: systemPrompt },
         { role: "user", content: userPrompt },
@@ -105,36 +93,9 @@ Antes de responder, analise silenciosamente: qual era o verdadeiro problema disc
         },
       ],
       tool_choice: { type: "function", function: { name: "build_report" } },
-    });
+    }, { corsHeaders });
 
-    if (response.status === 429) {
-      return new Response(
-        JSON.stringify({ error: "Muitas requisições. Tente novamente em alguns segundos." }),
-        { status: 429, headers: { ...corsHeaders, "Content-Type": "application/json" } },
-      );
-    }
-    if (response.status === 402) {
-      return new Response(
-        JSON.stringify({ error: "Sem créditos de IA. Verifique o plano da chave OpenAI ou Gemini." }),
-        { status: 402, headers: { ...corsHeaders, "Content-Type": "application/json" } },
-      );
-    }
-    if (!response.ok) {
-      const txt = await response.text();
-      console.error("AI gateway error", response.status, txt);
-      let detail = "Falha ao organizar o resumo com a IA.";
-      try {
-        const parsed = JSON.parse(txt);
-        if (parsed?.error?.message) detail = String(parsed.error.message);
-        else if (typeof parsed?.error === "string") detail = parsed.error;
-      } catch {
-        if (txt && txt.length < 200) detail = txt;
-      }
-      return new Response(JSON.stringify({ error: detail }), {
-        status: 500,
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
-    }
+    if (!response.ok) return response;
 
     const data = await response.json();
     const call = data.choices?.[0]?.message?.tool_calls?.[0];

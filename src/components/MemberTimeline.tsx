@@ -49,6 +49,10 @@ interface Props {
   kickoffSessionIds?: Set<string> | string[];
   /** Chamado após o admin/mentor fechar uma sessão "A confirmar" pelo modal. */
   onChanged?: () => void;
+  /** Admin e super admin alteram qualquer sessão. Omisso = sim, para não mudar a jornada do membro. */
+  canManageAll?: boolean;
+  /** profiles.id de quem está vendo. Mentor só altera a sessão em que este id é o mentor. */
+  actorProfileId?: string | null;
 }
 
 const fmtDate = (iso?: string | null) => {
@@ -60,6 +64,7 @@ const fmtDate = (iso?: string | null) => {
 export const MemberTimeline = ({
   profile, bookings, sessionNames, mentorNames, reports, reportRoute,
   totalSessions = 12, hideReportButton = false, journeySessionIds, kickoffSessionIds, onChanged,
+  canManageAll = true, actorProfileId = null,
 }: Props) => {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
@@ -227,6 +232,10 @@ export const MemberTimeline = ({
   };
 
   const performClosePending = async (booking: Booking, status: "completed" | "not_realized") => {
+    if (!canManageBooking(booking)) {
+      toast.error("Só o mentor desta sessão, ou o admin, pode alterá-la.");
+      return;
+    }
     setClosing(true);
     try {
       const { error } = await supabase
@@ -251,7 +260,11 @@ export const MemberTimeline = ({
     ? sessionNames[pendingClose.booking.session_id] || pendingClose.booking.sessions?.name || "Sessão"
     : "";
 
-  const canFillReport = (b: Booking) => bookingRequiresReport(b) && isBookingPast(b) && !reports[b.id];
+  const canManageBooking = (b: Booking) =>
+    canManageAll || (!!actorProfileId && b.mentor_id === actorProfileId);
+
+  const canFillReport = (b: Booking) =>
+    canManageBooking(b) && bookingRequiresReport(b) && isBookingPast(b) && !reports[b.id];
 
   const PaceIcon = paceIcon;
   const paceTone: "success" | "danger" | "neutral" = paceInfo?.tone === "green" ? "success" : paceInfo?.tone === "red" ? "danger" : "neutral";
@@ -508,7 +521,7 @@ export const MemberTimeline = ({
         }
         size="sm"
         footer={
-          openBooking && !hideReportButton && reportRoute && (openReport?.summary || canFillReport(openBooking)) ? (
+          openBooking && !hideReportButton && reportRoute && canManageBooking(openBooking) && (openReport?.summary || canFillReport(openBooking)) ? (
             <Button
               className="w-full sm:w-auto"
               onClick={() => { const bid = openBooking.id; setOpenBookingId(null); navigate(reportRoute(bid)); }}
@@ -549,7 +562,7 @@ export const MemberTimeline = ({
             )}
 
             {/* Ações do admin/mentor sobre uma sessão que passou e ainda não foi confirmada */}
-            {!hideReportButton && openStatus === "pending_confirmation" && (
+            {!hideReportButton && canManageBooking(openBooking) && openStatus === "pending_confirmation" && (
               <div className="flex flex-col sm:flex-row gap-2">
                 {!bookingRequiresReport(openBooking) && (
                   <Button

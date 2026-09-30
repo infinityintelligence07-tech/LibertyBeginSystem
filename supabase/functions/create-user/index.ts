@@ -3,7 +3,7 @@
 // A senha temporária é aleatória e devolvida na resposta (`password`) para o
 // admin repassar por WhatsApp; nunca é registrada em logs.
 import { handleOptions, json, errorJson } from "../_shared/cors.ts";
-import { requireRole, assertCanAssignRole, toResponse, ALL_ROLES, ADMIN_ROLES, type AppRole } from "../_shared/auth.ts";
+import { requireRole, assertCanAssignRole, assertCanManageUser, fetchUserRoles, toResponse, ALL_ROLES, ADMIN_ROLES, type AppRole } from "../_shared/auth.ts";
 import { normalizeEmail, findProfilesByEmail, ensureAuthUserForEmail } from "../_shared/accounts.ts";
 
 Deno.serve(async (req) => {
@@ -47,8 +47,65 @@ Deno.serve(async (req) => {
 
     if (normalizedEmail) {
       const existing = await findProfilesByEmail(admin, normalizedEmail);
-      const withAccount = existing.find((p) => p.user_id);
-      if (withAccount) {
+      const withAccount = existing.filter((p) => p.user_id);
+
+      // Um único perfil com conta: acrescenta liberty/mentor na mesma conta.
+      // Não cria outro perfil, não apaga a conta e não mexe na senha.
+      const canLinkRole =
+        (role === "liberty" || role === "mentor") &&
+        existing.length === 1 &&
+        withAccount.length === 1;
+
+      if (canLinkRole) {
+        const profile = withAccount[0];
+        const existingUserId = profile.user_id as string;
+        const targetRoles = await fetchUserRoles(admin, existingUserId);
+
+        if (targetRoles.includes(role as AppRole)) {
+          const papel = role === "mentor" ? "mentor" : "membro";
+          return errorJson(
+            `Esta pessoa já é ${papel}. Edite o cadastro existente.`,
+            409,
+          );
+        }
+
+        // Não altera conta de admin/super_admin sem ser super_admin (não contorna assertCanAssignRole).
+        assertCanManageUser(ctx, { userId: existingUserId, roles: targetRoles });
+
+        const linkFields: Record<string, unknown> = {};
+        if (fullName) linkFields.full_name = fullName;
+        if (phone) linkFields.phone = String(phone).trim();
+        if (company_name) linkFields.company_name = String(company_name).trim();
+        if (program_start_date) linkFields.program_start_date = program_start_date;
+        if (program_end_date) linkFields.program_end_date = program_end_date;
+        if (member_tier && ["begin", "liberty"].includes(member_tier)) linkFields.member_tier = member_tier;
+
+        if (Object.keys(linkFields).length > 0) {
+          const { error: linkProfileError } = await admin
+            .from("profiles")
+            .update(linkFields)
+            .eq("id", profile.id);
+          if (linkProfileError) return errorJson(linkProfileError.message, 400);
+        }
+
+        const { error: linkRoleError } = await admin
+          .from("user_roles")
+          .upsert({ user_id: existingUserId, role }, { onConflict: "user_id,role" });
+        if (linkRoleError) return errorJson(linkRoleError.message, 400);
+
+        return json({
+          success: true,
+          linked_existing: true,
+          user_id: existingUserId,
+          profile_id: profile.id,
+          email: normalizedEmail,
+          message: role === "mentor"
+            ? "Conta existente agora também é mentor. O acesso continua o mesmo."
+            : "Conta existente agora também é membro. O acesso continua o mesmo.",
+        });
+      }
+
+      if (withAccount.length > 0) {
         return errorJson(
           "Já existe um membro cadastrado com este e-mail e com conta de acesso. Edite o cadastro existente ou use outro e-mail.",
           409,

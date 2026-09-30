@@ -136,7 +136,7 @@ const AdminMembroDetalhesPage = () => {
   const navigate = useNavigate();
   const location = useLocation();
   const goBack = useGoBack(location.pathname.startsWith("/mentor") ? "/mentor/alunos" : "/admin/membros");
-  const { roles } = useAuth();
+  const { roles, profile: actorProfile } = useAuth();
   const isAdminUser = roles.includes("admin") || roles.includes("super_admin");
   const layoutRole: "admin" | "mentor" = location.pathname.startsWith("/mentor") ? "mentor" : "admin";
   const isAdminArea = layoutRole === "admin";
@@ -651,6 +651,8 @@ const AdminMembroDetalhesPage = () => {
               reports={memberReports}
               reportRoute={reportRoute}
               onChanged={refreshAll}
+              canManageAll={isAdminUser}
+              actorProfileId={actorProfile?.id ?? null}
             />
 
             {/* Objetivo e dor */}
@@ -694,6 +696,8 @@ const AdminMembroDetalhesPage = () => {
                 libertyName={profile.full_name || "Aluno"}
                 onReportClick={(bid) => navigate(reportRoute(bid))}
                 onChanged={refreshAll}
+                canManageAll={isAdminUser}
+                actorProfileId={actorProfile?.id ?? null}
               />
             )}
 

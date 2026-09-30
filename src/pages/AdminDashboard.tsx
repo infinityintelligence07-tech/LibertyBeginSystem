@@ -9,7 +9,7 @@ import {
 import type { LucideIcon } from "lucide-react";
 import { useMembers, useMentors } from "@/hooks/useAdminData";
 import { daysSinceBookingEnd, PENDING_CONFIRMATION_ALERT_DAYS, PENDING_CONFIRMATION_HINT } from "@/lib/bookingStatus";
-import { shortName } from "@/lib/formatName";
+import { shortName, toTitleCase } from "@/lib/formatName";
 import { useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
@@ -395,11 +395,17 @@ const AdminDashboardPage = () => {
                     {upcomingEndings.map((m, index) => (
                       <ListRow
                         key={m.id}
+                        wrap
                         last={index === upcomingEndings.length - 1}
-                        onPress={() => navigate(`/admin/membros/${m.id}/editar`)}
+                        onPress={() => navigate(`/admin/membros/${m.id}`)}
                         leading={<DateBlock date={m.program_end_date || ""} tone="muted" />}
-                        title={shortName(m.full_name)}
-                        subtitle={`${m.total_completed}/12 sessões${m.company_name ? ` · ${m.company_name}` : ""}`}
+                        title={toTitleCase(m.full_name || "")}
+                        subtitle={
+                          <span className="block">
+                            <span className="block tabular-nums whitespace-nowrap">{m.total_completed}/12 sessões</span>
+                            {m.company_name ? <span className="block break-words">{m.company_name}</span> : null}
+                          </span>
+                        }
                         trailing={
                           <StatusPill tone={endingTone(m.daysLeft)}>
                             {m.daysLeft === 0 ? "Encerra hoje" : `${m.daysLeft} ${m.daysLeft === 1 ? "dia" : "dias"}`}

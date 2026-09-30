@@ -3,12 +3,7 @@
 // sends to the student on WhatsApp.
 import { corsHeaders, handleOptions } from "../_shared/cors.ts";
 import { requireRole, toResponse, STAFF_ROLES } from "../_shared/auth.ts";
-import {
-  AiConfigError,
-  chatCompletions,
-  missingAiKeyResponse,
-  resolveAiConfig,
-} from "../_shared/ai.ts";
+import { chatCompletionsWithFallback } from "../_shared/ai.ts";
 
 Deno.serve(async (req) => {
   const preflight = handleOptions(req);
@@ -32,13 +27,6 @@ Deno.serve(async (req) => {
         JSON.stringify({ error: "Cole o resumo completo do Zoom (mínimo ~80 caracteres)." }),
         { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } },
       );
-    }
-
-    try {
-      await resolveAiConfig();
-    } catch (e) {
-      if (e instanceof AiConfigError) return missingAiKeyResponse(corsHeaders);
-      throw e;
     }
 
     const systemPrompt = `Você é um consultor estratégico do programa Liberty Begin. Sua tarefa é transformar o resumo bruto do Zoom de uma sessão de mentoria em um ENTREGÁVEL ESTRATÉGICO que será enviado ao aluno via WhatsApp em formato de PDF infográfico (3-4 páginas).
@@ -80,7 +68,7 @@ next_steps (array de 3 a 5 strings): próximas ações prioritárias, cada uma c
 
     const userPrompt = `Aluno: ${member_name || "(sem nome)"}${company_name ? ` — empresa: ${company_name}` : ""}\nTier: ${member_tier || "begin"}\nSessão do programa: ${session_name || "(sem nome)"}\nDor principal do aluno (do perfil): ${main_pain || "(não informada)"}\n\nRESUMO/TRANSCRIÇÃO BRUTA DO ZOOM:\n${zoom_transcript.trim()}`;
 
-    const response = await chatCompletions({
+    const response = await chatCompletionsWithFallback({
       messages: [
         { role: "system", content: systemPrompt },
         { role: "user", content: userPrompt },
@@ -160,28 +148,9 @@ next_steps (array de 3 a 5 strings): próximas ações prioritárias, cada uma c
         },
       ],
       tool_choice: { type: "function", function: { name: "build_deliverable" } },
-    });
+    }, { corsHeaders });
 
-    if (response.status === 429) {
-      return new Response(
-        JSON.stringify({ error: "Muitas requisições. Tente novamente em alguns segundos." }),
-        { status: 429, headers: { ...corsHeaders, "Content-Type": "application/json" } },
-      );
-    }
-    if (response.status === 402) {
-      return new Response(
-        JSON.stringify({ error: "Sem créditos de IA. Verifique o plano da chave OpenAI ou Gemini." }),
-        { status: 402, headers: { ...corsHeaders, "Content-Type": "application/json" } },
-      );
-    }
-    if (!response.ok) {
-      const txt = await response.text();
-      console.error("AI gateway error", response.status, txt);
-      return new Response(JSON.stringify({ error: "Falha ao chamar IA" }), {
-        status: 500,
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
-    }
+    if (!response.ok) return response;
 
     const data = await response.json();
     const call = data.choices?.[0]?.message?.tool_calls?.[0];

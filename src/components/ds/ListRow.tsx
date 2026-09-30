@@ -17,6 +17,8 @@ interface ListRowProps extends Omit<HTMLAttributes<HTMLElement>, "title"> {
   active?: boolean;
   /** Sem borda inferior (última da lista). */
   last?: boolean;
+  /** Título e subtítulo quebram a linha inteira, sem reticências. O padrão continua truncando. */
+  wrap?: boolean;
 }
 
 /**
@@ -25,7 +27,7 @@ interface ListRowProps extends Omit<HTMLAttributes<HTMLElement>, "title"> {
  * ou de uma `<ul>` com `divide-y`.
  */
 export const ListRow = forwardRef<HTMLElement, ListRowProps>(
-  ({ leading, title, subtitle, trailing, onPress, href, chevron, active, last, className, ...props }, ref) => {
+  ({ leading, title, subtitle, trailing, onPress, href, chevron, active, last, wrap = false, className, ...props }, ref) => {
     const interactive = Boolean(onPress || href);
     const Tag = (href ? "a" : interactive ? "button" : "div") as "div";
     return (
@@ -35,7 +37,8 @@ export const ListRow = forwardRef<HTMLElement, ListRowProps>(
         {...(interactive && !href ? { type: "button", onClick: onPress } : {})}
         {...(href && onPress ? { onClick: onPress } : {})}
         className={cn(
-          "w-full min-h-[56px] px-4 py-3 flex items-center gap-3 text-left",
+          "w-full min-h-[56px] px-4 py-3 flex gap-3 text-left",
+          wrap ? "items-start" : "items-center",
           !last && "border-b border-border",
           interactive && "transition-colors duration-ds-1 ease-ds hover:bg-accent/60 focus-visible:outline-none focus-visible:bg-accent/60",
           active && "bg-primary/5",
@@ -45,8 +48,12 @@ export const ListRow = forwardRef<HTMLElement, ListRowProps>(
       >
         {leading && <div className="shrink-0 flex items-center justify-center">{leading}</div>}
         <div className="min-w-0 flex-1">
-          <div className="text-sm font-medium text-foreground leading-snug truncate">{title}</div>
-          {subtitle && <div className="text-xs text-muted-foreground mt-0.5 leading-snug truncate">{subtitle}</div>}
+          <div className={cn("text-sm font-medium text-foreground leading-snug", wrap ? "whitespace-normal break-words" : "truncate")}>{title}</div>
+          {subtitle && (
+            <div className={cn("text-xs text-muted-foreground mt-0.5 leading-snug", wrap ? "whitespace-normal break-words" : "truncate")}>
+              {subtitle}
+            </div>
+          )}
         </div>
         {trailing && <div className="shrink-0 flex items-center gap-2">{trailing}</div>}
         {(chevron ?? interactive) && <ChevronRight className="h-4 w-4 text-muted-foreground shrink-0" aria-hidden />}

@@ -3,7 +3,7 @@ import { useNavigate } from "react-router-dom";
 import { AppLayout } from "@/components/AppLayout";
 import { useMembers } from "@/hooks/useAdminData";
 import { UserAvatar } from "@/components/UserAvatar";
-import { shortName } from "@/lib/formatName";
+import { toTitleCase } from "@/lib/formatName";
 import { supabase } from "@/integrations/supabase/client";
 import { useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
@@ -33,6 +33,13 @@ const monthKey = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).pad
 const monthLabel = (key: string) => {
   const [y, m] = key.split("-").map(Number);
   return `${MONTHS_PT[m - 1]} ${y}`;
+};
+
+/** "Dia DD" só quando o dia da data é de 1 a 31. Nunca "Dia 0". */
+const endDayLabel = (iso: string | null | undefined): string | null => {
+  const day = Number(String(iso || "").slice(8, 10));
+  if (!Number.isInteger(day) || day < 1 || day > 31) return null;
+  return `Dia ${String(day).padStart(2, "0")}`;
 };
 
 const memberPace = (member: any, key: string): { label: string; tone: PillTone } => {
@@ -158,7 +165,7 @@ const AdminEncerramentosPage = () => {
         ) : (
           <>
             <div className="overflow-x-auto pb-2 -mx-4 px-4 sm:mx-0 sm:px-0">
-              <div className="grid grid-flow-col auto-cols-[minmax(272px,1fr)] gap-4 min-w-full">
+              <div className="grid grid-flow-col auto-cols-[minmax(420px,1fr)] gap-4 min-w-full">
                 {monthKeys.map((key) => {
                   const items = grouped[key] || [];
                   const isCurrent = key === currentKey;
@@ -177,25 +184,25 @@ const AdminEncerramentosPage = () => {
                           <p className="text-xs text-muted-foreground text-center py-10 px-4">Nenhum encerramento</p>
                         ) : (
                           items.map((m, index) => {
-                            const day = (m.program_end_date || "").slice(8, 10);
+                            const dayLabel = endDayLabel(m.program_end_date);
                             const pace = memberPace(m, key);
                             return (
                               <ListRow
                                 key={m.id}
+                                wrap
                                 last={index === items.length - 1}
-                                onPress={() => navigate(`/admin/membros/${m.id}/editar`)}
+                                onPress={() => navigate(`/admin/membros/${m.id}`)}
                                 leading={<UserAvatar name={m.full_name} avatarUrl={m.avatar_url || undefined} size={40} />}
-                                title={shortName(m.full_name)}
+                                title={toTitleCase(m.full_name || "")}
                                 subtitle={
-                                  <span className="flex items-center gap-1.5">
-                                    <span className="tabular-nums">Dia {day}</span>
-                                    <span aria-hidden>·</span>
-                                    <span className="tabular-nums">{m.total_completed}/12 sessões</span>
-                                    {m.company_name && (
-                                      <>
-                                        <span aria-hidden>·</span>
-                                        <span className="truncate">{m.company_name}</span>
-                                      </>
+                                  <span className="block">
+                                    <span className="block tabular-nums whitespace-nowrap">{m.total_completed}/12 sessões</span>
+                                    {(dayLabel || m.company_name) && (
+                                      <span className="block break-words">
+                                        {dayLabel}
+                                        {dayLabel && m.company_name ? " · " : null}
+                                        {m.company_name}
+                                      </span>
                                     )}
                                   </span>
                                 }
@@ -257,7 +264,7 @@ const AdminEncerramentosPage = () => {
                         <div className="flex items-center gap-3 flex-1 min-w-0 md:pb-2">
                           <UserAvatar name={m.full_name} avatarUrl={m.avatar_url || undefined} size={40} />
                           <div className="min-w-0">
-                            <p className="text-sm font-medium text-foreground truncate">{shortName(m.full_name)}</p>
+                            <p className="text-sm font-medium text-foreground whitespace-normal break-words">{toTitleCase(m.full_name || "")}</p>
                             <p className="text-xs text-muted-foreground truncate">{m.company_name || m.email || "Sem dados"}</p>
                           </div>
                         </div>

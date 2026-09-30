@@ -102,6 +102,19 @@ const countByMonth = <T extends { scheduled_date?: string | null }>(list: T[]) =
   return acc;
 };
 
+/** liberty_id únicos por mês YYYY-MM. Convidados sem liberty_id não entram. */
+const uniqueLibertyByMonth = (list: { scheduled_date?: string | null; liberty_id?: string | null }[]) => {
+  const sets: Record<string, Set<string>> = {};
+  list.forEach((b) => {
+    if (!b.liberty_id) return;
+    const key = monthKeyOf(b);
+    if (!key) return;
+    if (!sets[key]) sets[key] = new Set();
+    sets[key].add(b.liberty_id);
+  });
+  return Object.fromEntries(Object.entries(sets).map(([key, ids]) => [key, ids.size]));
+};
+
 export interface BookingDetail {
   session_name: string;
   session_id: string;
@@ -190,7 +203,10 @@ export interface MentorWithStats {
   /** Passaram do horário sem fechamento do mentor. NÃO entram no repasse até serem confirmadas. */
   total_pending_confirmation: number;
   assigned_sessions: string[];
+  /** liberty_id únicos em sessões realizadas (`completed` + `awaiting_report`), vida toda. */
   members_served: number;
+  /** liberty_id únicos em sessões realizadas, por mês YYYY-MM. */
+  monthly_members_served: Record<string, number>;
   monthly_completed: Record<string, number>;
   monthly_scheduled: Record<string, number>;
   monthly_awaiting_report: Record<string, number>;
@@ -226,12 +242,15 @@ export const useMembers = () => {
 
       const [bookings, reportedIds] = await Promise.all([fetchAdminBookings(), fetchReportedBookingIds()]);
 
-      // Exclui quem é mentor/admin/super_admin. Como algumas linhas de role podem estar ocultas por RLS,
-      // também exclui perfis que aparecem como mentor em sessões atribuídas, disponibilidade ou bookings.
+      // Mentor ou admin puro sai da lista. Quem também tem o papel liberty permanece:
+      // a mesma pessoa pode ser mentor e membro (os números da jornada precisam dela).
+      // Se a role vier oculta por RLS, o perfil que só aparece como mentor em sessão,
+      // disponibilidade ou booking continua de fora, salvo quando já tem papel liberty.
       const candidateUserIds = profileRows.map((p) => p.user_id).filter((id): id is string => !!id);
       const candidateProfileIds = profileRows.map((p) => p.id);
       const excludeUserIds = new Set<string>();
       const excludeProfileIds = new Set<string>();
+      const libertyUserIds = new Set<string>();
 
       if (candidateUserIds.length > 0) {
         const roleChunks = await Promise.all(
@@ -240,19 +259,31 @@ export const useMembers = () => {
               .from("user_roles")
               .select("user_id, role")
               .in("user_id", ids)
-              .in("role", ["mentor", "admin", "super_admin"]),
+              .in("role", ["liberty", "mentor", "admin", "super_admin"]),
           ),
         );
+        const staffUserIds = new Set<string>();
         roleChunks.forEach(({ data, error }) => {
           if (error) throw error;
-          (data || []).forEach((r) => excludeUserIds.add(r.user_id));
+          (data || []).forEach((r) => {
+            if (r.role === "liberty") libertyUserIds.add(r.user_id);
+            else staffUserIds.add(r.user_id);
+          });
+        });
+        staffUserIds.forEach((id) => {
+          if (!libertyUserIds.has(id)) excludeUserIds.add(id);
         });
       }
+      const memberProfileIds = new Set(
+        profileRows.filter((p) => p.user_id && libertyUserIds.has(p.user_id)).map((p) => p.id),
+      );
       if (candidateProfileIds.length > 0) {
         const candidateSet = new Set(candidateProfileIds);
-        bookings.forEach((b) => {
-          if (b.mentor_id && candidateSet.has(b.mentor_id)) excludeProfileIds.add(b.mentor_id);
-        });
+        const markMentorOnly = (mentorId: string | null | undefined) => {
+          if (!mentorId || !candidateSet.has(mentorId) || memberProfileIds.has(mentorId)) return;
+          excludeProfileIds.add(mentorId);
+        };
+        bookings.forEach((b) => markMentorOnly(b.mentor_id));
         const [mentorSessionChunks, availabilityChunks] = await Promise.all([
           Promise.all(
             chunkArray(candidateProfileIds, 100).map((ids) =>
@@ -267,9 +298,7 @@ export const useMembers = () => {
         ]);
         [...mentorSessionChunks, ...availabilityChunks].forEach(({ data, error }) => {
           if (error) throw error;
-          (data || []).forEach((r) => {
-            if (r.mentor_id) excludeProfileIds.add(r.mentor_id);
-          });
+          (data || []).forEach((r) => markMentorOnly(r.mentor_id));
         });
       }
       const profiles = profileRows.filter(
@@ -435,11 +464,9 @@ export const useMentors = () => {
           .filter((ms) => ms.mentor_id === m.id)
           .map((ms) => (ms as typeof ms & { sessions: { name: string } | null }).sessions?.name || "Sem dados");
 
-        // Membros atendidos: só perfis reais (sem convidados) e sem pedidos apenas pendentes de aprovação.
+        // Membros atendidos: liberty_id únicos só em realizadas (completed + awaiting_report). Convidados sem liberty_id não entram.
         const uniqueMembers = new Set(
-          withStatus
-            .filter((x) => x.b.liberty_id && x.status !== "pending_approval")
-            .map((x) => x.b.liberty_id as string),
+          completed.filter((b) => b.liberty_id).map((b) => b.liberty_id as string),
         );
 
         const isKick = (b: AdminBookingRow) => feeMultiplierOf(b) > 1;
@@ -475,6 +502,7 @@ export const useMentors = () => {
           total_pending_confirmation: pendingConfirmation.length,
           assigned_sessions: assignedSessions,
           members_served: uniqueMembers.size,
+          monthly_members_served: uniqueLibertyByMonth(completed),
           monthly_completed: countByMonth(completed),
           monthly_scheduled: countByMonth(scheduled),
           monthly_awaiting_report: countByMonth(awaiting),

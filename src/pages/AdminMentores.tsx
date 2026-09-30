@@ -366,6 +366,8 @@ const AdminMentoresPage = () => {
     const mentorRate = mentor.session_rate ?? defaultRate;
     const mentorKickoff = kickoffFeeForRate(mentorRate, feeRates);
     const completed = filterKey ? (mentor.monthly_completed[filterKey] || 0) : mentor.total_completed;
+    const scheduled = filterKey ? (mentor.monthly_scheduled[filterKey] || 0) : mentor.total_scheduled;
+    const membersServed = filterKey ? (mentor.monthly_members_served[filterKey] || 0) : mentor.members_served;
     const kickoffCompleted = filterKey
       ? (mentor.monthly_kickoff_completed[filterKey] || 0)
       : mentor.total_kickoff_completed;
@@ -438,8 +440,8 @@ const AdminMentoresPage = () => {
         {/* Indicadores */}
         <div className="mt-4 grid grid-cols-2 lg:grid-cols-4 gap-3">
           <Stat size="sm" icon={CheckCircle2} label={filterKey ? "Realizadas no mês" : "Realizadas"} value={completed} />
-          <Stat size="sm" icon={Calendar} label="Agendadas" value={mentor.total_scheduled} />
-          <Stat size="sm" icon={Users} label="Membros atendidos" value={mentor.members_served} />
+          <Stat size="sm" icon={Calendar} label={filterKey ? "Agendadas no mês" : "Agendadas"} value={scheduled} />
+          <Stat size="sm" icon={Users} label={filterKey ? "Membros atendidos no mês" : "Membros atendidos"} value={membersServed} />
           <Stat size="sm" icon={DollarSign} label={filterKey ? "Receita no mês" : "Receita total"} value={formatBRL(revenue)} />
         </div>
 

@@ -583,7 +583,10 @@ const AdminMembrosPage = () => {
           throw new Error(translateErrorToPt(msg));
         }
         if (data?.error) throw new Error(translateErrorToPt(data.error));
-        if (data?.password) {
+        if (data?.linked_existing) {
+          const name = form.full_name.trim();
+          toast.success(`${name} agora também é membro. O acesso dele continua o mesmo.`);
+        } else if (data?.password) {
           toast.success("Membro criado com acesso");
           setCredentialsDialog({
             full_name: form.full_name.trim(),

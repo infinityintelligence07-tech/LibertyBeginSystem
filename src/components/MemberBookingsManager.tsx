@@ -18,6 +18,13 @@ interface Props {
   onReportClick: (booking_id: string, session_name: string) => void;
   /** Called after add / edit / delete so the parent screen can refresh. */
   onChanged?: () => void;
+  /**
+   * Admin e super_admin: true. Mentor: false.
+   * Omitido mantém o controle total (tela de membros do admin).
+   */
+  canManageAll?: boolean;
+  /** profiles.id de quem está vendo. Usado quando canManageAll é false. */
+  actorProfileId?: string | null;
 }
 
 type ManagerBooking = {
@@ -48,7 +55,14 @@ type ManagerSession = {
  * renders it for a single student. Works for any role with proper RLS
  * (admin always; mentor via the policies created for them).
  */
-export const MemberBookingsManager = ({ libertyId, libertyName, onReportClick, onChanged }: Props) => {
+export const MemberBookingsManager = ({
+  libertyId,
+  libertyName,
+  onReportClick,
+  onChanged,
+  canManageAll = true,
+  actorProfileId = null,
+}: Props) => {
   const queryClient = useQueryClient();
 
   const { data: bookings = [], error: bookingsError, isLoading: isLoadingBookings, refetch: refetchBookings } = useQuery({
@@ -170,7 +184,11 @@ export const MemberBookingsManager = ({ libertyId, libertyName, onReportClick, o
             <CalendarDays className="h-4 w-4 text-muted-foreground" aria-hidden /> Sessões do aluno
           </span>
         }
-        description="Adicionar, editar ou excluir sessões deste aluno."
+        description={
+          canManageAll
+            ? "Adicionar, editar ou excluir sessões deste aluno."
+            : "Você vê o histórico completo e só altera as sessões que são suas."
+        }
       />
       {bookingsError && (
         <ErrorState
@@ -190,6 +208,8 @@ export const MemberBookingsManager = ({ libertyId, libertyName, onReportClick, o
         onReportClick={onReportClick}
         pendingConfirmationSessions={pendingConfirmation}
         onChanged={handleChanged}
+        canManageAll={canManageAll}
+        actorProfileId={actorProfileId}
       />
       )}
     </SectionCard>
