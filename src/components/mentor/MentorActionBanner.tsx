@@ -31,6 +31,7 @@ const ACTION_TYPES = [
   "booking_not_realized",
   "booking_reminder",
   "report_pending",
+  "meeting_transcript_missing",
 ];
 
 /** Ações pendentes do mentor — versão minimalista, tipo lista de e-mails. */
@@ -168,6 +169,7 @@ export const MentorActionBanner = () => {
 
   const dotFor = (t: string) => {
     if (t === "booking_pending") return "bg-status-yellow";
+    if (t === "meeting_transcript_missing") return "bg-status-yellow";
     if (t === "report_pending" || t === "booking_not_realized") return "bg-destructive";
     if (t === "booking_reminder" || t === "booking_rescheduled") return "bg-status-blue";
     if (t === "booking_cancelled") return "bg-destructive";
@@ -222,6 +224,7 @@ export const MentorActionBanner = () => {
                       {items.map((n) => {
                         const isPending = n.type === "booking_pending";
                         const isReport = n.type === "report_pending";
+                        const isMissingNotes = n.type === "meeting_transcript_missing";
                         const disabled = busy.has(n.id);
                         return (
                           <li key={n.id} className="flex flex-wrap sm:flex-nowrap items-center gap-2 sm:gap-3 px-4 py-3 min-h-[56px]">
@@ -246,9 +249,9 @@ export const MentorActionBanner = () => {
                                     Recusar
                                   </Button>
                                 </>
-                              ) : isReport ? (
+                              ) : isReport || isMissingNotes ? (
                                 <Button size="sm" variant="secondary" onClick={() => openLink(n)}>
-                                  Preencher
+                                  {isMissingNotes ? "Registrar" : "Preencher"}
                                 </Button>
                               ) : n.link ? (
                                 <Button size="sm" variant="ghost" onClick={() => openLink(n)}>

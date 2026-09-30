@@ -79,6 +79,7 @@ function buildWaTexts(opts: {
   start: string;
   end: string;
   meetUrl: string;
+  mentorEmail?: string | null;
   appOrigin?: string;
 }): { member: string; mentor: string } {
   const origin = (opts.appOrigin || Deno.env.get("APP_URL") || APP_ORIGIN_DEFAULT).replace(/\/$/, "");
@@ -87,7 +88,7 @@ function buildWaTexts(opts: {
   const dateShort = `${d}/${m}`;
   const timeH = `${formatBrTime(opts.start)}H`;
   const session = sessionPhrase(opts.sessionName);
-  const meetUrl = (opts.meetUrl || "").trim();
+  const meetUrl = meetEntryUrl(opts.meetUrl, opts.mentorEmail);
   const npsUrl = `${origin}/nps/${opts.bookingId}`;
 
   const headline = "Estou passando para lembrá-lo da sua Sessão do Liberty Begin.";
@@ -340,6 +341,28 @@ async function addMentorCohosts(accessToken: string, meetingCode: string, emails
     : null;
 }
 
+/** Abre o Meet já na conta Google do mentor, sem ele escolher a conta errada. */
+function meetEntryUrl(meetUrl: string, email?: string | null): string {
+  const raw = (meetUrl || "").trim();
+  const mail = (email || "").trim().toLowerCase();
+  if (!raw.startsWith("http") || !mail.includes("@")) return raw;
+  try {
+    const u = new URL("https://accounts.google.com/AccountChooser");
+    u.searchParams.set("Email", mail);
+    u.searchParams.set("continue", raw);
+    return u.toString();
+  } catch {
+    return raw;
+  }
+}
+
+function mentorJoinEmail(mentor: { email?: string | null; google_calendar_email?: string | null } | null): string {
+  const calendar = (mentor?.google_calendar_email || "").trim().toLowerCase();
+  const login = (mentor?.email || "").trim().toLowerCase();
+  if (calendar.includes("@")) return calendar;
+  return login.includes("@") ? login : "";
+}
+
 function mentorGoogleEmails(mentor: { email?: string | null; google_calendar_email?: string | null } | null): string[] {
   return [...new Set(
     [mentor?.google_calendar_email, mentor?.email]
@@ -381,15 +404,28 @@ function humanizeMeetApiError(data: unknown): string {
 
 async function resolveHostAccessToken(
   admin: Awaited<ReturnType<typeof requireRole>>["supabaseAdmin"],
+  bookingHostId?: string | null,
 ): Promise<{ accessToken: string; hostEmail: string } | { error: string }> {
-  const { data: hosts } = await admin
-    .from("meeting_hosts")
-    .select("id, email, label, profile_id")
-    .eq("is_active", true)
-    .order("sort_order", { ascending: true })
-    .limit(5);
+  let host: HostRow | null = null;
+  if (bookingHostId) {
+    const { data: pinned } = await admin
+      .from("meeting_hosts")
+      .select("id, email, label, profile_id")
+      .eq("id", bookingHostId)
+      .maybeSingle();
+    host = (pinned as HostRow | null) || null;
+  }
 
-  let host = (hosts?.[0] || null) as HostRow | null;
+  if (!host) {
+    const { data: hosts } = await admin
+      .from("meeting_hosts")
+      .select("id, email, label, profile_id")
+      .eq("is_active", true)
+      .order("sort_order", { ascending: true })
+      .limit(5);
+
+    host = (hosts?.[0] || null) as HostRow | null;
+  }
   if (!host) {
     const { data: cfg } = await admin.from("system_config").select("value").eq("key", "meeting_host_email").maybeSingle();
     const email = (cfg?.value || "membrosliberty@gmail.com").trim();
@@ -718,7 +754,7 @@ async function handleProvision(req: Request, ctx: AuthContext, payload: Record<s
   const { data: booking, error: bErr } = await admin
     .from("bookings")
     .select(
-      "id, status, scheduled_date, start_time, end_time, mentor_id, liberty_id, guest_name, guest_email, session_id, zoom_join_url, meeting_space_name, meeting_calendar_event_id, is_retroactive, created_by, meeting_ended_at, meeting_transcript_text, meeting_artifacts_status",
+      "id, status, scheduled_date, start_time, end_time, mentor_id, liberty_id, guest_name, guest_email, session_id, zoom_join_url, meeting_space_name, meeting_calendar_event_id, meeting_host_id, is_retroactive, created_by, meeting_ended_at, meeting_transcript_text, meeting_artifacts_status",
     )
     .eq("id", bookingId)
     .single();
@@ -842,8 +878,11 @@ async function handleProvision(req: Request, ctx: AuthContext, payload: Record<s
       ? await admin.from("profiles").select("full_name, phone, email").eq("id", booking.liberty_id).maybeSingle()
       : { data: null };
     const reuseCode = booking.zoom_join_url.replace(/^https?:\/\/meet\.google\.com\//, "").split("?")[0];
-    const reuseTok = await resolveHostAccessToken(admin);
+    const reuseTok = await resolveHostAccessToken(admin, booking.meeting_host_id);
     if (!("error" in reuseTok) && reuseCode) {
+      await configureMeetSpace(reuseTok.accessToken, reuseCode).catch((e) =>
+        console.warn("transcrição na sala reaproveitada", bookingId, e),
+      );
       const warn = await addMentorCohosts(reuseTok.accessToken, reuseCode, mentorGoogleEmails(mentor)).catch((e) => String(e));
       if (warn) console.warn("co-host na sala reaproveitada", bookingId, warn);
     }
@@ -856,6 +895,7 @@ async function handleProvision(req: Request, ctx: AuthContext, payload: Record<s
       start: booking.start_time,
       end: booking.end_time,
       meetUrl: booking.zoom_join_url,
+      mentorEmail: mentorJoinEmail(mentor),
     });
     await admin
       .from("bookings")
@@ -969,6 +1009,7 @@ async function handleProvision(req: Request, ctx: AuthContext, payload: Record<s
     start: booking.start_time,
     end: booking.end_time,
     meetUrl,
+    mentorEmail: mentorJoinEmail(mentor),
   });
 
   const { error: upErr } = await admin
@@ -1071,6 +1112,69 @@ async function sweepUnprovisioned(req: Request, admin: AuthContext["supabaseAdmi
   return { checked: pending.length, provisioned, errors };
 }
 
+/** Antes e durante a sessão: liga a transcrição de novo e confirma o mentor como co-host no e-mail atual. */
+async function sweepEnsureCohosts(
+  admin: Awaited<ReturnType<typeof requireRole>>["supabaseAdmin"],
+): Promise<{ ensured: number; cohostErrors: number }> {
+  const todayBrt = new Date(Date.now() - 3 * 60 * 60 * 1000).toISOString().slice(0, 10);
+  const untilDate = new Date(Date.now() - 3 * 60 * 60 * 1000 + 14 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+  const { data: rows, error } = await admin
+    .from("bookings")
+    .select("id, mentor_id, zoom_join_url, meeting_host_id, scheduled_date, start_time, end_time")
+    .eq("status", "scheduled")
+    .eq("is_retroactive", false)
+    .gte("scheduled_date", todayBrt)
+    .lte("scheduled_date", untilDate)
+    .ilike("zoom_join_url", "%meet.google.com%")
+    .order("scheduled_date")
+    .order("start_time")
+    .limit(40);
+  if (error) throw new Error("Falha ao listar salas para confirmar co-host: " + error.message);
+
+  const nowMs = Date.now();
+  const due = (rows || []).filter((b) => {
+    const end = new Date(`${b.scheduled_date}T${String(b.end_time || b.start_time || "23:59").slice(0, 5)}:00-03:00`).getTime();
+    return end > nowMs;
+  }).slice(0, 12);
+
+  let ensured = 0;
+  let cohostErrors = 0;
+  for (const b of due) {
+    const code = String(b.zoom_join_url || "").replace(/^https?:\/\/meet\.google\.com\//, "").split(/[?#]/)[0];
+    if (!code || !b.mentor_id) continue;
+    const tok = await resolveHostAccessToken(admin, b.meeting_host_id);
+    if ("error" in tok) {
+      cohostErrors++;
+      console.warn("[provision-meeting] ensure host", b.id, tok.error);
+      continue;
+    }
+    const { data: mentor } = await admin
+      .from("profiles")
+      .select("email, google_calendar_email")
+      .eq("id", b.mentor_id)
+      .maybeSingle();
+    const login = (mentor?.email || "").trim().toLowerCase();
+    const calendar = (mentor?.google_calendar_email || "").trim().toLowerCase();
+    if (login.endsWith("@libertymentoria.com.br") && !calendar) {
+      await admin.from("profiles").update({ google_calendar_email: login }).eq("id", b.mentor_id);
+      if (mentor) mentor.google_calendar_email = login;
+    }
+    try {
+      await configureMeetSpace(tok.accessToken, code);
+      const warn = await addMentorCohosts(tok.accessToken, code, mentorGoogleEmails(mentor));
+      if (warn) {
+        cohostErrors++;
+        await admin.from("bookings").update({ meeting_provision_error: warn.slice(0, 500) }).eq("id", b.id);
+      }
+      ensured++;
+    } catch (e) {
+      cohostErrors++;
+      console.warn("[provision-meeting] ensure", b.id, e);
+    }
+  }
+  return { ensured, cohostErrors };
+}
+
 Deno.serve(async (req) => {
   const preflight = handleOptions(req);
   if (preflight) return preflight;
@@ -1079,7 +1183,9 @@ Deno.serve(async (req) => {
     if (req.headers.get("x-sweep-secret")) {
       const sweepAdmin = getAdminClient();
       if (!(await isValidSweepSecret(sweepAdmin, req))) return errorJson("Forbidden", 403);
-      return json({ ok: true, ...(await sweepUnprovisioned(req, sweepAdmin)) });
+      const created = await sweepUnprovisioned(req, sweepAdmin);
+      const ready = await sweepEnsureCohosts(sweepAdmin);
+      return json({ ok: true, ...created, ...ready });
     }
 
     const ctx = await requireRole(req, PROVISION_ROLES);

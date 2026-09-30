@@ -4,6 +4,21 @@ import { supabase } from "@/integrations/supabase/client";
 
 export const APP_ORIGIN_DEFAULT = "https://begin.libertymentoria.com.br";
 
+/** Abre o Meet já na conta Google do mentor. A URL gravada no banco continua sendo o link cru. */
+export function meetEntryUrl(meetUrl: string, email?: string | null): string {
+  const raw = (meetUrl || "").trim();
+  const mail = (email || "").trim().toLowerCase();
+  if (!raw.startsWith("http") || !mail.includes("@")) return raw;
+  try {
+    const u = new URL("https://accounts.google.com/AccountChooser");
+    u.searchParams.set("Email", mail);
+    u.searchParams.set("continue", raw);
+    return u.toString();
+  } catch {
+    return raw;
+  }
+}
+
 export function digitsPhone(phone?: string | null): string {
   if (!phone) return "";
   const d = phone.replace(/\D/g, "");

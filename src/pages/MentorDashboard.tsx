@@ -35,7 +35,7 @@ import { useAuth } from "@/hooks/useAuth";
 import { supabase } from "@/integrations/supabase/client";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { invokeEndMeeting } from "@/lib/meetingWhatsApp";
+import { invokeEndMeeting, meetEntryUrl } from "@/lib/meetingWhatsApp";
 import { format, startOfMonth, addMonths, subMonths, parseISO } from "date-fns";
 import { ptBR } from "date-fns/locale";
 import { shortName } from "@/lib/formatName";
@@ -355,6 +355,22 @@ const MentorDashboardPage = () => {
   );
   const liveIds = useMemo(() => new Set(liveMeetSessions.map((b) => b.id)), [liveMeetSessions]);
 
+  const mentorMeetEmail = profile?.google_calendar_email || profile?.email || null;
+
+  const sessionsWithoutNotes = useMemo(
+    () =>
+      allMentorBookings
+        .filter((b) => {
+          if (b.status === "cancelled" || b.status === "not_realized") return false;
+          if (b.meeting_artifacts_status !== "unavailable") return false;
+          if (String(b.meeting_transcript_text || "").trim().length >= 30) return false;
+          if (String(b.meeting_summary_text || "").trim()) return false;
+          return true;
+        })
+        .slice(0, 3),
+    [allMentorBookings],
+  );
+
   // Próximas: lista completa do mentor; AO VIVO fica só no card de cima
   const upcomingAll = useMemo(
     () => sortByScheduledDateAsc(allVisible.filter((b) => isFutureScheduledBooking(b) && !liveIds.has(b.id))),
@@ -499,6 +515,29 @@ const MentorDashboardPage = () => {
           <ErrorState title="Não foi possível carregar suas sessões" onRetry={() => refetchBookings()} />
         )}
 
+        {!bookingsLoading && sessionsWithoutNotes.length > 0 && (
+          <section aria-label="Sessões sem registro" className="space-y-3">
+            {sessionsWithoutNotes.map((b) => {
+              const memberName = shortName((b.liberty_id ? libertyName(b.liberty_id) : b.guest_name) || "Membro");
+              return (
+                <SectionCard key={b.id} className="border-status-yellow/40">
+                  <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                    <div className="min-w-0 space-y-1">
+                      <p className="text-sm font-semibold text-foreground">Falta o registro desta sessão</p>
+                      <p className="text-sm text-muted-foreground">
+                        {memberName}, {sessionName(b.session_id)}. A transcrição não chegou. Escreva o que foi falado para o próximo encontro continuar daqui.
+                      </p>
+                    </div>
+                    <Button className="min-h-11 shrink-0" onClick={() => navigate(`/mentor/sessoes/${b.id}/relatorio`)}>
+                      Registrar o que foi falado
+                    </Button>
+                  </div>
+                </SectionCard>
+              );
+            })}
+          </section>
+        )}
+
         {!bookingsLoading && liveMeetSessions.length > 0 && (
           <section aria-label="Sessão ao vivo" className="space-y-3">
             {liveMeetSessions.map((b) => {
@@ -560,7 +599,7 @@ const MentorDashboardPage = () => {
                           size="default"
                           className="bg-status-green text-primary-foreground hover:bg-status-green/90"
                         >
-                          <a href={meetUrl} target="_blank" rel="noopener noreferrer">
+                          <a href={meetEntryUrl(meetUrl, mentorMeetEmail)} target="_blank" rel="noopener noreferrer">
                             <Video /> Entrar no Meet
                           </a>
                         </Button>
@@ -577,7 +616,7 @@ const MentorDashboardPage = () => {
                     </div>
                   </div>
                   <p className="mt-3 text-xs text-muted-foreground">
-                    Ao encerrar, todos saem da call → o Gemini gera o resumo → você cai no relatório para revisar e enviar.
+                    Entre pelo computador. Quando a call acabar, a transcrição chega sozinha no relatório.
                   </p>
                 </SectionCard>
               );
@@ -745,7 +784,7 @@ const MentorDashboardPage = () => {
                             }
                             variant={isSessionHappeningNow(b) ? "default" : "outline"}
                           >
-                            <a href={b.zoom_join_url} target="_blank" rel="noopener noreferrer">
+                            <a href={meetEntryUrl(b.zoom_join_url, mentorMeetEmail)} target="_blank" rel="noopener noreferrer">
                               {isSessionHappeningNow(b) ? <Video /> : <ExternalLink />}
                               {isSessionHappeningNow(b) ? "Ao vivo" : "Meet"}
                             </a>

@@ -38,6 +38,7 @@ import { SessionDeliverableDialog } from "@/components/SessionDeliverableDialog"
 import {
   invalidateMentorBookingQueries,
   translateBookingError,
+  markCompletedButtonClass,
   useMentorBookingActions,
 } from "@/components/mentor/MentorBookingActions";
 import { EndMeetingDialog } from "@/components/mentor/EndMeetingDialog";
@@ -614,8 +615,8 @@ const MentorRelatorioPage = () => {
               artifactsStatus === "ready"
                 ? "Transcrição recebida"
                 : artifactsStatus === "unavailable"
-                  ? "Sessão encerrada — transcrição não disponível"
-                  : "Sessão encerrada — recebendo a transcrição"
+                  ? "Sessão encerrada. Transcrição não chegou"
+                  : "Sessão encerrada. Recebendo a transcrição"
             }
           >
             <ol className="mt-1 list-decimal list-inside space-y-1 text-sm text-muted-foreground">
@@ -628,7 +629,7 @@ const MentorRelatorioPage = () => {
                 )}
                 {artifactsStatus === "ready" && "A transcrição chegou — revise o rascunho abaixo e ajuste o que quiser."}
                 {artifactsStatus === "unavailable" &&
-                  "O Google não gerou transcrição desta sessão (o mentor precisa entrar no Meet pelo computador, logado no Gmail cadastrado). Escreva um resumo abaixo e organize com a IA."}
+                  "A transcrição automática não chegou. Escreva abaixo o que foi falado e o que ficou combinado. A IA organiza o relatório."}
               </li>
               <li>A IA monta o rascunho do relatório — você só ajusta e salva.</li>
               {smartNotesUrl && (
@@ -670,7 +671,13 @@ const MentorRelatorioPage = () => {
               title={booking.is_retroactive ? "Registro retroativo: não exige relatório" : "Mapeamento do Negócio: não exige relatório"}
               action={
                 canEdit && effectiveStatus === "pending_confirmation" ? (
-                  <Button size="sm" disabled={actingId === booking.id} onClick={() => markCompleted(booking.id)}>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className={markCompletedButtonClass}
+                    disabled={!sessionEnded || actingId === booking.id}
+                    onClick={() => markCompleted(booking.id)}
+                  >
                     {actingId === booking.id ? <Loader2 className="animate-spin" /> : <CheckCircle2 />} Marcar realizada
                   </Button>
                 ) : undefined
@@ -908,23 +915,33 @@ const MentorRelatorioPage = () => {
           <SectionCard className="space-y-3">
             <SectionHeader
               as="h3"
-              title={<span className="inline-flex items-center gap-2"><ShieldCheck className="h-4 w-4 text-muted-foreground" aria-hidden /> Para concluir a sessão</span>}
+              title={<span className="inline-flex items-center gap-2"><ShieldCheck className="h-4 w-4 text-muted-foreground" aria-hidden /> {requiresReport ? "Para concluir a sessão" : "Para concluir o mapeamento"}</span>}
             />
-            <ul className="space-y-2 text-sm">
-              {[
-                { ok: sessionEnded, label: "Horário da sessão encerrado" },
-                { ok: summary.trim().length > 0, label: "Resumo preenchido" },
-                { ok: hasTool, label: "Ferramenta anexada (recomendado)" },
-              ].map((item) => (
-                <li key={item.label} className={cn("flex items-center gap-2", item.ok ? "text-foreground" : "text-muted-foreground")}>
-                  <Check className={cn("h-4 w-4 shrink-0", !item.ok && "opacity-30")} aria-hidden /> {item.label}
-                </li>
-              ))}
-            </ul>
+            {requiresReport ? (
+              <ul className="space-y-2 text-sm">
+                {[
+                  { ok: sessionEnded, label: "Horário da sessão encerrado" },
+                  { ok: summary.trim().length > 0, label: "Resumo preenchido" },
+                  { ok: hasTool, label: "Ferramenta anexada (recomendado)" },
+                ].map((item) => (
+                  <li key={item.label} className={cn("flex items-center gap-2", item.ok ? "text-foreground" : "text-muted-foreground")}>
+                    <Check className={cn("h-4 w-4 shrink-0", !item.ok && "opacity-30")} aria-hidden /> {item.label}
+                  </li>
+                ))}
+              </ul>
+            ) : (
+              <p className="text-sm text-foreground leading-relaxed">
+                O mapeamento já é o registro do lead. Não precisa de relatório para a sessão contar.
+              </p>
+            )}
             <p className="text-xs text-muted-foreground leading-relaxed">
-              {!sessionEnded
-                ? "O relatório só pode ser enviado depois do horário da sessão."
-                : "A sessão é marcada como realizada ao salvar o relatório com o resumo preenchido. A ferramenta é recomendada, mas não obrigatória."}
+              {!requiresReport
+                ? sessionEnded
+                  ? "Marque como realizada para o lead seguir na jornada. Observações abaixo são opcionais."
+                  : "O botão de realizada libera depois do horário de término."
+                : !sessionEnded
+                  ? "O relatório só pode ser enviado depois do horário da sessão."
+                  : "A sessão é marcada como realizada ao salvar o relatório com o resumo preenchido. A ferramenta é recomendada, mas não obrigatória."}
             </p>
           </SectionCard>
         </section>
@@ -935,16 +952,29 @@ const MentorRelatorioPage = () => {
             <Button variant="outline" size="lg" onClick={() => setDeliverableOpen(true)}>
               <FileText /> Gerar material
             </Button>
-            <Button
-              size="lg"
-              onClick={() => saveMutation.mutate()}
-              disabled={!canSave || saveMutation.isPending}
-              title={saveHint}
-              className="w-full sm:w-auto"
-            >
-              {saveMutation.isPending ? <Loader2 className="animate-spin" /> : <FileText />}
-              {existingReport ? "Atualizar relatório" : "Salvar relatório"}
-            </Button>
+            {!requiresReport && canEdit && effectiveStatus === "pending_confirmation" ? (
+              <Button
+                size="lg"
+                variant="outline"
+                className={cn("w-full sm:w-auto", markCompletedButtonClass)}
+                disabled={!sessionEnded || actingId === booking?.id}
+                onClick={() => booking && markCompleted(booking.id)}
+              >
+                {actingId === booking?.id ? <Loader2 className="animate-spin" /> : <CheckCircle2 />}
+                Marcar realizada
+              </Button>
+            ) : (
+              <Button
+                size="lg"
+                onClick={() => saveMutation.mutate()}
+                disabled={!canSave || saveMutation.isPending}
+                title={saveHint}
+                className="w-full sm:w-auto"
+              >
+                {saveMutation.isPending ? <Loader2 className="animate-spin" /> : <FileText />}
+                {existingReport ? "Atualizar relatório" : "Salvar relatório"}
+              </Button>
+            )}
           </div>
           {saveHint && <p className="text-xs text-muted-foreground text-right mt-2">{saveHint}</p>}
         </div>

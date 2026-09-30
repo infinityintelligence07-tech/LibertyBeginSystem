@@ -478,6 +478,66 @@ async function notifyMentorArtifactsReady(
   });
 }
 
+async function notifyMentorTranscriptMissing(
+  admin: AdminClient,
+  mentorProfileId: string | null | undefined,
+  bookingId: string,
+): Promise<void> {
+  if (!mentorProfileId) return;
+  const { data: mentor } = await admin
+    .from("profiles")
+    .select("user_id, email, full_name")
+    .eq("id", mentorProfileId)
+    .maybeSingle();
+  if (!mentor?.user_id) return;
+
+  const { count } = await admin
+    .from("notifications")
+    .select("id", { count: "exact", head: true })
+    .eq("type", "meeting_transcript_missing")
+    .eq("related_booking_id", bookingId);
+  if ((count ?? 0) > 0) return;
+
+  const { data: booking } = await admin
+    .from("bookings")
+    .select("liberty_id, guest_name, session_id, meeting_host_id")
+    .eq("id", bookingId)
+    .maybeSingle();
+  let memberName = (booking?.guest_name || "").trim();
+  if (booking?.liberty_id) {
+    const { data: member } = await admin.from("profiles").select("full_name").eq("id", booking.liberty_id).maybeSingle();
+    memberName = (member?.full_name || memberName || "o membro").trim();
+  }
+  const who = memberName || "o membro";
+
+  await admin.from("notifications").insert({
+    user_id: mentor.user_id,
+    type: "meeting_transcript_missing",
+    title: "Falta o registro da sessão",
+    message: `A transcrição com ${who} não chegou. Abra a sessão e escreva o que foi falado, para o próximo encontro continuar daqui.`,
+    link: `/mentor/sessoes/${bookingId}/relatorio`,
+    related_booking_id: bookingId,
+  });
+
+  const to = (mentor.email || "").trim().toLowerCase();
+  if (!to.includes("@")) return;
+  try {
+    const hostTok = await resolveHostAccessToken(admin, booking?.meeting_host_id);
+    if ("error" in hostTok) return;
+    const appUrl = (Deno.env.get("APP_URL") || "https://begin.libertymentoria.com.br").replace(/\/+$/, "");
+    const reportUrl = `${appUrl}/mentor/sessoes/${bookingId}/relatorio`;
+    await sendGmail(
+      hostTok.accessToken,
+      hostTok.hostEmail,
+      [to],
+      "Falta o registro da sessão",
+      `<p>A transcrição da sessão com ${escapeHtml(who)} não chegou.</p><p>Abra a sessão e escreva o que foi falado. A IA organiza o relatório.</p><p><a href="${escapeHtml(reportUrl)}">Registrar o que foi falado</a></p>`,
+    );
+  } catch (e) {
+    console.warn("[meeting-control] aviso de transcrição ausente", e);
+  }
+}
+
 type SessionSummary = {
   resumo: string;
   pontos_principais: string[];
@@ -813,6 +873,7 @@ async function pollArtifactsAfterEnd(
           meeting_artifacts_fetched_at: new Date().toISOString(),
           meeting_provision_error: (e instanceof Error ? e.message : String(e)).slice(0, 500),
         }).eq("id", bookingId);
+        await notifyMentorTranscriptMissing(admin, mentorId, bookingId);
       }
       continue;
     }
@@ -824,7 +885,10 @@ async function pollArtifactsAfterEnd(
       await onArtifactsReady(admin, bookingId, mentorId, artifacts);
       return;
     }
-    if (artifacts.status === "unavailable") return;
+    if (artifacts.status === "unavailable") {
+      await notifyMentorTranscriptMissing(admin, mentorId, bookingId);
+      return;
+    }
   }
 }
 
@@ -919,6 +983,8 @@ async function sweepEndedMeetings(admin: AdminClient): Promise<{ checked: number
       if (artifacts.status === "ready" && (hasTranscript || artifacts.smart_notes_url)) {
         await onArtifactsReady(admin, b.id, b.mentor_id, artifacts);
         ready++;
+      } else if (givingUp || artifacts.status === "unavailable") {
+        await notifyMentorTranscriptMissing(admin, b.mentor_id, b.id);
       }
     } catch (e) {
       errors++;
@@ -1065,6 +1131,8 @@ Deno.serve(async (req) => {
     await persistArtifacts(admin, bookingId, artifacts);
     if (artifacts.status === "ready") {
       scheduleBackground(() => onArtifactsReady(admin, bookingId, booking.mentor_id, artifacts));
+    } else if (artifacts.status === "unavailable") {
+      scheduleBackground(() => notifyMentorTranscriptMissing(admin, booking.mentor_id, bookingId));
     }
 
     return json({
