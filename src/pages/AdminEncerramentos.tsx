@@ -165,7 +165,7 @@ const AdminEncerramentosPage = () => {
         ) : (
           <>
             <div className="overflow-x-auto pb-2 -mx-4 px-4 sm:mx-0 sm:px-0">
-              <div className="grid grid-flow-col auto-cols-[minmax(420px,1fr)] gap-4 min-w-full">
+              <div className="grid grid-flow-col auto-cols-[minmax(240px,280px)] gap-3 w-max max-w-full">
                 {monthKeys.map((key) => {
                   const items = grouped[key] || [];
                   const isCurrent = key === currentKey;
@@ -195,23 +195,21 @@ const AdminEncerramentosPage = () => {
                                 leading={<UserAvatar name={m.full_name} avatarUrl={m.avatar_url || undefined} size={40} />}
                                 title={toTitleCase(m.full_name || "")}
                                 subtitle={
-                                  <span className="block">
-                                    <span className="block tabular-nums whitespace-nowrap">{m.total_completed}/12 sessões</span>
+                                  <span className="flex flex-col items-start gap-1">
+                                    <span className="tabular-nums">{m.total_completed}/12 sessões</span>
                                     {(dayLabel || m.company_name) && (
-                                      <span className="block break-words">
+                                      <span className="break-words">
                                         {dayLabel}
                                         {dayLabel && m.company_name ? " · " : null}
                                         {m.company_name}
                                       </span>
                                     )}
-                                  </span>
-                                }
-                                trailing={
-                                  <span className="flex flex-col items-end gap-1">
-                                    <StatusPill tone={pace.tone}>{pace.label}</StatusPill>
-                                    {!m.has_next_session && (
-                                      <StatusPill tone="danger" withDot={false}>Sem próxima sessão</StatusPill>
-                                    )}
+                                    <span className="flex flex-wrap gap-x-2 gap-y-0.5">
+                                      <StatusPill tone={pace.tone}>{pace.label}</StatusPill>
+                                      {!m.has_next_session && (
+                                        <StatusPill tone="danger" withDot={false} className="whitespace-normal">Sem próxima sessão</StatusPill>
+                                      )}
+                                    </span>
                                   </span>
                                 }
                               />
