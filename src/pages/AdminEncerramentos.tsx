@@ -15,14 +15,12 @@ import {
   SectionHeader,
   SectionCard,
   ListRow,
-  StatusPill,
   IconButton,
   TextField,
   LoadingState,
   EmptyState,
   ErrorState,
 } from "@/components/ds";
-import type { PillTone } from "@/components/ds";
 
 const MONTHS_PT = [
   "Janeiro", "Fevereiro", "Março", "Abril", "Maio", "Junho",
@@ -35,18 +33,11 @@ const monthLabel = (key: string) => {
   return `${MONTHS_PT[m - 1]} ${y}`;
 };
 
-/** "Dia DD" só quando o dia da data é de 1 a 31. Nunca "Dia 0". */
-const endDayLabel = (iso: string | null | undefined): string | null => {
+/** Dia do encerramento, de 1 a 31. Nunca 0. */
+const endDay = (iso: string | null | undefined): number | null => {
   const day = Number(String(iso || "").slice(8, 10));
   if (!Number.isInteger(day) || day < 1 || day > 31) return null;
-  return `Dia ${String(day).padStart(2, "0")}`;
-};
-
-const memberPace = (member: any, key: string): { label: string; tone: PillTone } => {
-  const count = member.monthly_counts?.[key] || 0;
-  if (count >= 2) return { label: "No ritmo", tone: "success" };
-  if (count === 1) return { label: "Parcial", tone: "warning" };
-  return { label: "Sem sessão", tone: "danger" };
+  return day;
 };
 
 const AdminEncerramentosPage = () => {
@@ -184,8 +175,7 @@ const AdminEncerramentosPage = () => {
                           <p className="text-xs text-muted-foreground text-center py-10 px-4">Nenhum encerramento</p>
                         ) : (
                           items.map((m, index) => {
-                            const dayLabel = endDayLabel(m.program_end_date);
-                            const pace = memberPace(m, key);
+                            const day = endDay(m.program_end_date);
                             return (
                               <ListRow
                                 key={m.id}
@@ -195,12 +185,12 @@ const AdminEncerramentosPage = () => {
                                 leading={<UserAvatar name={m.full_name} avatarUrl={m.avatar_url || undefined} size={40} />}
                                 title={shortName(m.full_name || "")}
                                 subtitle={
-                                  <span className="inline-flex flex-wrap items-center gap-x-1.5 gap-y-0.5">
-                                    <span className="tabular-nums">{m.total_completed}/12</span>
-                                    {dayLabel && <span>{dayLabel}</span>}
-                                    <StatusPill tone={!m.has_next_session ? "danger" : pace.tone}>
-                                      {!m.has_next_session ? "Sem próxima" : pace.label}
-                                    </StatusPill>
+                                  <span className="block">
+                                    <span className="tabular-nums">{m.total_completed} de 12 sessões</span>
+                                    {day != null && <span> · encerra dia {day}</span>}
+                                    {!m.has_next_session && (
+                                      <span className="block text-destructive">Sem próxima sessão</span>
+                                    )}
                                   </span>
                                 }
                               />
