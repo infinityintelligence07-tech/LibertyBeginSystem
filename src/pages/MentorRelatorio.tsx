@@ -33,6 +33,7 @@ import { ptBR } from "date-fns/locale";
 import { shortName } from "@/lib/formatName";
 import { useAuth } from "@/hooks/useAuth";
 import { bookingRequiresReport, getEffectiveBookingStatus, isBookingPast } from "@/lib/bookingStatus";
+import { mentorAiReportEnabled } from "@/lib/mentorAiReport";
 import { StudentTools } from "@/components/StudentTools";
 import { SessionDeliverableDialog } from "@/components/SessionDeliverableDialog";
 import {
@@ -54,6 +55,7 @@ const MentorRelatorioPage = () => {
   // O layout segue a rota (/admin/... ou /mentor/...), não o papel do usuário
   const isAdminRoute = location.pathname.startsWith("/admin");
   const layoutRole: "admin" | "mentor" = isAdminRoute ? "admin" : "mentor";
+  const aiReportOn = layoutRole === "admin" || mentorAiReportEnabled;
   const goBack = useGoBack(isAdminRoute ? "/admin/membros" : "/mentor/sessoes");
   const { actingId, markCompleted } = useMentorBookingActions();
 
@@ -351,8 +353,10 @@ const MentorRelatorioPage = () => {
         done = true;
         setTranscript(r.transcript.trim());
         setArtifactsStatus("ready");
-        setAutoOrganizeOnce(true);
-        toast.success("Transcrição pronta", { description: "Organizando rascunho com IA…" });
+        if (aiReportOn) {
+          setAutoOrganizeOnce(true);
+          toast.success("Transcrição pronta", { description: "Organizando rascunho com IA…" });
+        }
         return;
       }
       if (r.status === "ready") {
@@ -372,7 +376,7 @@ const MentorRelatorioPage = () => {
       cancelled = true;
       window.clearInterval(id);
     };
-  }, [bookingId, canEdit, meetEndedFromNav, booking?.meeting_ended_at]);
+  }, [bookingId, canEdit, meetEndedFromNav, booking?.meeting_ended_at, aiReportOn]);
 
   useEffect(() => {
     if (artifactsStatus !== "polling" && artifactsStatus !== "idle") return;
@@ -393,7 +397,11 @@ const MentorRelatorioPage = () => {
         toast.error(r.error || "Não foi possível encerrar o Meet");
         return;
       }
-      toast.success("Sessão encerrada", { description: "A transcrição chega em instantes aqui no relatório." });
+      toast.success("Sessão encerrada", {
+        description: aiReportOn
+          ? "A transcrição chega em instantes aqui no relatório."
+          : "Escreva o relatório nesta tela.",
+      });
       await queryClient.invalidateQueries({ queryKey: ["booking-detail", bookingId] });
       navigate(location.pathname, { replace: true, state: { meetEnded: true } });
     } finally {
@@ -403,12 +411,12 @@ const MentorRelatorioPage = () => {
   };
 
   useEffect(() => {
-    if (!autoOrganizeOnce || organizing) return;
+    if (!aiReportOn || !autoOrganizeOnce || organizing) return;
     if (transcript.trim().length < 30) return;
     setAutoOrganizeOnce(false);
     void organize();
     // eslint-disable-next-line react-hooks/exhaustive-deps -- dispara uma vez quando a transcrição chega
-  }, [autoOrganizeOnce, transcript, organizing]);
+  }, [aiReportOn, autoOrganizeOnce, transcript, organizing]);
 
   // A sessão só pode ser concluída (e o relatório enviado) depois do horário de término.
   const sessionEnded = !!booking && isBookingPast(booking);
@@ -590,7 +598,7 @@ const MentorRelatorioPage = () => {
           />
         </div>
 
-        {booking.meeting_summary_text && (
+        {aiReportOn && booking.meeting_summary_text && (
           <SectionCard>
             <SectionHeader
               title="Resumo da sessão"
@@ -607,7 +615,13 @@ const MentorRelatorioPage = () => {
           </SectionCard>
         )}
 
-        {(meetEndedFromNav || !!booking.meeting_ended_at) && (
+        {(meetEndedFromNav || !!booking.meeting_ended_at) && !aiReportOn && (
+          <Callout tone="info" icon={CheckCircle2} title="Escreva o relatório desta sessão">
+            A sessão encerrou. O que conta é o texto que você salva abaixo.
+          </Callout>
+        )}
+
+        {(meetEndedFromNav || !!booking.meeting_ended_at) && aiReportOn && (
           <Callout
             tone="success"
             icon={CheckCircle2}
@@ -653,7 +667,7 @@ const MentorRelatorioPage = () => {
         )}
         {!sessionEnded && meetEndedFromNav && (
           <Callout tone="info" icon={Clock} title="Você já pode montar o rascunho">
-            O Meet acabou, mas o envio do relatório libera após {booking.end_time?.slice(0, 5) ?? "--:--"} (horário agendado). Enquanto isso, cole o Gemini e organize com a IA.
+            O Meet acabou, mas o envio do relatório libera após {booking.end_time?.slice(0, 5) ?? "--:--"} (horário agendado). {aiReportOn ? "Enquanto isso, cole o Gemini e organize com a IA." : "Enquanto isso, escreva o relatório abaixo."}
           </Callout>
         )}
         {!canEdit && (
@@ -736,7 +750,7 @@ const MentorRelatorioPage = () => {
           </section>
         )}
 
-        {/* Organizar com IA */}
+        {aiReportOn && (
         <section id="organizar-ia">
           <SectionCard className="space-y-4">
             <SectionHeader
@@ -760,8 +774,7 @@ const MentorRelatorioPage = () => {
             </div>
           </SectionCard>
         </section>
-
-        {/* Relatório estruturado */}
+        )}
         <section>
           <SectionCard className="space-y-4">
             <SectionHeader as="h3" title="Relatório" description="O que o aluno vai ler." />
@@ -771,7 +784,7 @@ const MentorRelatorioPage = () => {
           </SectionCard>
         </section>
 
-        {/* Insights da IA */}
+        {aiReportOn && (
         <section>
           <SectionCard className="space-y-4">
             <SectionHeader as="h3" title="Insights da IA" />
@@ -797,8 +810,7 @@ const MentorRelatorioPage = () => {
             )}
           </SectionCard>
         </section>
-
-        {/* Tarefas sugeridas */}
+        )}
         <section>
           <SectionCard className="space-y-4">
             <SectionHeader
@@ -806,7 +818,9 @@ const MentorRelatorioPage = () => {
               title="Tarefas para o aluno"
               description={
                 suggestions.length === 0
-                  ? "As sugestões da IA aparecem aqui depois de organizar a transcrição. Você também pode adicionar tarefas manualmente."
+                  ? aiReportOn
+                    ? "As sugestões da IA aparecem aqui depois de organizar a transcrição. Você também pode adicionar tarefas manualmente."
+                    : "Adicione as tarefas que o aluno deve fazer até a próxima sessão."
                   : `${approvedCount} de ${suggestions.length} serão enviadas ao checklist do aluno ao salvar. Toque na caixa para aprovar ou rejeitar.`
               }
               actions={
@@ -949,9 +963,11 @@ const MentorRelatorioPage = () => {
         {/* Ações: fixas na base no mobile */}
         <div className="sticky bottom-[calc(64px+env(safe-area-inset-bottom))] lg:static z-20 -mx-4 px-4 sm:-mx-6 sm:px-6 py-3 bg-background border-t border-border lg:mx-0 lg:p-0 lg:bg-transparent lg:border-0">
           <div className="flex flex-col-reverse sm:flex-row sm:items-center sm:justify-end gap-2">
+            {aiReportOn && (
             <Button variant="outline" size="lg" onClick={() => setDeliverableOpen(true)}>
               <FileText /> Gerar material
             </Button>
+            )}
             {!requiresReport && canEdit && effectiveStatus === "pending_confirmation" ? (
               <Button
                 size="lg"

@@ -36,6 +36,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { invokeEndMeeting, meetEntryUrl } from "@/lib/meetingWhatsApp";
+import { mentorAiReportEnabled } from "@/lib/mentorAiReport";
 import { format, startOfMonth, addMonths, subMonths, parseISO } from "date-fns";
 import { ptBR } from "date-fns/locale";
 import { shortName } from "@/lib/formatName";
@@ -88,7 +89,9 @@ const MentorDashboardPage = () => {
       setLocallyEndedMeetIds((prev) => new Set(prev).add(bookingId));
       await queryClient.invalidateQueries({ queryKey: ["mentor-dash-bookings", profile?.id] });
       toast.success("Sessão encerrada", {
-        description: "Abrindo o relatório — a transcrição chega em instantes.",
+        description: mentorAiReportEnabled
+          ? "Abrindo o relatório. A transcrição chega em instantes."
+          : "Abrindo o relatório para você escrever.",
       });
       navigate(`/mentor/sessoes/${bookingId}/relatorio`, { state: { meetEnded: true } });
     } finally {
@@ -610,14 +613,16 @@ const MentorDashboardPage = () => {
                         variant="outline"
                         disabled={endingMeetId === b.id}
                         onClick={() => setEndConfirmId(b.id)}
-                        title="Encerra a call para todos, libera o resumo Gemini e abre o relatório"
+                        title="Encerra a call para todos e abre o relatório"
                       >
                         <PhoneOff /> {endingMeetId === b.id ? "Encerrando…" : "Encerrar sessão"}
                       </Button>
                     </div>
                   </div>
                   <p className="mt-3 text-xs text-muted-foreground">
-                    Entre pelo computador. Quando a call acabar, a transcrição chega sozinha no relatório.
+                    {mentorAiReportEnabled
+                      ? "Entre pelo computador. Quando a call acabar, a transcrição chega sozinha no relatório."
+                      : "Entre pelo computador. Depois da sessão, o relatório você escreve na tela."}
                   </p>
                 </SectionCard>
               );
@@ -797,7 +802,7 @@ const MentorDashboardPage = () => {
                             variant="outline"
                             disabled={endingMeetId === b.id}
                             onClick={() => setEndConfirmId(b.id)}
-                            title="Encerra a call para todos, libera o resumo Gemini e abre o relatório"
+                            title="Encerra a call para todos e abre o relatório"
                           >
                             <PhoneOff /> {endingMeetId === b.id ? "Encerrando…" : "Encerrar"}
                           </Button>

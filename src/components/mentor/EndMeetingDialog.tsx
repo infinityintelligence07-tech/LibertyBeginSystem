@@ -1,4 +1,5 @@
 import { ConfirmDialog } from "@/components/ds";
+import { mentorAiReportEnabled } from "@/lib/mentorAiReport";
 
 type EndMeetingDialogProps = {
   open: boolean;
@@ -13,7 +14,11 @@ export function EndMeetingDialog({ open, onOpenChange, onConfirm, busy }: EndMee
       open={open}
       onOpenChange={onOpenChange}
       title="Encerrar a sessão para todos?"
-      description="A chamada do Meet termina na hora para você e para o aluno. A transcrição chega sozinha no relatório (em geral 2–5 min) e a IA monta o rascunho."
+      description={
+        mentorAiReportEnabled
+          ? "A chamada do Meet termina na hora para você e para o aluno. A transcrição chega sozinha no relatório (em geral 2–5 min) e a IA monta o rascunho."
+          : "A chamada do Meet termina na hora para você e para o aluno. O relatório você escreve na tela da sessão."
+      }
       confirmLabel="Encerrar sessão"
       cancelLabel="Continuar na sessão"
       destructive

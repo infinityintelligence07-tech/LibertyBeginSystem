@@ -727,6 +727,9 @@ function mentorEmails(mentor: { email?: string | null; google_calendar_email?: s
  * Idempotente: a trava meeting_summary_claimed_at evita que poll, varredura e tela façam isso em dobro.
  */
 async function finalizeSessionSummary(admin: AdminClient, bookingId: string): Promise<void> {
+  // Pausado até o relatório automático ficar confiável. Liga com o secret ENABLE_MENTOR_AI_SUMMARY=1.
+  if (Deno.env.get("ENABLE_MENTOR_AI_SUMMARY") !== "1") return;
+
   const now = new Date();
   const claimCutoff = new Date(now.getTime() - SUMMARY_CLAIM_MS).toISOString();
   const { data: claimed, error: claimErr } = await admin
