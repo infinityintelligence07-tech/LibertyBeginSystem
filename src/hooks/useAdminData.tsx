@@ -447,9 +447,9 @@ export const useMentors = () => {
         getEffectiveBookingStatus(b, { hasReport: reportedIds.has(b.id) });
 
       const mentors: MentorWithStats[] = (mentorProfiles || []).map((m) => {
-        // Sessões não remuneradas (Onboarding) ficam fora de todos os controles financeiros.
+        // Onboarding e sessões marcadas sem repasse ficam fora de todos os controles financeiros.
         const mBookings = bookings.filter(
-          (b) => b.mentor_id === m.id && isVisibleSessionBooking(b) && feeMultiplierOf(b) > 0,
+          (b) => b.mentor_id === m.id && isVisibleSessionBooking(b) && feeMultiplierOf(b) > 0 && b.payout_excluded !== true,
         );
 
         const withStatus = mBookings.map((b) => ({ b, status: effectiveStatus(b) }));

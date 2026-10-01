@@ -325,9 +325,10 @@ const MentorDashboardPage = () => {
   };
   const sumFees = (list: { session_id: string }[]) => list.reduce((acc, b) => acc + feeOf(b), 0);
 
-  const earnedThisPeriod = sumFees(realized);
-  const projectedThisPeriod = sumFees([...realized, ...scheduled]);
-  const allTimeRealized = useMemo(() => allVisible.filter(isRealizedSessionBooking), [allVisible]);
+  const payable = (b: { payout_excluded?: boolean | null }) => b.payout_excluded !== true;
+  const earnedThisPeriod = sumFees(realized.filter(payable));
+  const projectedThisPeriod = sumFees([...realized, ...scheduled].filter(payable));
+  const allTimeRealized = useMemo(() => allVisible.filter((b) => isRealizedSessionBooking(b) && payable(b)), [allVisible]);
   const totalEarnedAllTime = sumFees(allTimeRealized);
 
   const stats = [

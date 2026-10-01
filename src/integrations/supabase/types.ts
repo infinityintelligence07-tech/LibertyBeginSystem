@@ -91,6 +91,7 @@ export type Database = {
           guest_email: string | null
           id: string
           is_retroactive: boolean
+          payout_excluded: boolean
           liberty_id: string | null
           mentor_id: string
           observations: string | null
@@ -137,6 +138,7 @@ export type Database = {
           guest_email?: string | null
           id?: string
           is_retroactive?: boolean
+          payout_excluded?: boolean
           liberty_id?: string | null
           mentor_id: string
           observations?: string | null
@@ -183,6 +185,7 @@ export type Database = {
           guest_email?: string | null
           id?: string
           is_retroactive?: boolean
+          payout_excluded?: boolean
           liberty_id?: string | null
           mentor_id?: string
           observations?: string | null
