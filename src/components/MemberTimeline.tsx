@@ -14,7 +14,9 @@ import {
   PENDING_CONFIRMATION_HINT,
 } from "@/lib/bookingStatus";
 import { translateBookingError } from "@/components/MemberSessionEditor";
+import { markCompletedButtonClass } from "@/components/mentor/MentorBookingActions";
 import { shortName } from "@/lib/formatName";
+import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { BottomSheet, Callout, ConfirmDialog, EmptyState, SectionCard, SectionHeader, StatusPill } from "@/components/ds";
 import { useNavigate } from "react-router-dom";
@@ -567,7 +569,7 @@ export const MemberTimeline = ({
                 {!bookingRequiresReport(openBooking) && (
                   <Button
                     variant="outline"
-                    className="flex-1"
+                    className={cn("flex-1", markCompletedButtonClass)}
                     disabled={closing}
                     onClick={() => closePending(openBooking, "completed")}
                   >

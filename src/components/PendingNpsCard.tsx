@@ -1,14 +1,12 @@
-import { Link } from "react-router-dom";
-import { ClipboardCheck, ArrowRight } from "lucide-react";
+import { useNavigate } from "react-router-dom";
 import { useAuth } from "@/hooks/useAuth";
-import { Button } from "@/components/ui/button";
-import { SectionCard, Stat, StatusPill } from "@/components/ds";
+import { ListRow, SectionCard, StatusPill } from "@/components/ds";
 import { useQuery } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { format, parseISO } from "date-fns";
 import { ptBR } from "date-fns/locale";
-import { isRealizedSessionBooking, sortByScheduledDateDesc } from "@/lib/bookingStatus";
-import { isJourneySession } from "@/lib/sessionProgress";
+import { sortByScheduledDateDesc } from "@/lib/bookingStatus";
+import { isNpsEligibleBooking } from "@/lib/pendingNps";
 
 type PendingNpsBooking = {
   id: string;
@@ -23,15 +21,12 @@ type PendingNpsBooking = {
 };
 
 /**
- * Card destacado no topo do painel do aluno quando existem sessões realizadas
- * sem pesquisa de satisfação respondida. Leva direto ao formulário do NPS.
- *
- * Regra: só sessões REALIZADAS (status efetivo `completed`/`awaiting_report`),
- * da jornada (order > 0, sem Onboarding) e não retroativas. Sessões "A confirmar"
- * (passaram do horário sem fechamento do mentor) não pedem NPS.
+ * Lista, no início do aluno, as sessões realizadas que ainda não têm NPS.
+ * Cada linha abre a avaliação daquela sessão.
  */
 export const PendingNpsCard = () => {
   const { profile } = useAuth();
+  const navigate = useNavigate();
 
   const { data } = useQuery({
     queryKey: ["pending-nps", profile?.id],
@@ -44,8 +39,6 @@ export const PendingNpsCard = () => {
             "id, scheduled_date, start_time, end_time, status, is_retroactive, report_required, session_id, sessions(name, order, is_kickoff)",
           )
           .eq("liberty_id", profile.id)
-          // Só o mentor/admin fecham a sessão como realizada (status bruto `completed`).
-          // Sessões que apenas passaram do horário ficam "A confirmar" e não pedem NPS.
           .eq("status", "completed")
           .order("scheduled_date", { ascending: false }),
         supabase.from("nps_responses").select("booking_id").eq("liberty_id", profile.id),
@@ -53,16 +46,9 @@ export const PendingNpsCard = () => {
       if (bookingsResult.error) throw bookingsResult.error;
       if (answeredResult.error) throw answeredResult.error;
 
-      const done = new Set((answeredResult.data ?? []).map((r) => r.booking_id).filter(Boolean));
+      const done = new Set((answeredResult.data ?? []).map((r) => r.booking_id).filter(Boolean) as string[]);
       const bookings = (bookingsResult.data ?? []) as unknown as PendingNpsBooking[];
-      const pending = bookings.filter(
-        (b) =>
-          !done.has(b.id) &&
-          isRealizedSessionBooking(b) &&
-          isJourneySession({ id: b.session_id, order: b.sessions?.order }) &&
-          !b.is_retroactive,
-      );
-      return sortByScheduledDateDesc(pending);
+      return sortByScheduledDateDesc(bookings.filter((b) => isNpsEligibleBooking(b, done)));
     },
     enabled: !!profile?.id,
   });
@@ -71,45 +57,32 @@ export const PendingNpsCard = () => {
   if (profile?.is_active === false) return null;
   if (!pending.length) return null;
 
-  const next = pending[0];
-  const sessionName = next.sessions?.name;
-  const dateLabel = next?.scheduled_date
-    ? format(parseISO(next.scheduled_date), "dd 'de' MMMM", { locale: ptBR })
-    : null;
-
   return (
-    <SectionCard as="section" aria-labelledby="pending-nps-title">
-      <div className="grid grid-cols-1 md:grid-cols-[1fr_auto] gap-4 md:gap-6 md:items-center">
-        <div className="space-y-3 min-w-0">
-          <StatusPill tone="pending">
-            Avaliação pendente
-          </StatusPill>
-          <h3 id="pending-nps-title" className="text-[17px] font-semibold text-foreground leading-tight">
-            {pending.length > 1
-              ? `Você tem ${pending.length} sessões para avaliar`
-              : "Falta você avaliar sua última sessão"}
-          </h3>
-          <p className="text-sm text-muted-foreground leading-relaxed max-w-xl">
-            {sessionName ? `“${sessionName}”` : "Sua sessão"}
-            {dateLabel ? ` · ${dateLabel}` : ""}. Sua opinião nos ajuda a melhorar a mentoria. Leva menos de 2 minutos.
-          </p>
-          <div className="pt-1">
-            <Button asChild className="w-full sm:w-auto">
-              <Link to={`/nps/${next.id}`}>
-                Responder avaliação
-                <ArrowRight className="h-4 w-4" aria-hidden />
-              </Link>
-            </Button>
-          </div>
-        </div>
-
-        <Stat
-          icon={ClipboardCheck}
-          label={pending.length === 1 ? "Avaliação pendente" : "Avaliações pendentes"}
-          value={pending.length}
-          className="md:min-w-[140px]"
-        />
+    <SectionCard as="section" padding="none" aria-labelledby="pending-nps-title">
+      <div className="px-4 pt-4 pb-3 space-y-2">
+        <StatusPill tone="pending">Avaliação pendente</StatusPill>
+        <h3 id="pending-nps-title" className="text-[17px] font-semibold text-foreground leading-tight">
+          {pending.length === 1 ? "Falta avaliar 1 sessão" : `Faltam avaliar ${pending.length} sessões`}
+        </h3>
+        <p className="text-sm text-muted-foreground leading-relaxed">
+          Cada sessão pede a sua nota. Toque na que você vai avaliar. Leva menos de 2 minutos.
+        </p>
       </div>
+      {pending.map((booking, index) => {
+        const dateLabel = booking.scheduled_date
+          ? format(parseISO(booking.scheduled_date), "dd 'de' MMMM", { locale: ptBR })
+          : "Data não informada";
+        return (
+          <ListRow
+            key={booking.id}
+            onPress={() => navigate(`/nps/${booking.id}`)}
+            last={index === pending.length - 1}
+            title={booking.sessions?.name || "Sessão"}
+            subtitle={dateLabel}
+            trailing={<StatusPill tone="pending" withDot={false}>Sem avaliação</StatusPill>}
+          />
+        );
+      })}
     </SectionCard>
   );
 };

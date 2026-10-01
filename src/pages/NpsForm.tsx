@@ -6,8 +6,12 @@ import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/hooks/useAuth";
 import { toast } from "sonner";
 import { CheckCircle2, Loader2, Send } from "lucide-react";
+import { format, parseISO } from "date-fns";
+import { ptBR } from "date-fns/locale";
 import { Button } from "@/components/ui/button";
-import { LoadingState, PageContainer, PageHeader, SectionCard, SelectField, TextAreaField } from "@/components/ds";
+import { EmptyState, ListRow, LoadingState, PageContainer, PageHeader, SectionCard, StatusPill, TextAreaField } from "@/components/ds";
+import { sortByScheduledDateDesc } from "@/lib/bookingStatus";
+import { isNpsEligibleBooking } from "@/lib/pendingNps";
 
 type Booking = {
   id: string;
@@ -15,6 +19,19 @@ type Booking = {
   mentor_id: string | null;
   session_id: string | null;
   scheduled_date: string | null;
+  status: string | null;
+  is_retroactive: boolean | null;
+  report_required: boolean | null;
+  start_time: string | null;
+  end_time: string | null;
+  sessions: { name: string | null; order: number | null } | null;
+  mentor: { full_name: string | null } | null;
+};
+
+type PendingItem = {
+  id: string;
+  scheduled_date: string;
+  session_name: string;
 };
 
 const scoreQuestions: { key: keyof ScoreState; label: string }[] = [
@@ -88,11 +105,8 @@ const NpsForm = () => {
   const [submitting, setSubmitting] = useState(false);
   const [alreadySent, setAlreadySent] = useState(false);
   const [booking, setBooking] = useState<Booking | null>(null);
-
-  const [sessionsList, setSessionsList] = useState<{ id: string; name: string }[]>([]);
-  const [mentorsList, setMentorsList] = useState<{ id: string; full_name: string }[]>([]);
-  const [selectedSessionId, setSelectedSessionId] = useState<string>("");
-  const [selectedMentorId, setSelectedMentorId] = useState<string>("");
+  const [pending, setPending] = useState<PendingItem[]>([]);
+  const [blockedReason, setBlockedReason] = useState<string | null>(null);
 
   const [scores, setScores] = useState<ScoreState>(emptyScores);
   const [keyTakeaway, setKeyTakeaway] = useState("");
@@ -103,47 +117,50 @@ const NpsForm = () => {
     (async () => {
       if (!profile?.id) return;
       setLoading(true);
+      setBlockedReason(null);
+      setAlreadySent(false);
+      setBooking(null);
       try {
-        // Load all active sessions + all mentor options for the dropdowns
-        const [{ data: sess, error: sessError }, { data: mentorOptions, error: mentorError }] = await Promise.all([
-          supabase.from("sessions").select("id, name, order").eq("is_active", true).order("order"),
-          (supabase.from("nps_mentor_options" as any) as any)
-            .select("profile_id, full_name")
-            .order("full_name"),
-        ]);
-
-        if (sessError) throw sessError;
-        if (mentorError) throw mentorError;
-
-        setSessionsList((sess || []) as any);
-        setMentorsList(
-          ((mentorOptions || []) as any[]).map((m) => ({
-            id: m.profile_id,
-            full_name: m.full_name,
-          }))
-        );
-
-        if (bookingId) {
-          const { data: b } = await supabase
+        const [bookingsResult, answeredResult] = await Promise.all([
+          supabase
             .from("bookings")
-            .select("id, liberty_id, mentor_id, session_id, scheduled_date")
-            .eq("id", bookingId)
-            .maybeSingle();
-          if (b) {
-            setBooking(b as Booking);
-            setSelectedSessionId(b.session_id || "");
-            setSelectedMentorId(b.mentor_id || "");
-            const { data: existing } = await supabase
-              .from("nps_responses")
-              .select("id")
-              .eq("booking_id", b.id)
-              .eq("liberty_id", profile.id)
-              .maybeSingle();
-            setAlreadySent(!!existing);
-          }
+            .select("id, liberty_id, mentor_id, session_id, scheduled_date, status, is_retroactive, report_required, start_time, end_time, sessions(name, order), mentor:profiles!bookings_mentor_id_fkey(full_name)")
+            .eq("liberty_id", profile.id)
+            .eq("status", "completed")
+            .order("scheduled_date", { ascending: false }),
+          supabase.from("nps_responses").select("booking_id").eq("liberty_id", profile.id),
+        ]);
+        if (bookingsResult.error) throw bookingsResult.error;
+        if (answeredResult.error) throw answeredResult.error;
+
+        const answered = new Set((answeredResult.data ?? []).map((r) => r.booking_id).filter(Boolean) as string[]);
+        const mine = (bookingsResult.data ?? []) as unknown as Booking[];
+        const open = sortByScheduledDateDesc(mine.filter((b) => isNpsEligibleBooking(b, answered)));
+        setPending(open.map((b) => ({
+          id: b.id,
+          scheduled_date: b.scheduled_date || "",
+          session_name: b.sessions?.name || "Sessão",
+        })));
+
+        if (!bookingId) return;
+
+        const current = mine.find((b) => b.id === bookingId) ?? null;
+        if (!current) {
+          setBlockedReason("Esta sessão não está na sua jornada.");
+          return;
         }
-      } catch (e: any) {
-        toast.error("Não foi possível carregar as sessões e mentores. Atualize a página e tente novamente.");
+        if (answered.has(current.id)) {
+          setBooking(current);
+          setAlreadySent(true);
+          return;
+        }
+        if (!isNpsEligibleBooking(current, answered)) {
+          setBlockedReason("Esta sessão ainda não pode ser avaliada.");
+          return;
+        }
+        setBooking(current);
+      } catch {
+        toast.error("Não foi possível carregar suas sessões. Atualize a página e tente novamente.");
       } finally {
         setLoading(false);
       }
@@ -153,50 +170,23 @@ const NpsForm = () => {
   const missingScores = scoreQuestions.some((q) => scores[q.key] == null);
 
   const submit = async () => {
-    if (!profile?.id) return;
-    if (!selectedSessionId) {
-      toast.error("Selecione qual sessão você está avaliando.");
-      return;
-    }
-    if (!selectedMentorId) {
-      toast.error("Selecione qual mentor conduziu a sessão.");
-      return;
-    }
+    if (!profile?.id || !booking?.session_id || !booking.mentor_id) return;
     if (missingScores) {
       toast.error("Por favor responda todas as notas de 0 a 10.");
       return;
     }
-    const sessionName = sessionsList.find((s) => s.id === selectedSessionId)?.name || null;
-    const mentorName = mentorsList.find((m) => m.id === selectedMentorId)?.full_name || null;
+    const sessionName = booking.sessions?.name || null;
+    const mentorName = booking.mentor?.full_name || null;
 
     setSubmitting(true);
     try {
-      // O membro pode trocar mentor/sessão no formulário: nesse caso a avaliação não é da reserva do link.
-      // Procura a reserva dele com esse mentor e sessão; se não houver, grava sem reserva.
-      let targetBookingId: string | null = null;
-      if (booking && booking.mentor_id === selectedMentorId && booking.session_id === selectedSessionId) {
-        targetBookingId = booking.id;
-      } else {
-        const { data: match } = await supabase
-          .from("bookings")
-          .select("id")
-          .eq("liberty_id", profile.id)
-          .eq("mentor_id", selectedMentorId)
-          .eq("session_id", selectedSessionId)
-          .not("status", "in", "(cancelled,not_realized)")
-          .order("scheduled_date", { ascending: false })
-          .limit(1)
-          .maybeSingle();
-        targetBookingId = match?.id ?? null;
-      }
-
       const { error } = await supabase.from("nps_responses").insert({
         liberty_id: profile.id,
-        mentor_id: selectedMentorId,
-        session_id: selectedSessionId,
-        booking_id: targetBookingId,
+        mentor_id: booking.mentor_id,
+        session_id: booking.session_id,
+        booking_id: booking.id,
         liberty_name: profile.full_name ?? null,
-        liberty_whatsapp: (profile as any)?.phone ?? null,
+        liberty_whatsapp: (profile as { phone?: string | null }).phone ?? null,
         session_name: sessionName,
         mentor_name: mentorName,
         ...scores,
@@ -207,63 +197,93 @@ const NpsForm = () => {
       if (error) throw error;
       queryClient.invalidateQueries({ queryKey: ["pending-nps"] });
       toast.success("Avaliação registrada");
-      navigate("/dashboard");
-    } catch (e: any) {
-      toast.error("Erro ao enviar: " + (e?.message || "desconhecido"));
+      navigate("/nps");
+    } catch (e: unknown) {
+      const message = e instanceof Error ? e.message : "desconhecido";
+      toast.error("Erro ao enviar: " + message);
     } finally {
       setSubmitting(false);
     }
   };
+
+  const sessionLabel = booking?.sessions?.name || "Sessão";
+  const mentorLabel = booking?.mentor?.full_name || "Mentor não informado";
+  const dateLabel = booking?.scheduled_date
+    ? format(parseISO(booking.scheduled_date), "dd 'de' MMMM 'de' yyyy", { locale: ptBR })
+    : null;
 
   return (
     <AppLayout role="liberty">
       <PageContainer variant="narrow">
         <PageHeader
           eyebrow="Pesquisa de satisfação"
-          title="Como foi sua sessão?"
-          description="Sua opinião nos ajuda a evoluir a experiência do Liberty Begin. Leva menos de 2 minutos."
-          back
+          title={bookingId ? "Como foi sua sessão?" : "Sessões para avaliar"}
+          description={
+            bookingId
+              ? "A nota fica ligada a esta sessão. Leva menos de 2 minutos."
+              : "Escolha a sessão que você ainda não avaliou."
+          }
+          back={bookingId ? "/nps" : "/dashboard"}
         />
 
         {loading ? (
-          <LoadingState variant="cards" rows={3} />
+          <LoadingState variant="list" rows={3} />
+        ) : !bookingId ? (
+          pending.length === 0 ? (
+            <EmptyState
+              icon={CheckCircle2}
+              title="Nenhuma sessão para avaliar"
+              description="Quando uma sessão sua for marcada como realizada, ela aparece aqui."
+            />
+          ) : (
+            <SectionCard padding="none">
+              {pending.map((item, index) => (
+                <ListRow
+                  key={item.id}
+                  last={index === pending.length - 1}
+                  onPress={() => navigate(`/nps/${item.id}`)}
+                  title={item.session_name}
+                  subtitle={item.scheduled_date ? format(parseISO(item.scheduled_date), "dd 'de' MMMM", { locale: ptBR }) : "Data não informada"}
+                  trailing={<StatusPill tone="pending" withDot={false}>Sem avaliação</StatusPill>}
+                />
+              ))}
+            </SectionCard>
+          )
         ) : alreadySent ? (
           <SectionCard className="text-center space-y-2">
             <CheckCircle2 className="h-6 w-6 text-muted-foreground mx-auto" aria-hidden />
-            <p className="text-[17px] font-semibold text-foreground">Você já respondeu essa avaliação</p>
-            <p className="text-sm text-muted-foreground">Obrigado pelo feedback.</p>
+            <p className="text-[17px] font-semibold text-foreground">Você já avaliou esta sessão</p>
+            <p className="text-sm text-muted-foreground">{sessionLabel}</p>
             <div className="pt-2">
-              <Button variant="outline" onClick={() => navigate("/dashboard")}>Voltar ao início</Button>
+              <Button variant="outline" onClick={() => navigate("/nps")}>Ver outras sessões</Button>
             </div>
           </SectionCard>
+        ) : blockedReason || !booking ? (
+          <EmptyState
+            title="Não dá para avaliar esta sessão"
+            description={blockedReason || "Esta sessão não está na sua jornada."}
+            action={<Button variant="outline" onClick={() => navigate("/nps")}>Ver suas sessões</Button>}
+          />
         ) : (
           <form
             className="space-y-6 pb-24 sm:pb-0"
             onSubmit={(e) => { e.preventDefault(); submit(); }}
           >
             <SectionCard className="space-y-6">
-              <div className="grid gap-4 md:grid-cols-2">
-                <SelectField
-                  label="Qual sessão você realizou?"
-                  value={selectedSessionId}
-                  onChange={(e) => setSelectedSessionId(e.target.value)}
-                >
-                  <option value="">Selecione a sessão</option>
-                  {sessionsList.map((s) => (
-                    <option key={s.id} value={s.id}>{s.name}</option>
-                  ))}
-                </SelectField>
-                <SelectField
-                  label="Quem foi seu mentor?"
-                  value={selectedMentorId}
-                  onChange={(e) => setSelectedMentorId(e.target.value)}
-                >
-                  <option value="">Selecione o mentor</option>
-                  {mentorsList.map((m) => (
-                    <option key={m.id} value={m.id}>{m.full_name}</option>
-                  ))}
-                </SelectField>
-              </div>
+              <dl className="grid gap-4 sm:grid-cols-3">
+                <div>
+                  <dt className="text-xs text-muted-foreground">Sessão</dt>
+                  <dd className="text-sm font-medium text-foreground mt-1">{sessionLabel}</dd>
+                </div>
+                <div>
+                  <dt className="text-xs text-muted-foreground">Mentor</dt>
+                  <dd className="text-sm font-medium text-foreground mt-1">{mentorLabel}</dd>
+                </div>
+                <div>
+                  <dt className="text-xs text-muted-foreground">Data</dt>
+                  <dd className="text-sm font-medium text-foreground mt-1">{dateLabel || "Sem data"}</dd>
+                </div>
+              </dl>
 
               {scoreQuestions.map((q) => (
                 <ScoreScale
@@ -302,7 +322,7 @@ const NpsForm = () => {
 
             <div className="fixed inset-x-0 bottom-0 z-30 border-t border-border bg-background px-4 pt-3 pb-[calc(env(safe-area-inset-bottom)+12px)] sm:static sm:border-0 sm:bg-transparent sm:p-0">
               <div className="mx-auto flex max-w-2xl flex-col-reverse gap-2 sm:flex-row sm:justify-end">
-                <Button type="button" variant="outline" size="lg" onClick={() => navigate(-1)}>
+                <Button type="button" variant="outline" size="lg" onClick={() => navigate("/nps")}>
                   Voltar
                 </Button>
                 <Button type="submit" size="lg" disabled={submitting}>

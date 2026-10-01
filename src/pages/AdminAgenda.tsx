@@ -45,6 +45,7 @@ import { bookingRuleErrorMessage } from "@/lib/bookingRules";
 import { whatsappHref, copyText, invokeProvisionMeeting, friendlyMeetError, buildMeetingWhatsAppTexts, invokeEndMeeting } from "@/lib/meetingWhatsApp";
 import { UserAvatar } from "@/components/UserAvatar";
 import { Button } from "@/components/ui/button";
+import { markCompletedButtonClass } from "@/components/mentor/MentorBookingActions";
 import {
   BottomSheet,
   Callout,
@@ -1422,7 +1423,7 @@ const AdminAgendaPage = () => {
                     i === pendingConfirmationBookings.length - 1,
                     <>
                       <Button size="sm" variant="outline" onClick={() => openDrawer(bk)}>Gerenciar</Button>
-                      <Button size="sm" variant="outline" disabled={savingStatus} onClick={() => closePendingConfirmation(bk, "completed")}>
+                      <Button size="sm" variant="outline" className={markCompletedButtonClass} disabled={savingStatus} onClick={() => closePendingConfirmation(bk, "completed")}>
                         <Check className="h-4 w-4" /> Marcar realizada
                       </Button>
                       <Button size="sm" variant="ghost" disabled={savingStatus} onClick={() => { openDrawer(bk); setShowNotRealizedModal(true); }}>
@@ -2047,7 +2048,7 @@ const AdminAgendaPage = () => {
               <Callout tone="warning" icon={Clock} title="O mentor ainda não fechou esta sessão">
                 <p className="mb-3">{PENDING_CONFIRMATION_HINT}</p>
                 <div className="flex flex-col sm:flex-row gap-2">
-                  <Button variant="outline" size="sm" className="flex-1" disabled={savingStatus} onClick={() => closePendingConfirmation(selectedBooking, "completed")}>
+                  <Button variant="outline" size="sm" className={`flex-1 ${markCompletedButtonClass}`} disabled={savingStatus} onClick={() => closePendingConfirmation(selectedBooking, "completed")}>
                     <Check className="h-4 w-4" /> Marcar realizada
                   </Button>
                   <Button variant="ghost" size="sm" className="flex-1" disabled={savingStatus} onClick={() => setShowNotRealizedModal(true)}>

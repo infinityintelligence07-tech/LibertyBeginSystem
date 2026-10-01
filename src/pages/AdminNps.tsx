@@ -6,6 +6,10 @@ import { ptBR } from "date-fns/locale";
 import { ClipboardCheck, Send, Star, TrendingUp, Users } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
+import { UserAvatar } from "@/components/UserAvatar";
+import { shortName } from "@/lib/formatName";
+import { whatsappHref } from "@/lib/meetingWhatsApp";
+import { isNpsEligibleBooking } from "@/lib/pendingNps";
 import {
   PageContainer,
   PageHeader,
@@ -77,13 +81,25 @@ const avg = (rows: NpsRow[], key: keyof NpsRow) => {
   return Math.round((vals.reduce((a, b) => a + b, 0) / vals.length) * 10) / 10;
 };
 
-type PendingRow = {
+type PendingSession = {
   booking_id: string;
-  liberty_id: string | null;
+  liberty_id: string;
   liberty_name: string;
+  avatar_url: string | null;
+  phone: string | null;
+  user_id: string | null;
   session_name: string;
   mentor_name: string;
   date: string;
+};
+
+type PendingStudent = {
+  liberty_id: string;
+  liberty_name: string;
+  avatar_url: string | null;
+  phone: string | null;
+  user_id: string | null;
+  sessions: PendingSession[];
 };
 
 const monthKey = (iso: string) => iso.slice(0, 7);
@@ -94,11 +110,13 @@ const monthLabel = (key: string) => {
 
 const AdminNps = () => {
   const [rows, setRows] = useState<NpsRow[]>([]);
-  const [pending, setPending] = useState<PendingRow[]>([]);
+  const [pending, setPending] = useState<PendingSession[]>([]);
   const [loading, setLoading] = useState(true);
   const [expanded, setExpanded] = useState<string | null>(null);
+  const [openStudentId, setOpenStudentId] = useState<string | null>(null);
   const [selectedMonth, setSelectedMonth] = useState<string>(new Date().toISOString().slice(0, 7));
   const [dispatching, setDispatching] = useState(false);
+  const [sendingKey, setSendingKey] = useState<string | null>(null);
 
   useEffect(() => {
     (async () => {
@@ -114,20 +132,23 @@ const AdminNps = () => {
       // Sessões realizadas que ainda não receberam resposta de NPS
       const { data: doneBookings } = await supabase
         .from("bookings")
-        .select("id, scheduled_date, liberty_id, sessions(name), liberty:profiles!bookings_liberty_id_fkey(full_name), mentor:profiles!bookings_mentor_id_fkey(full_name)")
+        .select("id, scheduled_date, start_time, end_time, status, is_retroactive, report_required, session_id, liberty_id, sessions(name, order, is_kickoff), liberty:profiles!bookings_liberty_id_fkey(full_name, phone, avatar_url, user_id), mentor:profiles!bookings_mentor_id_fkey(full_name)")
         .eq("status", "completed")
         .order("scheduled_date", { ascending: false })
-        .limit(200);
+        .limit(1000);
       const answeredIds = new Set(answered.map((r) => r.booking_id).filter(Boolean) as string[]);
       setPending(
         (doneBookings || [])
-          .filter((b: any) => !answeredIds.has(b.id))
-          .map((b: any) => ({
+          .filter((b) => b.liberty_id && isNpsEligibleBooking(b, answeredIds))
+          .map((b) => ({
             booking_id: b.id,
-            liberty_id: b.liberty_id ?? null,
+            liberty_id: b.liberty_id as string,
             liberty_name: b.liberty?.full_name || "Membro",
+            avatar_url: b.liberty?.avatar_url ?? null,
+            phone: b.liberty?.phone ?? null,
+            user_id: b.liberty?.user_id ?? null,
             session_name: b.sessions?.name || "Sessão",
-            mentor_name: b.mentor?.full_name || "Sem dados",
+            mentor_name: b.mentor?.full_name || "Sem mentor",
             date: b.scheduled_date,
           })),
       );
@@ -164,57 +185,121 @@ const AdminNps = () => {
     [pending, selectedMonth],
   );
 
-  // Um convite por aluno (sessão mais recente sem NPS no mês selecionado)
-  const monthTargets = useMemo(() => {
-    const byMember = new Map<string, PendingRow>();
-    for (const p of monthPending) {
-      if (!p.liberty_id) continue;
-      if (!byMember.has(p.liberty_id)) byMember.set(p.liberty_id, p);
+  const groupStudents = (items: PendingSession[]): PendingStudent[] => {
+    const byMember = new Map<string, PendingStudent>();
+    for (const item of items) {
+      const current = byMember.get(item.liberty_id);
+      if (!current) {
+        byMember.set(item.liberty_id, {
+          liberty_id: item.liberty_id,
+          liberty_name: item.liberty_name,
+          avatar_url: item.avatar_url,
+          phone: item.phone,
+          user_id: item.user_id,
+          sessions: [item],
+        });
+      } else {
+        current.sessions.push(item);
+      }
     }
-    return Array.from(byMember.values());
-  }, [monthPending]);
+    return Array.from(byMember.values()).sort((a, b) => a.liberty_name.localeCompare(b.liberty_name, "pt-BR"));
+  };
+
+  const monthStudents = useMemo(() => groupStudents(monthPending), [monthPending]);
+  const openStudent = monthStudents.find((student) => student.liberty_id === openStudentId) ?? null;
+
+  const npsLink = (bookingId?: string) =>
+    `${window.location.origin}${bookingId ? `/nps/${bookingId}` : "/nps"}`;
+
+  const whatsappText = (student: PendingStudent) => {
+    const first = student.liberty_name.split(" ")[0] || "olá";
+    const lines = student.sessions.map((session) => {
+      const when = session.date ? format(parseISO(session.date), "dd/MM", { locale: ptBR }) : "sem data";
+      return `• ${session.session_name} (${when})`;
+    });
+    return `Oi, ${first}. Falta você preencher o NPS destas sessões:\n\n${lines.join("\n")}\n\nAbra a lista e avalie cada uma. Leva menos de 2 minutos:\n${npsLink()}`;
+  };
+
+  const insertInvites = async (
+    payload: { user_id: string; message: string; link: string; related_booking_id: string }[],
+  ) => {
+    if (!payload.length) {
+      toast.error("Nenhum destes alunos tem acesso ativado.");
+      return false;
+    }
+    const { error } = await supabase.from("notifications").insert(
+      payload.map((item) => ({
+        user_id: item.user_id,
+        type: "nps_request",
+        title: "Pesquisa de satisfação (NPS)",
+        message: item.message,
+        link: item.link,
+        related_booking_id: item.related_booking_id,
+      })),
+    );
+    if (error) throw error;
+    return true;
+  };
+
+  const dispatchStudents = async (students: PendingStudent[]) => {
+    const skipped = students.filter((student) => !student.user_id).length;
+    const payload = students
+      .filter((student) => student.user_id && student.sessions[0])
+      .map((student) => {
+        const count = student.sessions.length;
+        const first = student.sessions[0];
+        return {
+          user_id: student.user_id as string,
+          related_booking_id: first.booking_id,
+          link: "/nps",
+          message: count === 1
+            ? `Como foi a sessão "${first.session_name}"? Sua opinião leva menos de 2 minutos.`
+            : `Você tem ${count} sessões para avaliar. Abra a lista e preencha o NPS de cada uma.`,
+        };
+      });
+    const ok = await insertInvites(payload);
+    if (!ok) return;
+    toast.success(
+      `Convite enviado para ${payload.length} aluno(s)` +
+        (skipped > 0 ? `. ${skipped} sem acesso ativado.` : ""),
+    );
+  };
 
   const dispatchMonth = async () => {
-    if (!monthTargets.length) {
+    if (!monthStudents.length) {
       toast.info("Nenhum aluno pendente nesse mês.");
       return;
     }
     setDispatching(true);
     try {
-      const ids = monthTargets.map((t) => t.liberty_id!) as string[];
-      const { data: profs, error: pe } = await supabase
-        .from("profiles")
-        .select("id, user_id")
-        .in("id", ids);
-      if (pe) throw pe;
-      const userMap = new Map((profs || []).map((p: any) => [p.id, p.user_id]));
-
-      const payload = monthTargets
-        .filter((t) => userMap.get(t.liberty_id!))
-        .map((t) => ({
-          user_id: userMap.get(t.liberty_id!) as string,
-          type: "nps_request",
-          title: "Pesquisa de satisfação (NPS)",
-          message: `Como foi a sessão "${t.session_name}"? Sua opinião é essencial e leva menos de 2 minutos.`,
-          link: `/nps/${t.booking_id}`,
-          related_booking_id: t.booking_id,
-        }));
-
-      const skipped = monthTargets.length - payload.length;
-      if (!payload.length) {
-        toast.error("Nenhum dos alunos pendentes possui acesso ativado.");
-        return;
-      }
-      const { error } = await supabase.from("notifications").insert(payload);
-      if (error) throw error;
-      toast.success(
-        `Convite de NPS enviado para ${payload.length} aluno(s)` +
-          (skipped > 0 ? ` · ${skipped} sem acesso ativado` : ""),
-      );
-    } catch (e: any) {
-      toast.error("Erro no disparo: " + (e?.message || "desconhecido"));
+      await dispatchStudents(monthStudents);
+    } catch (e: unknown) {
+      const message = e instanceof Error ? e.message : "desconhecido";
+      toast.error("Erro no disparo: " + message);
     } finally {
       setDispatching(false);
+    }
+  };
+
+  const dispatchOne = async (session: PendingSession) => {
+    if (!session.user_id) {
+      toast.error("Este aluno ainda não tem acesso ativado.");
+      return;
+    }
+    setSendingKey(session.booking_id);
+    try {
+      const ok = await insertInvites([{
+        user_id: session.user_id,
+        related_booking_id: session.booking_id,
+        link: `/nps/${session.booking_id}`,
+        message: `Como foi a sessão "${session.session_name}"? Sua opinião leva menos de 2 minutos.`,
+      }]);
+      if (ok) toast.success(`NPS enviado para ${session.liberty_name.split(" ")[0]}`);
+    } catch (e: unknown) {
+      const message = e instanceof Error ? e.message : "desconhecido";
+      toast.error("Erro ao enviar NPS: " + message);
+    } finally {
+      setSendingKey(null);
     }
   };
 
@@ -225,7 +310,7 @@ const AdminNps = () => {
       <PageContainer>
         <PageHeader
           title="Pesquisas de NPS"
-          description="Respostas de satisfação enviadas pelos membros dentro do app."
+          description="Quem já preencheu o NPS da sessão e quem ainda precisa responder."
         />
 
         {loading ? (
@@ -255,15 +340,15 @@ const AdminNps = () => {
                 <Stat icon={TrendingUp} label="NPS" value={stats.nps != null ? stats.nps : "Sem dados"} />
               </SectionCard>
               <SectionCard padding="compact" className="col-span-2 md:col-span-1">
-                <Stat icon={ClipboardCheck} label="Sem resposta" value={pending.length} tone={pending.length > 0 ? "pending" : "default"} />
+                <Stat icon={ClipboardCheck} label="Sessões sem NPS" value={pending.length} tone={pending.length > 0 ? "pending" : "default"} />
               </SectionCard>
             </div>
 
             <SectionCard as="section" className="space-y-4">
               <SectionHeader
                 as="h3"
-                title="Disparo de NPS"
-                description="Escolha o mês e envie o convite para todos os alunos que ainda não responderam. O aviso aparece destacado no início da plataforma do aluno."
+                title="Quem não preencheu"
+                description="A lista é de alunos com sessão realizada sem NPS neste mês. O disparo avisa no app. O WhatsApp abre na ficha de cada pessoa."
               />
               <div className="grid grid-cols-1 sm:grid-cols-[minmax(0,1fr)_auto_auto] sm:items-end gap-3">
                 <SelectField label="Mês" value={selectedMonth} onChange={(e) => setSelectedMonth(e.target.value)}>
@@ -272,21 +357,44 @@ const AdminNps = () => {
                   ))}
                 </SelectField>
                 <div className="px-4 py-2 rounded-ds border border-border bg-card">
-                  <Stat size="sm" label="Alunos pendentes" value={monthTargets.length} />
+                  <Stat size="sm" label="Alunos neste mês" value={monthStudents.length} />
                 </div>
-                <Button onClick={dispatchMonth} disabled={dispatching || monthTargets.length === 0} className="sm:h-11">
+                <Button onClick={dispatchMonth} disabled={dispatching || monthStudents.length === 0} className="min-h-11">
                   <Send aria-hidden />
-                  {dispatching ? "Enviando..." : `Disparar para ${monthTargets.length} aluno(s)`}
+                  {dispatching ? "Enviando..." : `Disparar para ${monthStudents.length}`}
                 </Button>
               </div>
-              {monthTargets.length > 0 && (
-                <div className="flex flex-wrap gap-1.5">
-                  {monthTargets.map((t) => (
-                    <StatusPill key={t.booking_id} tone="neutral" withDot={false}>{t.liberty_name}</StatusPill>
-                  ))}
-                </div>
-              )}
             </SectionCard>
+
+            {monthStudents.length === 0 ? (
+              <EmptyState
+                icon={ClipboardCheck}
+                compact
+                title="Ninguém pendente neste mês"
+                description="Quando uma sessão realizada ficar sem NPS, o aluno aparece aqui."
+              />
+            ) : (
+              <SectionCard padding="none">
+                {monthStudents.map((student, index) => {
+                  const names = student.sessions.map((session) => session.session_name);
+                  const subtitle = names.length === 1
+                    ? names[0]
+                    : `${names.length} sessões sem avaliação: ${names.join(", ")}`;
+                  return (
+                    <ListRow
+                      key={student.liberty_id}
+                      wrap
+                      last={index === monthStudents.length - 1}
+                      onPress={() => setOpenStudentId(student.liberty_id)}
+                      leading={<UserAvatar name={student.liberty_name} avatarUrl={student.avatar_url} size={40} />}
+                      title={shortName(student.liberty_name)}
+                      subtitle={subtitle}
+                      trailing={<StatusPill tone="pending">Sem NPS</StatusPill>}
+                    />
+                  );
+                })}
+              </SectionCard>
+            )}
 
             {rows.length > 0 && (
               <SectionCard as="section" className="space-y-4">
@@ -306,29 +414,8 @@ const AdminNps = () => {
               </SectionCard>
             )}
 
-            {pending.length > 0 && (
-              <section className="space-y-3">
-                <SectionHeader
-                  title="Sessões realizadas sem NPS respondido"
-                  description="O convite fica disponível no app do membro até ele responder."
-                />
-                <SectionCard padding="none" className="max-h-80 overflow-y-auto">
-                  {pending.map((p, index) => (
-                    <ListRow
-                      key={p.booking_id}
-                      last={index === pending.length - 1}
-                      leading={<DateBlock date={p.date} tone="muted" />}
-                      title={p.liberty_name}
-                      subtitle={`${p.session_name} · ${p.mentor_name}`}
-                      trailing={<StatusPill tone="pending">Sem resposta</StatusPill>}
-                    />
-                  ))}
-                </SectionCard>
-              </section>
-            )}
-
             <section className="space-y-3">
-              <SectionHeader title="Respostas" description="Toque em uma resposta para ver todas as notas e comentários." />
+              <SectionHeader title="Quem preencheu" description="Toque em uma resposta para ver a sessão e as notas." />
               {rows.length === 0 ? (
                 <EmptyState
                   icon={ClipboardCheck}
@@ -363,6 +450,74 @@ const AdminNps = () => {
           </>
         )}
       </PageContainer>
+
+      <BottomSheet
+        open={openStudent !== null}
+        onOpenChange={(open) => !open && setOpenStudentId(null)}
+        title={openStudent?.liberty_name || "Aluno"}
+        description="Sessões realizadas que ainda não têm NPS."
+        size="lg"
+        footer={
+          openStudent ? (
+            <>
+              {openStudent.sessions.length > 1 && (
+                <Button
+                  variant="outline"
+                  disabled={dispatching || !openStudent.user_id}
+                  onClick={async () => {
+                    setDispatching(true);
+                    try {
+                      await dispatchStudents([openStudent]);
+                    } catch (e: unknown) {
+                      const message = e instanceof Error ? e.message : "desconhecido";
+                      toast.error("Erro no disparo: " + message);
+                    } finally {
+                      setDispatching(false);
+                    }
+                  }}
+                >
+                  <Send aria-hidden /> Disparar todas no app
+                </Button>
+              )}
+              {whatsappHref(openStudent.phone, whatsappText(openStudent)) ? (
+                <Button asChild>
+                  <a href={whatsappHref(openStudent.phone, whatsappText(openStudent)) || "#"} target="_blank" rel="noopener noreferrer">
+                    Avisar no WhatsApp
+                  </a>
+                </Button>
+              ) : (
+                <Button disabled>Sem telefone no cadastro</Button>
+              )}
+            </>
+          ) : undefined
+        }
+      >
+        {openStudent && (
+          <div className="space-y-3">
+            {openStudent.sessions.map((session) => (
+              <SectionCard key={session.booking_id} padding="compact" className="space-y-3">
+                <div>
+                  <p className="text-sm font-medium text-foreground">{session.session_name}</p>
+                  <p className="text-xs text-muted-foreground mt-1">
+                    {session.date ? format(parseISO(session.date), "dd 'de' MMMM", { locale: ptBR }) : "Sem data"}
+                    {" · "}
+                    {session.mentor_name}
+                  </p>
+                </div>
+                <Button
+                  variant="outline"
+                  className="min-h-11"
+                  disabled={sendingKey === session.booking_id || !session.user_id}
+                  onClick={() => dispatchOne(session)}
+                >
+                  <Send aria-hidden />
+                  {sendingKey === session.booking_id ? "Enviando..." : "Enviar esta sessão no app"}
+                </Button>
+              </SectionCard>
+            ))}
+          </div>
+        )}
+      </BottomSheet>
 
       <BottomSheet
         open={expanded !== null}

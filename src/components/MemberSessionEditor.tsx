@@ -25,6 +25,7 @@ import {
   SelectField, StatusPill, TextField,
 } from "@/components/ds";
 import { cn } from "@/lib/utils";
+import { markCompletedButtonClass } from "@/components/mentor/MentorBookingActions";
 
 /**
  * Detalhe de booking com os campos extras que o editor usa quando disponíveis
@@ -544,9 +545,10 @@ export const MemberSessionEditor = ({
                     </Button>
                   ) : (
                     <Button
-                      variant="ghost"
+                      variant="outline"
                       size="sm"
                       disabled={isClosing}
+                      className={markCompletedButtonClass}
                       onClick={() => handleClosePending(cs, "completed")}
                     >
                       Marcar realizada
