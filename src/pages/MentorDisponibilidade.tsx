@@ -98,9 +98,21 @@ const startHoursFor = (duration: number) =>
   ALL_HALF_HOURS.filter((t) => timeToMinutes(t) + duration <= 23 * 60 + 30);
 
 const DURATION_OPTIONS = [
-  { value: 120, label: "2h", hint: "Sessões normais da jornada" },
-  { value: 180, label: "3h", hint: "Exclusivo · Mapeamento do Negócio" },
+  { value: 120, label: "2 horas", hint: "Sessões normais da jornada" },
+  { value: 180, label: "3 horas", hint: "Somente o Mapeamento do Negócio" },
 ];
+
+const dayTitle = (date: Date) => {
+  const raw = format(date, "EEEE, dd 'de' MMMM", { locale: ptBR });
+  return raw.charAt(0).toUpperCase() + raw.slice(1);
+};
+
+const windowKind = (start: string, end: string) => {
+  const mins = timeToMinutes(end.slice(0, 5)) - timeToMinutes(start.slice(0, 5));
+  if (mins >= 180) return "Mapeamento, 3 horas";
+  if (mins >= 120) return "Sessão, 2 horas";
+  return null;
+};
 
 
 
@@ -542,7 +554,7 @@ const MentorDisponibilidadePage = () => {
   const renderDurationPicker = (value: number, onChange: (v: number) => void) => (
     <fieldset>
       <legend className="block text-sm font-medium text-foreground mb-1.5">Duração da janela</legend>
-      <div className="grid grid-cols-2 gap-2">
+      <div className="grid grid-cols-1 gap-2">
         {DURATION_OPTIONS.map((opt) => {
           const active = value === opt.value;
           return (
@@ -552,27 +564,34 @@ const MentorDisponibilidadePage = () => {
               variant={active ? "secondary" : "outline"}
               aria-pressed={active}
               onClick={() => onChange(opt.value)}
-              className="h-auto min-h-[44px] flex-col items-start gap-0 py-2 text-left"
+              className="h-auto w-full min-h-11 whitespace-normal items-start justify-start gap-0.5 px-3 py-2.5 text-left"
             >
               <span className="text-sm font-semibold">{opt.label}</span>
-              <span className="text-xs font-normal text-muted-foreground">{opt.hint}</span>
+              <span className="text-xs font-normal leading-snug text-muted-foreground">{opt.hint}</span>
             </Button>
           );
         })}
       </div>
+      <p className="mt-2 text-xs leading-relaxed text-muted-foreground">
+        A janela de 3 horas só aparece para o Mapeamento do Negócio. As outras sessões usam a janela de 2 horas.
+      </p>
     </fieldset>
   );
 
-  const slotPills = (slot: { isBooked: boolean; isRecurring: boolean }) => (
-    <>
-      {slot.isRecurring && (
-        <StatusPill tone="neutral" withDot={false}>
-          <Repeat className="h-3 w-3" aria-hidden /> Recorrente
-        </StatusPill>
-      )}
-      {slot.isBooked ? <StatusPill tone="info">Agendado</StatusPill> : <StatusPill tone="success">Disponível</StatusPill>}
-    </>
-  );
+  const slotPills = (slot: { startTime: string; endTime: string; isBooked: boolean; isRecurring: boolean }) => {
+    const kind = windowKind(slot.startTime, slot.endTime);
+    return (
+      <>
+        {kind && <StatusPill tone="neutral" withDot={false}>{kind}</StatusPill>}
+        {slot.isRecurring && (
+          <StatusPill tone="neutral" withDot={false}>
+            <Repeat className="h-3 w-3" aria-hidden /> Recorrente
+          </StatusPill>
+        )}
+        {slot.isBooked ? <StatusPill tone="info">Agendado</StatusPill> : <StatusPill tone="success">Disponível</StatusPill>}
+      </>
+    );
+  };
 
   return (
     <AppLayout role="mentor">
@@ -672,7 +691,7 @@ const MentorDisponibilidadePage = () => {
                     <div className="px-4 sm:px-6 pt-4 sm:pt-6 pb-3">
                       <SectionHeader
                         as="h2"
-                        title={<span className="capitalize">{format(selectedDate, "EEEE, dd 'de' MMMM", { locale: ptBR })}</span>}
+                        title={dayTitle(selectedDate)}
                         description={`${selectedSlots.length} horário${selectedSlots.length !== 1 ? "s" : ""} cadastrado${selectedSlots.length !== 1 ? "s" : ""}`}
                         actions={
                           !isPastDay ? (
@@ -814,8 +833,8 @@ const MentorDisponibilidadePage = () => {
         open={isAdding && !!selectedDate}
         onOpenChange={(open) => { if (!open && !saving) closeAddSheet(); }}
         title="Adicionar horário"
-        description={selectedDate ? <span className="capitalize">{format(selectedDate, "EEEE, dd 'de' MMMM", { locale: ptBR })}</span> : undefined}
-        size="sm"
+        description={selectedDate ? dayTitle(selectedDate) : undefined}
+        size="md"
         locked={saving}
         footer={
           <>
