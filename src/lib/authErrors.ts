@@ -12,7 +12,7 @@ export const AUTH_DEFAULT_ERROR_MESSAGE =
 
 /** Mensagem neutra exibida após "Esqueci minha senha" (não revela se o e-mail existe). */
 export const FORGOT_PASSWORD_NEUTRAL_MESSAGE =
-  "Se este e-mail tiver uma conta, você receberá o link em alguns minutos. Verifique também o spam. Se não chegar, peça um novo acesso pela equipe Liberty pelo WhatsApp.";
+  "Se este e-mail tiver uma conta, o link chega em alguns minutos. Olhe também a caixa de spam. O remetente é a Liberty Begin.";
 
 type AuthErrorLike = {
   message?: string;

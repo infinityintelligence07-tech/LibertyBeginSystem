@@ -9,8 +9,6 @@ import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Callout, IconButton, PageContainer, SectionCard, TextField } from "@/components/ds";
 
-const RESET_PASSWORD_PATH = "/reset-password";
-
 const normalizeEmail = (value: string) => value.trim().toLowerCase();
 
 const LoginPage = () => {
@@ -46,20 +44,29 @@ const LoginPage = () => {
     setLoading(true);
 
     if (mode === "forgot") {
-      const { error } = await supabase.auth.resetPasswordForEmail(normalizedEmail, {
-        redirectTo: `${window.location.origin}${RESET_PASSWORD_PATH}`,
+      const { data, error } = await supabase.functions.invoke("request-password-reset", {
+        body: { email: normalizedEmail, origin: window.location.origin },
       });
       setLoading(false);
       if (error) {
-        console.error("[Login] resetPasswordForEmail", error.message);
-        const msg = error.message.toLowerCase();
-        // Só expõe erros que não revelam se a conta existe (rede, limite de envios).
-        if (msg.includes("rate limit") || msg.includes("too many") || msg.includes("fetch") || msg.includes("network")) {
-          setFormError(translateAuthError(error));
-          return;
+        console.error("[Login] request-password-reset", error.message);
+        let detail = "";
+        try {
+          const ctx = (error as { context?: Response }).context;
+          if (ctx && typeof ctx.json === "function") {
+            const body = await ctx.json();
+            if (body?.error) detail = String(body.error);
+          }
+        } catch {
+          /* keep detail */
         }
+        setFormError(detail || "Não foi possível enviar o e-mail agora. Tente de novo em alguns minutos.");
+        return;
       }
-      // Mensagem sempre neutra (anti-enumeração): o GoTrue devolve 200 mesmo sem conta.
+      if ((data as { error?: string } | null)?.error) {
+        setFormError(String((data as { error: string }).error));
+        return;
+      }
       toast.success(FORGOT_PASSWORD_NEUTRAL_MESSAGE, { duration: 10000 });
       setMode("login");
       return;

@@ -42,6 +42,9 @@ verify_jwt = false
 [functions.pick-featured-case]
 verify_jwt = false
 
+[functions.request-password-reset]
+verify_jwt = false
+
 [functions.send-push]
 verify_jwt = false
 
