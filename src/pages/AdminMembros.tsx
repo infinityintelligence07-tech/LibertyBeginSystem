@@ -1,4 +1,4 @@
-import { useState, useMemo, useRef, useEffect, Fragment } from "react";
+import { useState, useMemo, useRef, useEffect, useCallback, Fragment } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import * as XLSX from "xlsx";
 import { AppLayout } from "@/components/AppLayout";
@@ -54,7 +54,7 @@ interface ConfirmRequest {
   onConfirm: () => void | Promise<void>;
 }
 
-type MemberFilter = "all" | "on_track" | "behind" | "zero" | "no_bookings";
+type MemberFilter = "all" | "on_track" | "behind" | "zero" | "scheduled";
 
 interface ImportResult {
   email: string;
@@ -240,8 +240,8 @@ const AdminMembrosPage = () => {
   // Apply URL params on mount (e.g. ?filter=on_track or ?expand=<id>)
   useEffect(() => {
     const f = searchParams.get("filter");
-    if (f && ["all", "on_track", "behind", "zero", "no_bookings"].includes(f)) {
-      setFilter(f as any);
+    if (f && ["all", "on_track", "behind", "zero", "scheduled"].includes(f)) {
+      setFilter(f as MemberFilter);
     }
     const ex = searchParams.get("expand");
     if (ex) setExpandedId(ex);
@@ -847,6 +847,21 @@ const AdminMembrosPage = () => {
 
 
 
+  const rhythmOf = useCallback((m: NonNullable<typeof members>[number]): Exclude<MemberFilter, "all"> => {
+    if (filterKey) {
+      const completed = m.monthly_counts[filterKey] || 0;
+      const scheduled = m.monthly_scheduled_counts[filterKey] || 0;
+      if (completed >= 2) return "on_track";
+      if (completed === 1) return "behind";
+      if (scheduled > 0) return "scheduled";
+      return "zero";
+    }
+    if (m.total_completed >= 12) return "on_track";
+    if (m.total_completed > 0) return "behind";
+    if (m.total_scheduled > 0 || m.has_next_session) return "scheduled";
+    return "zero";
+  }, [filterKey]);
+
   const filtered = useMemo(() => {
     if (!members) return [];
     let list = tierTab === "inactive"
@@ -857,18 +872,7 @@ const AdminMembrosPage = () => {
         (m) => matchesSearch(m.full_name, search) || matchesSearch(m.company_name || "", search) || matchesSearch(m.email || "", search)
       );
     }
-    if (filter === "no_bookings") {
-      // Sem próxima sessão: nada futuro confirmado nem aguardando confirmação do mentor.
-      list = list.filter((m) => !m.has_next_session);
-    } else if (filterKey) {
-      if (filter === "on_track") list = list.filter((m) => (m.monthly_counts[filterKey] || 0) >= 2);
-      else if (filter === "behind") list = list.filter((m) => (m.monthly_counts[filterKey] || 0) === 1);
-      else if (filter === "zero") list = list.filter((m) => (m.monthly_counts[filterKey] || 0) === 0);
-    } else {
-      if (filter === "on_track") list = list.filter((m) => m.total_completed >= 12);
-      else if (filter === "behind") list = list.filter((m) => m.total_completed > 0 && m.total_completed < 12);
-      else if (filter === "zero") list = list.filter((m) => m.total_completed === 0);
-    }
+    if (filter !== "all") list = list.filter((m) => rhythmOf(m) === filter);
     if (sortMode === "priority") {
       // Priority: no bookings at all → zero completed → least completed → name
       list = [...list].sort((a, b) => {
@@ -880,7 +884,7 @@ const AdminMembrosPage = () => {
       });
     }
     return list;
-  }, [members, search, filter, filterKey, tierTab, sortMode]);
+  }, [members, search, filter, filterKey, tierTab, sortMode, rhythmOf]);
 
   const monthColumns = useMemo(() => {
     const year = new Date().getFullYear();
@@ -919,26 +923,15 @@ const AdminMembrosPage = () => {
     return list;
   }, [members, tierTab, search]);
 
-  const matchesFilter = (m: NonNullable<typeof members>[number], key: MemberFilter) => {
-    if (key === "all") return true;
-    if (key === "no_bookings") return !m.has_next_session;
-    if (filterKey) {
-      const c = m.monthly_counts[filterKey] || 0;
-      if (key === "on_track") return c >= 2;
-      if (key === "behind") return c === 1;
-      return c === 0;
-    }
-    if (key === "on_track") return m.total_completed >= 12;
-    if (key === "behind") return m.total_completed > 0 && m.total_completed < 12;
-    return m.total_completed === 0;
-  };
+  const matchesFilter = (m: NonNullable<typeof members>[number], key: MemberFilter) =>
+    key === "all" || rhythmOf(m) === key;
 
   const filterOptions: { key: MemberFilter; label: string }[] = [
     { key: "all", label: "Todos" },
     { key: "on_track", label: filterKey ? "No ritmo" : "Jornada completa" },
     { key: "behind", label: filterKey ? "Parcial" : "Em andamento" },
     { key: "zero", label: "Sem sessão" },
-    { key: "no_bookings", label: "Sem próxima sessão" },
+    { key: "scheduled", label: "Sessão agendada" },
   ];
 
   const monthTone = (count: number): "success" | "warning" | "danger" => (count >= 2 ? "success" : count === 1 ? "warning" : "danger");
@@ -951,7 +944,7 @@ const AdminMembrosPage = () => {
     return "border border-border text-destructive";
   };
   const monthStatusLabel = (completed: number, scheduled = 0) =>
-    completed >= 2 ? "No ritmo" : completed === 1 ? "Parcial" : scheduled > 0 ? "Agendada" : "Sem sessão";
+    completed >= 2 ? "No ritmo" : completed === 1 ? "Parcial" : scheduled > 0 ? "Sessão agendada" : "Sem sessão";
 
   const openImport = () => {
     setImportResults(null);
