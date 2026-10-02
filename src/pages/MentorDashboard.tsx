@@ -370,6 +370,7 @@ const MentorDashboardPage = () => {
           if (b.meeting_artifacts_status !== "unavailable") return false;
           if (String(b.meeting_transcript_text || "").trim().length >= 30) return false;
           if (String(b.meeting_summary_text || "").trim()) return false;
+          if (String(b.meeting_smart_notes_url || "").startsWith("http")) return false;
           return true;
         })
         .slice(0, 3),

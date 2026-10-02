@@ -460,13 +460,11 @@ async function notifyMentorArtifactsReady(
     .eq("related_booking_id", bookingId);
   if ((count ?? 0) > 0) return;
 
-  const hasTranscript = !!(artifacts.transcript && artifacts.transcript.trim().length >= 30);
-  const title = hasTranscript ? "Transcrição da sessão pronta" : "Resumo Gemini da sessão pronto";
-  const message = hasTranscript
-    ? "A transcrição já está no relatório. Abra e revise o rascunho."
-    : artifacts.smart_notes_url
-      ? "O Doc do Gemini ficou pronto. Abra o relatório e use o link Anota pra Mim."
-      : "O resumo da call ficou pronto no relatório.";
+  const hasNotes = !!artifacts.smart_notes_url;
+  const title = hasNotes ? "Relatório do Gemini pronto" : "Transcrição da sessão pronta";
+  const message = hasNotes
+    ? "O relatório do Gemini está na sessão. Abra o documento e escreva o seu resumo."
+    : "A transcrição já está na sessão. Escreva o resumo com base no que foi falado.";
 
   await admin.from("notifications").insert({
     user_id: mentor.user_id,
@@ -531,7 +529,7 @@ async function notifyMentorTranscriptMissing(
       hostTok.hostEmail,
       [to],
       "Falta o registro da sessão",
-      `<p>A transcrição da sessão com ${escapeHtml(who)} não chegou.</p><p>Abra a sessão e escreva o que foi falado. A IA organiza o relatório.</p><p><a href="${escapeHtml(reportUrl)}">Registrar o que foi falado</a></p>`,
+      `<p>A transcrição da sessão com ${escapeHtml(who)} não chegou.</p><p>Abra a sessão e escreva o que foi falado.</p><p><a href="${escapeHtml(reportUrl)}">Registrar o que foi falado</a></p>`,
     );
   } catch (e) {
     console.warn("[meeting-control] aviso de transcrição ausente", e);
@@ -723,12 +721,95 @@ function mentorEmails(mentor: { email?: string | null; google_calendar_email?: s
 }
 
 /**
+ * Manda ao mentor só o link do relatório do Gemini, sem reescrever com IA.
+ * Idempotente pela mesma trava do resumo (meeting_summary_emailed_at).
+ */
+async function emailGeminiNotes(admin: AdminClient, bookingId: string): Promise<void> {
+  const now = new Date();
+  const claimCutoff = new Date(now.getTime() - SUMMARY_CLAIM_MS).toISOString();
+  const { data: claimed, error: claimErr } = await admin
+    .from("bookings")
+    .update({ meeting_summary_claimed_at: now.toISOString() })
+    .eq("id", bookingId)
+    .is("meeting_summary_emailed_at", null)
+    .not("meeting_smart_notes_url", "is", null)
+    .or(`meeting_summary_claimed_at.is.null,meeting_summary_claimed_at.lt.${claimCutoff}`)
+    .select("id");
+  if (claimErr) throw new Error("Falha ao travar aviso do Gemini: " + claimErr.message);
+  if (!claimed?.length) return;
+
+  const { data: b } = await admin
+    .from("bookings")
+    .select("id, mentor_id, liberty_id, guest_name, session_id, scheduled_date, start_time, meeting_host_id, meeting_smart_notes_url")
+    .eq("id", bookingId)
+    .maybeSingle();
+  const notesUrl = String(b?.meeting_smart_notes_url || "").trim();
+  if (!b || !notesUrl.startsWith("http")) {
+    await admin.from("bookings").update({ meeting_summary_claimed_at: null }).eq("id", bookingId);
+    return;
+  }
+
+  const fail = async (msg: string) => {
+    console.warn("[meeting-control] gemini", bookingId, msg);
+    await admin.from("bookings").update({ meeting_summary_email_error: msg.slice(0, 500) }).eq("id", bookingId);
+  };
+
+  const [{ data: mentor }, { data: member }, { data: session }] = await Promise.all([
+    b.mentor_id
+      ? admin.from("profiles").select("full_name, email, google_calendar_email").eq("id", b.mentor_id).maybeSingle()
+      : Promise.resolve({ data: null }),
+    b.liberty_id
+      ? admin.from("profiles").select("full_name").eq("id", b.liberty_id).maybeSingle()
+      : Promise.resolve({ data: null }),
+    b.session_id
+      ? admin.from("sessions").select("name").eq("id", b.session_id).maybeSingle()
+      : Promise.resolve({ data: null }),
+  ]);
+  const sessionName = session?.name || "Sessão de mentoria";
+  const memberName = member?.full_name || b.guest_name || "Mentorado";
+  const to = mentorEmails(mentor);
+  if (!to.length) return fail("Mentor sem e-mail cadastrado para receber o relatório do Gemini.");
+
+  const hostTok = await resolveHostAccessToken(admin, b.meeting_host_id);
+  if ("error" in hostTok) return fail(hostTok.error);
+
+  const appUrl = (Deno.env.get("APP_URL") || "https://begin.libertymentoria.com.br").replace(/\/+$/, "");
+  const [y, m, d] = String(b.scheduled_date).split("-");
+  const dateLabel = `${d}/${m}/${y}${b.start_time ? ` às ${String(b.start_time).slice(0, 5)}` : ""}`;
+  try {
+    await sendGmail(
+      hostTok.accessToken,
+      hostTok.hostEmail,
+      to,
+      `Relatório do Gemini: ${sessionName} com ${memberName}`,
+      `<p style="margin:0 0 4px;color:#6b7280;font-size:13px">Liberty Mentoria</p>
+<h2 style="margin:0 0 4px;font-size:18px">${escapeHtml(sessionName)} com ${escapeHtml(memberName)}</h2>
+<p style="margin:0 0 12px;color:#6b7280;font-size:13px">${escapeHtml(dateLabel)}</p>
+<p>O Gemini escreveu o relatório desta sessão. Abra o documento para consultar e escreva o seu resumo na plataforma.</p>
+<p style="margin:16px 0 0"><a href="${escapeHtml(notesUrl)}">Abrir relatório do Gemini</a></p>
+<p style="margin:24px 0 0"><a href="${escapeHtml(`${appUrl}/mentor/sessoes/${bookingId}/relatorio`)}" style="background:#111827;color:#fff;padding:10px 16px;border-radius:6px;text-decoration:none;display:inline-block">Abrir a sessão</a></p>`,
+    );
+  } catch (e) {
+    return fail(e instanceof Error ? e.message : String(e));
+  }
+
+  await admin.from("bookings").update({
+    meeting_summary_emailed_at: new Date().toISOString(),
+    meeting_summary_email_error: null,
+  }).eq("id", bookingId);
+}
+
+/**
  * Transcrição pronta → resumo por IA (salvo na sessão) → e-mail para o mentor (co-host) pelo Gmail da host.
+ * Com a IA pausada, o e-mail leva só o link do relatório do Gemini.
  * Idempotente: a trava meeting_summary_claimed_at evita que poll, varredura e tela façam isso em dobro.
  */
 async function finalizeSessionSummary(admin: AdminClient, bookingId: string): Promise<void> {
-  // Pausado até o relatório automático ficar confiável. Liga com o secret ENABLE_MENTOR_AI_SUMMARY=1.
-  if (Deno.env.get("ENABLE_MENTOR_AI_SUMMARY") !== "1") return;
+  // A reescrita por IA continua pausada. O mentor recebe o link do Gemini para escrever o resumo.
+  if (Deno.env.get("ENABLE_MENTOR_AI_SUMMARY") !== "1") {
+    await emailGeminiNotes(admin, bookingId);
+    return;
+  }
 
   const now = new Date();
   const claimCutoff = new Date(now.getTime() - SUMMARY_CLAIM_MS).toISOString();
@@ -861,9 +942,11 @@ async function pollArtifactsAfterEnd(
       .eq("id", bookingId)
       .maybeSingle();
 
-    if (row?.meeting_artifacts_status === "ready" && String(row.meeting_transcript_text || "").trim().length >= 30) {
-      return;
-    }
+    const transcriptReady = row?.meeting_artifacts_status === "ready"
+      && String(row.meeting_transcript_text || "").trim().length >= 30;
+    const notesReady = typeof row?.meeting_smart_notes_url === "string" && row.meeting_smart_notes_url.startsWith("http");
+    if (notesReady) return;
+    if (transcriptReady && attempt >= 8) return;
 
     let artifacts: MeetArtifactsResult;
     try {
@@ -934,6 +1017,57 @@ async function isValidSweepSecret(admin: AdminClient, req: Request): Promise<boo
   return expected.length >= 32 && timingSafeEqual(provided, expected);
 }
 
+/** Sessões de ontem e de hoje que ainda não têm o link do Doc do Gemini. */
+async function attachMissingGeminiNotes(admin: AdminClient): Promise<void> {
+  const now = Date.now();
+  const spToday = new Date(now - 3 * 60 * 60 * 1000).toISOString().slice(0, 10);
+  const spYesterday = new Date(now - 27 * 60 * 60 * 1000).toISOString().slice(0, 10);
+  const { data, error } = await admin
+    .from("bookings")
+    .select("id, mentor_id, zoom_join_url, meeting_space_name, meeting_host_id")
+    .eq("meeting_provider", "meet")
+    .in("scheduled_date", [spYesterday, spToday])
+    .neq("status", "cancelled")
+    .is("meeting_smart_notes_url", null)
+    .limit(12);
+  if (error) throw new Error(error.message);
+
+  const rows = ((data || []) as Array<{
+    id: string;
+    mentor_id: string | null;
+    zoom_join_url: string | null;
+    meeting_space_name: string | null;
+    meeting_host_id: string | null;
+  }>).filter((b) => meetingCodeOf(b));
+
+  const tokens = new Map<string, Awaited<ReturnType<typeof resolveHostAccessToken>>>();
+  for (const b of rows) {
+    const hostKey = b.meeting_host_id || "active";
+    if (!tokens.has(hostKey)) tokens.set(hostKey, await resolveHostAccessToken(admin, b.meeting_host_id));
+    const hostTok = tokens.get(hostKey)!;
+    if ("error" in hostTok) {
+      console.warn("[meeting-control] gemini host", b.id, hostTok.error);
+      continue;
+    }
+    try {
+      const artifacts = await fetchMeetArtifacts(hostTok.accessToken, meetingCodeOf(b));
+      if (!artifacts.smart_notes_url) continue;
+      const { error: upErr } = await admin
+        .from("bookings")
+        .update({ meeting_smart_notes_url: artifacts.smart_notes_url })
+        .eq("id", b.id)
+        .is("meeting_smart_notes_url", null);
+      if (upErr) {
+        console.warn("[meeting-control] gemini save", b.id, upErr.message);
+        continue;
+      }
+      await onArtifactsReady(admin, b.id, b.mentor_id, artifacts);
+    } catch (e) {
+      console.warn("[meeting-control] gemini fetch", b.id, e);
+    }
+  }
+}
+
 /**
  * Cron: busca transcrição de sessões Meet que já terminaram, mesmo sem o mentor clicar em Encerrar.
  */
@@ -995,7 +1129,12 @@ async function sweepEndedMeetings(admin: AdminClient): Promise<{ checked: number
     }
   }
 
-  // Transcrição já chegou mas o resumo não foi gerado/enviado (IA ou Gmail falharam): tenta de novo.
+  await attachMissingGeminiNotes(admin).catch((e) => {
+    errors++;
+    console.warn("[meeting-control] gemini notes", e);
+  });
+
+  // Relatório do Gemini já salvo, e-mail ainda não enviado.
   const { data: unsent } = await admin
     .from("bookings")
     .select("id, meeting_ended_at, scheduled_date, end_time")
@@ -1006,7 +1145,6 @@ async function sweepEndedMeetings(admin: AdminClient): Promise<{ checked: number
     .is("meeting_summary_emailed_at", null)
     .limit(20);
   for (const b of (unsent || []) as SweepBooking[]) {
-    if (now - bookingEndMs(b) > SWEEP_WINDOW_MS) continue;
     await finalizeSessionSummary(admin, b.id).catch((e) => {
       errors++;
       console.warn("[meeting-control] sweep resumo", b.id, e);

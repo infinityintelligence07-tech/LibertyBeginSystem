@@ -615,7 +615,7 @@ const MentorRelatorioPage = () => {
           </SectionCard>
         )}
 
-        {(meetEndedFromNav || !!booking.meeting_ended_at) && !aiReportOn && (
+        {(meetEndedFromNav || !!booking.meeting_ended_at) && !aiReportOn && !smartNotesUrl && (
           <Callout tone="info" icon={CheckCircle2} title="Escreva o relatório desta sessão">
             A sessão encerrou. O que conta é o texto que você salva abaixo.
           </Callout>
@@ -774,6 +774,22 @@ const MentorRelatorioPage = () => {
             </div>
           </SectionCard>
         </section>
+        )}
+        {smartNotesUrl && (
+          <SectionCard>
+            <SectionHeader
+              as="h3"
+              title="Relatório do Gemini"
+              description="O Google já escreveu o resumo desta sessão. Abra para consultar e escreva o seu abaixo."
+            />
+            <div className="mt-3">
+              <Button variant="secondary" asChild>
+                <a href={smartNotesUrl} target="_blank" rel="noopener noreferrer">
+                  <ExternalLink /> Abrir relatório do Gemini
+                </a>
+              </Button>
+            </div>
+          </SectionCard>
         )}
         <section>
           <SectionCard className="space-y-4">
