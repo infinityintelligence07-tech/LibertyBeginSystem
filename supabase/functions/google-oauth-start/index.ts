@@ -19,8 +19,12 @@ const SCOPES = [
   "openid",
 ];
 
-// Só a conta host envia o resumo da sessão por e-mail; mentores e membros não veem esse pedido no consentimento.
-const HOST_EXTRA_SCOPES = ["https://www.googleapis.com/auth/gmail.send"];
+// Só a conta host envia o resumo e libera o Doc do Gemini. Mentores e membros não veem esse pedido.
+const HOST_EXTRA_SCOPES = [
+  "https://www.googleapis.com/auth/gmail.send",
+  // O Doc do Gemini nasce na conta host. Sem o Drive, o link pede acesso mesmo para quem foi da call.
+  "https://www.googleapis.com/auth/drive",
+];
 
 async function hmac(data: string, secret: string) {
   const key = await crypto.subtle.importKey(

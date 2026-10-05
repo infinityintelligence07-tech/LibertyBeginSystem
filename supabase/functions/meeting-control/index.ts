@@ -188,6 +188,34 @@ type MeetArtifactsResult = {
   message: string;
 };
 
+function geminiDocId(url: string): string | null {
+  const match = url.match(/\/d\/([a-zA-Z0-9_-]+)/);
+  return match?.[1] || null;
+}
+
+/** Quem tiver o link abre o Doc como leitor. A conta host é a dona do arquivo. */
+async function shareGeminiDocWithLink(
+  accessToken: string,
+  notesUrl: string,
+): Promise<{ ok: boolean; reason: string | null }> {
+  const fileId = geminiDocId(notesUrl);
+  if (!fileId) return { ok: false, reason: "Documento do Gemini sem identificador." };
+  const res = await fetch(
+    `https://www.googleapis.com/drive/v3/files/${encodeURIComponent(fileId)}/permissions?supportsAllDrives=true&sendNotificationEmail=false`,
+    {
+      method: "POST",
+      headers: { Authorization: `Bearer ${accessToken}`, "Content-Type": "application/json" },
+      body: JSON.stringify({ type: "anyone", role: "reader", allowFileDiscovery: false }),
+    },
+  );
+  if (res.ok) return { ok: true, reason: null };
+  const body = await res.text().catch(() => "");
+  if (/already exists|duplicate/i.test(body)) return { ok: true, reason: null };
+  const reason = body.replace(/\s+/g, " ").slice(0, 180);
+  console.warn("[meeting-control] share gemini", res.status, reason);
+  return { ok: false, reason: reason || `Google recusou a liberação (${res.status}).` };
+}
+
 function normalizeMeetingCode(raw: string): string {
   return raw
     .trim()
@@ -317,6 +345,10 @@ async function fetchMeetArtifacts(accessToken: string, meetingCodeRaw: string): 
     }
   } catch {
     /* ignore */
+  }
+
+  if (smartNotesUrl) {
+    await shareGeminiDocWithLink(accessToken, smartNotesUrl);
   }
 
   // Transcripts + entries
@@ -1017,6 +1049,59 @@ async function isValidSweepSecret(admin: AdminClient, req: Request): Promise<boo
   return expected.length >= 32 && timingSafeEqual(provided, expected);
 }
 
+/** Libera Docs já salvos para quem tiver o link. Para quando a permissão entra. */
+async function shareStoredGeminiDocs(admin: AdminClient): Promise<{ shared: number; lastError: string | null }> {
+  const since = new Date(Date.now() - 45 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+  const { data, error } = await admin
+    .from("bookings")
+    .select("id, meeting_smart_notes_url, meeting_host_id")
+    .not("meeting_smart_notes_url", "is", null)
+    .is("meeting_smart_notes_shared_at", null)
+    .gte("scheduled_date", since)
+    .neq("status", "cancelled")
+    .limit(20);
+  if (error) {
+    console.warn("[meeting-control] share list", error.message);
+    return { shared: 0, lastError: error.message };
+  }
+
+  const rows = (data || []) as Array<{
+    id: string;
+    meeting_smart_notes_url: string | null;
+    meeting_host_id: string | null;
+  }>;
+  const tokens = new Map<string, Awaited<ReturnType<typeof resolveHostAccessToken>>>();
+  let shared = 0;
+  let lastError: string | null = null;
+  for (const b of rows) {
+    const url = (b.meeting_smart_notes_url || "").trim();
+    if (!url.startsWith("http")) continue;
+    const hostKey = b.meeting_host_id || "active";
+    if (!tokens.has(hostKey)) tokens.set(hostKey, await resolveHostAccessToken(admin, b.meeting_host_id));
+    const hostTok = tokens.get(hostKey)!;
+    if ("error" in hostTok) {
+      lastError = hostTok.error;
+      console.warn("[meeting-control] share host", b.id, hostTok.error);
+      continue;
+    }
+    const sharedDoc = await shareGeminiDocWithLink(hostTok.accessToken, url);
+    if (!sharedDoc.ok) {
+      lastError = sharedDoc.reason;
+      continue;
+    }
+    const { error: upErr } = await admin
+      .from("bookings")
+      .update({ meeting_smart_notes_shared_at: new Date().toISOString() })
+      .eq("id", b.id);
+    if (upErr) {
+      console.warn("[meeting-control] share stamp", b.id, upErr.message);
+      continue;
+    }
+    shared++;
+  }
+  return { shared, lastError };
+}
+
 /** Sessões de ontem e de hoje que ainda não têm o link do Doc do Gemini. */
 async function attachMissingGeminiNotes(admin: AdminClient): Promise<void> {
   const now = Date.now();
@@ -1071,7 +1156,7 @@ async function attachMissingGeminiNotes(admin: AdminClient): Promise<void> {
 /**
  * Cron: busca transcrição de sessões Meet que já terminaram, mesmo sem o mentor clicar em Encerrar.
  */
-async function sweepEndedMeetings(admin: AdminClient): Promise<{ checked: number; ready: number; errors: number }> {
+async function sweepEndedMeetings(admin: AdminClient): Promise<{ checked: number; ready: number; errors: number; shared: number; shareError: string | null }> {
   const now = Date.now();
   const spToday = new Date(now - 3 * 60 * 60 * 1000).toISOString().slice(0, 10);
   const spYesterday = new Date(now - 27 * 60 * 60 * 1000).toISOString().slice(0, 10);
@@ -1134,6 +1219,18 @@ async function sweepEndedMeetings(admin: AdminClient): Promise<{ checked: number
     console.warn("[meeting-control] gemini notes", e);
   });
 
+  let shared = 0;
+  let shareError: string | null = null;
+  try {
+    const shareResult = await shareStoredGeminiDocs(admin);
+    shared = shareResult.shared;
+    shareError = shareResult.lastError;
+  } catch (e) {
+    errors++;
+    shareError = e instanceof Error ? e.message : String(e);
+    console.warn("[meeting-control] share gemini", e);
+  }
+
   // Relatório do Gemini já salvo, e-mail ainda não enviado.
   const { data: unsent } = await admin
     .from("bookings")
@@ -1151,7 +1248,7 @@ async function sweepEndedMeetings(admin: AdminClient): Promise<{ checked: number
     });
   }
 
-  return { checked: due.length, ready, errors };
+  return { checked: due.length, ready, errors, shared, shareError };
 }
 
 async function assertCanEndOrFetchArtifacts(
