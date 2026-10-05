@@ -31,7 +31,15 @@ export function digitsPhone(phone?: string | null): string {
 export function whatsappHref(phone: string | null | undefined, text: string): string | null {
   const digits = digitsPhone(phone);
   if (!digits) return null;
-  return `https://wa.me/${digits}?text=${encodeURIComponent(text)}`;
+  const textParam = encodeURIComponent(text);
+  // wa.me redireciona e troca emoji por "?" no WhatsApp Web. O link direto preserva o emoji.
+  const desktop =
+    typeof navigator !== "undefined" &&
+    !/Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent);
+  if (desktop) {
+    return `https://web.whatsapp.com/send?phone=${digits}&text=${textParam}`;
+  }
+  return `https://api.whatsapp.com/send?phone=${digits}&text=${textParam}`;
 }
 
 export async function copyText(text: string): Promise<void> {
@@ -117,7 +125,7 @@ export function buildMeetingWhatsAppTexts(opts: MeetingWaCopyInput): { member: s
   const headline = "Estou passando para lembrá-lo da sua Sessão do Liberty Begin.";
 
   const mentorSessionLine = [
-    day,
+    `📅 ${day}`,
     dateShort,
     timeH,
     "membro Liberty Begin",
@@ -126,7 +134,7 @@ export function buildMeetingWhatsAppTexts(opts: MeetingWaCopyInput): { member: s
   ].join(" - ");
 
   const memberSessionLine = [
-    day,
+    `📅 ${day}`,
     dateShort,
     timeH,
     "mentor",
@@ -135,13 +143,13 @@ export function buildMeetingWhatsAppTexts(opts: MeetingWaCopyInput): { member: s
   ].join(" - ");
 
   const meetBlock = meetUrl
-    ? [`Ingressar na reunião Meet`, meetUrl].join("\n")
+    ? [`🔗 Ingressar na reunião Meet`, meetUrl].join("\n")
     : "O link da reunião Meet será enviado em breve.";
 
   const npsBlock = [
     `🚨 Lembrete`,
-    `Confira com o Liberty Begin se abriu corretamente o link para a pesquisa de NPS 🙏🏼😊`,
-    `Link para a pesquisa 👇🏼👇🏼`,
+    `Confira com o Liberty Begin se abriu corretamente o link para a pesquisa de NPS 🙏😊`,
+    `Link para a pesquisa 👇👇`,
     ``,
     `📝 Clique aqui para avaliar a sessão: ${npsUrl}`,
   ].join("\n");

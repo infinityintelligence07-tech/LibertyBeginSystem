@@ -79,7 +79,6 @@ function buildWaTexts(opts: {
   start: string;
   end: string;
   meetUrl: string;
-  mentorEmail?: string | null;
   appOrigin?: string;
 }): { member: string; mentor: string } {
   const origin = (opts.appOrigin || Deno.env.get("APP_URL") || APP_ORIGIN_DEFAULT).replace(/\/$/, "");
@@ -88,12 +87,12 @@ function buildWaTexts(opts: {
   const dateShort = `${d}/${m}`;
   const timeH = `${formatBrTime(opts.start)}H`;
   const session = sessionPhrase(opts.sessionName);
-  const meetUrl = meetEntryUrl(opts.meetUrl, opts.mentorEmail);
+  const meetUrl = (opts.meetUrl || "").trim();
   const npsUrl = `${origin}/nps/${opts.bookingId}`;
 
   const headline = "Estou passando para lembrá-lo da sua Sessão do Liberty Begin.";
   const mentorSessionLine = [
-    day,
+    `📅 ${day}`,
     dateShort,
     timeH,
     "membro Liberty Begin",
@@ -101,7 +100,7 @@ function buildWaTexts(opts: {
     session,
   ].join(" - ");
   const memberSessionLine = [
-    day,
+    `📅 ${day}`,
     dateShort,
     timeH,
     "mentor",
@@ -109,12 +108,12 @@ function buildWaTexts(opts: {
     session,
   ].join(" - ");
   const meetBlock = meetUrl
-    ? `Ingressar na reunião Meet\n${meetUrl}`
+    ? `🔗 Ingressar na reunião Meet\n${meetUrl}`
     : "O link da reunião Meet será enviado em breve.";
   const npsBlock = [
     `🚨 Lembrete`,
-    `Confira com o Liberty Begin se abriu corretamente o link para a pesquisa de NPS 🙏🏼😊`,
-    `Link para a pesquisa 👇🏼👇🏼`,
+    `Confira com o Liberty Begin se abriu corretamente o link para a pesquisa de NPS 🙏😊`,
+    `Link para a pesquisa 👇👇`,
     ``,
     `📝 Clique aqui para avaliar a sessão: ${npsUrl}`,
   ].join("\n");
@@ -339,28 +338,6 @@ async function addMentorCohosts(accessToken: string, meetingCode: string, emails
   return failures.length
     ? `Não foi possível tornar co-host: ${failures.join(", ")}. Se a sala foi criada antes desta versão, use Recriar sala.`
     : null;
-}
-
-/** Abre o Meet já na conta Google do mentor, sem ele escolher a conta errada. */
-function meetEntryUrl(meetUrl: string, email?: string | null): string {
-  const raw = (meetUrl || "").trim();
-  const mail = (email || "").trim().toLowerCase();
-  if (!raw.startsWith("http") || !mail.includes("@")) return raw;
-  try {
-    const u = new URL("https://accounts.google.com/AccountChooser");
-    u.searchParams.set("Email", mail);
-    u.searchParams.set("continue", raw);
-    return u.toString();
-  } catch {
-    return raw;
-  }
-}
-
-function mentorJoinEmail(mentor: { email?: string | null; google_calendar_email?: string | null } | null): string {
-  const calendar = (mentor?.google_calendar_email || "").trim().toLowerCase();
-  const login = (mentor?.email || "").trim().toLowerCase();
-  if (calendar.includes("@")) return calendar;
-  return login.includes("@") ? login : "";
 }
 
 function mentorGoogleEmails(mentor: { email?: string | null; google_calendar_email?: string | null } | null): string[] {
@@ -895,7 +872,6 @@ async function handleProvision(req: Request, ctx: AuthContext, payload: Record<s
       start: booking.start_time,
       end: booking.end_time,
       meetUrl: booking.zoom_join_url,
-      mentorEmail: mentorJoinEmail(mentor),
     });
     await admin
       .from("bookings")
@@ -1009,7 +985,6 @@ async function handleProvision(req: Request, ctx: AuthContext, payload: Record<s
     start: booking.start_time,
     end: booking.end_time,
     meetUrl,
-    mentorEmail: mentorJoinEmail(mentor),
   });
 
   const { error: upErr } = await admin
