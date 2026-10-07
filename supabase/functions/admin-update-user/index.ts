@@ -90,14 +90,30 @@ Deno.serve(async (req) => {
         if (updErr) return errorJson("Auth: " + updErr.message, 400);
       }
     } else if (emailChanged) {
-      // Perfil sem conta recebendo e-mail novo: cria a conta e vincula
-      const account = await ensureAuthUserForEmail(admin, {
-        email: newEmail,
-        fullName: (profile_updates?.full_name as string | undefined) || target.full_name,
-        profileId: target.id,
-        password: newPassword ?? undefined,
-      });
-      userId = account.userId;
+      // Grava o e-mail neste perfil antes de criar a conta. O trigger do Auth
+      // procura um cadastro com esse e-mail e sem login. Se o e-mail ainda
+      // estiver vazio, ele cria um segundo cadastro e o salvamento falha
+      // dizendo que o e-mail já está em uso.
+      const { error: preEmailErr } = await admin
+        .from("profiles")
+        .update({ email: newEmail })
+        .eq("id", target.id);
+      if (preEmailErr) return errorJson("Profile: " + preEmailErr.message, 400);
+
+      let account;
+      try {
+        account = await ensureAuthUserForEmail(admin, {
+          email: newEmail,
+          fullName: (profile_updates?.full_name as string | undefined) || target.full_name,
+          profileId: target.id,
+          password: newPassword ?? undefined,
+        });
+      } catch (err) {
+        await admin.from("profiles").update({ email: target.email }).eq("id", target.id).is("user_id", null);
+        throw err;
+      }
+      const { data: linked } = await admin.from("profiles").select("user_id").eq("id", target.id).maybeSingle();
+      userId = (linked?.user_id as string | null) || account.userId;
       generatedPassword = account.password;
       accountCreated = true;
 
