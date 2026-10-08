@@ -9,6 +9,7 @@ import { toast } from "sonner";
 import { demoMentorActionNotifications } from "@/lib/demoForUser";
 import { useDemoData } from "@/contexts/DemoDataContext";
 import { invalidateMentorBookingQueries, translateBookingError } from "@/components/mentor/MentorBookingActions";
+import { invokeProvisionMeeting } from "@/lib/meetingWhatsApp";
 import { Button } from "@/components/ui/button";
 import { BottomSheet, SectionCard, StatusPill, TextAreaField } from "@/components/ds";
 import { cn } from "@/lib/utils";
@@ -139,7 +140,11 @@ export const MentorActionBanner = () => {
           return;
         }
         if (action === "approve") {
-          // Sincroniza com Google Calendar (mentor + aluno) assim que aprovada
+          void invokeProvisionMeeting(n.related_booking_id).then((r) => {
+            if (r && r.ok === false) {
+              toast.warning(r.error || r.message || "Sala Meet não criada. A equipe pode gerar o link na agenda.");
+            }
+          });
           supabase.functions
             .invoke("google-calendar-sync", { body: { booking_id: n.related_booking_id } })
             .catch((e) => console.error("Falha ao sincronizar com o Google Agenda", e));

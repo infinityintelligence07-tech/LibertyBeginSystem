@@ -42,7 +42,7 @@ import {
   PENDING_CONFIRMATION_HINT,
 } from "@/lib/bookingStatus";
 import { bookingRuleErrorMessage } from "@/lib/bookingRules";
-import { whatsappHref, copyText, invokeProvisionMeeting, friendlyMeetError, buildMeetingWhatsAppTexts, invokeEndMeeting } from "@/lib/meetingWhatsApp";
+import { whatsappHref, copyText, invokeProvisionMeeting, friendlyMeetError, buildMeetingWhatsAppTexts, invokeEndMeeting, plainMeetUrl } from "@/lib/meetingWhatsApp";
 import { UserAvatar } from "@/components/UserAvatar";
 import { Button } from "@/components/ui/button";
 import { markCompletedButtonClass } from "@/components/mentor/MentorBookingActions";
@@ -185,7 +185,7 @@ const buildMeetingWaFallback = (
     sessionName: booking.sessions?.name || "Sessão",
     date: booking.scheduled_date,
     start: booking.start_time,
-    meetUrl: booking.zoom_join_url || booking.zoom_link || "",
+    meetUrl: plainMeetUrl(booking.zoom_join_url || booking.zoom_link || ""),
     appOrigin: typeof window !== "undefined" ? window.location.origin : undefined,
   });
   return role === "member" ? texts.member : texts.mentor;
@@ -1039,6 +1039,12 @@ const AdminAgendaPage = () => {
     setSubmittingBook(false);
   };
 
+  const loadBookingRow = async (id: string): Promise<BookingRow | null> => {
+    const { data, error } = await supabase.from("bookings").select(BOOKING_SELECT).eq("id", id).maybeSingle();
+    if (error || !data) return null;
+    return data as unknown as BookingRow;
+  };
+
   const openDrawer = (booking: BookingRow) => {
     // Mantém o status BRUTO no booking selecionado; o efetivo é derivado na hora de exibir.
     setSelectedBooking(booking);
@@ -1051,6 +1057,12 @@ const AdminAgendaPage = () => {
     setShowCancelModal(false);
     setShowNotRealizedModal(false);
     setDrawerOpen(true);
+    const openedEmail = booking.guest_email || "";
+    void loadBookingRow(booking.id).then((fresh) => {
+      if (!fresh) return;
+      setSelectedBooking((cur) => (cur && cur.id === fresh.id ? fresh : cur));
+      setGuestEmailDraft((cur) => (cur === openedEmail ? fresh.guest_email || "" : cur));
+    });
   };
 
   // Auto-open drawer when navigated with ?booking=<id> (e.g. from notifications bell)
@@ -1249,12 +1261,34 @@ const AdminAgendaPage = () => {
 
   const sendMeetingWhatsApp = async (role: "member" | "mentor") => {
     if (!selectedBooking) return;
-    const mentorName =
-      selectedBooking.mentor?.full_name || getMentorName(selectedBooking.mentor_id);
+    let booking = (await loadBookingRow(selectedBooking.id)) || selectedBooking;
+    const meetOf = (b: BookingRow) => plainMeetUrl(b.zoom_join_url || b.zoom_link);
+
+    if (!meetOf(booking) && booking.status === "scheduled" && !booking.is_retroactive) {
+      const toastId = toast.loading("Gerando o link da reunião…");
+      const result = await invokeProvisionMeeting(booking.id);
+      const after = await loadBookingRow(booking.id);
+      if (after) booking = after;
+      if (!meetOf(booking)) {
+        toast.error(
+          friendlyMeetError(result?.error || result?.message || "Não foi possível gerar o link do Meet."),
+          { id: toastId },
+        );
+        setSelectedBooking(booking);
+        return;
+      }
+      toast.dismiss(toastId);
+    }
+
+    setSelectedBooking(booking);
+    const mentorName = booking.mentor?.full_name || getMentorName(booking.mentor_id);
     // Sempre gera na hora (HOJE/AMANHÃ + NPS da plataforma), não usa texto antigo gravado.
-    const text = buildMeetingWaFallback(selectedBooking, role, mentorName);
-    const phone =
-      role === "member" ? selectedBooking.liberty?.phone ?? null : mentorPhoneFor(selectedBooking);
+    const text = buildMeetingWaFallback(booking, role, mentorName);
+    if (!meetOf(booking)) {
+      toast.error("Esta sessão ainda não tem link do Meet.");
+      return;
+    }
+    const phone = role === "member" ? booking.liberty?.phone ?? null : mentorPhoneFor(booking);
     const href = whatsappHref(phone, text);
     if (href) {
       window.open(href, "_blank", "noopener,noreferrer");
