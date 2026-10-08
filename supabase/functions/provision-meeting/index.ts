@@ -335,9 +335,24 @@ async function addMentorCohosts(accessToken: string, meetingCode: string, emails
     console.warn("co-host falhou", email, res.status, body);
     failures.push(email);
   }
-  return failures.length
-    ? `Não foi possível tornar co-host: ${failures.join(", ")}. Se a sala foi criada antes desta versão, use Recriar sala.`
-    : null;
+  if (!failures.length) return null;
+
+  // O Google às vezes recusa a criação mesmo com o mentor já co-host. A lista manda.
+  const listed = await fetch(`https://meet.googleapis.com/v2/${spaceName}/members`, {
+    headers: { Authorization: `Bearer ${accessToken}` },
+  });
+  if (listed.ok) {
+    const data = await listed.json().catch(() => ({}));
+    const already = new Set(
+      (Array.isArray(data?.members) ? data.members : [])
+        .filter((m: { role?: string }) => String(m?.role || "").toUpperCase() === "COHOST")
+        .map((m: { email?: string }) => String(m?.email || "").trim().toLowerCase()),
+    );
+    const still = failures.filter((email) => !already.has(email.toLowerCase()));
+    if (!still.length) return null;
+    return `Não foi possível tornar co-host: ${still.join(", ")}. O link do Meet continua válido.`;
+  }
+  return `Não foi possível tornar co-host: ${failures.join(", ")}. O link do Meet continua válido.`;
 }
 
 function mentorGoogleEmails(mentor: { email?: string | null; google_calendar_email?: string | null } | null): string[] {
@@ -1140,6 +1155,13 @@ async function sweepEnsureCohosts(
       if (warn) {
         cohostErrors++;
         await admin.from("bookings").update({ meeting_provision_error: warn.slice(0, 500) }).eq("id", b.id);
+      } else {
+        // Tentativa anterior pode ter falhado e a seguinte ter dado certo. O aviso antigo não pode ficar.
+        await admin
+          .from("bookings")
+          .update({ meeting_provision_error: null })
+          .eq("id", b.id)
+          .ilike("meeting_provision_error", "Não foi possível tornar co-host%");
       }
       ensured++;
     } catch (e) {
