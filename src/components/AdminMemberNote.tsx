@@ -89,14 +89,15 @@ export function AdminMemberNote({
   notes?: MemberAdminNote[];
   notesLoading?: boolean;
 }) {
-  const { profile } = useAuth();
+  const { profile, hasRole } = useAuth();
   const queryClient = useQueryClient();
   const [draft, setDraft] = useState("");
   const [saving, setSaving] = useState(false);
+  const canSee = hasRole("admin") || hasRole("super_admin") || hasRole("mentor");
   const own = useQuery({
     queryKey: [...MEMBER_NOTES_KEY, memberId],
     queryFn: () => fetchMemberNotes(memberId),
-    enabled: notes === undefined,
+    enabled: notes === undefined && canSee,
   });
   const list = notes ?? own.data ?? [];
   const loading = notes === undefined ? own.isLoading : notesLoading;
@@ -122,7 +123,6 @@ export function AdminMemberNote({
       toast.error("Não foi possível salvar a nota");
       return;
     }
-    await supabase.from("profiles").update({ admin_note: body }).eq("id", memberId);
     setDraft("");
     setSaving(false);
     toast.success("Nota adicionada");
@@ -130,8 +130,10 @@ export function AdminMemberNote({
     queryClient.invalidateQueries({ queryKey: ["admin-members"] });
   };
 
+  if (!canSee) return null;
+
   return (
-    <div className="space-y-2" onClick={(e) => e.stopPropagation()}>
+    <div className="w-full max-w-md min-w-0 space-y-2" onClick={(e) => e.stopPropagation()}>
       <p className="text-xs font-medium text-muted-foreground">Anotações</p>
       {loading ? (
         <p className="text-sm text-muted-foreground">Carregando anotações</p>
@@ -147,11 +149,11 @@ export function AdminMemberNote({
                 size={28}
               />
               <div className="min-w-0">
-                <p className="text-xs tabular-nums text-muted-foreground">
+                <p className="truncate text-xs tabular-nums text-muted-foreground">
                   {noteStamp(note.created_at)}
                   {note.author_name ? ` · ${note.author_name}` : ""}
                 </p>
-                <p className="whitespace-pre-wrap text-sm text-foreground">{note.body}</p>
+                <p className="whitespace-pre-wrap break-words text-sm text-foreground">{note.body}</p>
               </div>
             </li>
           ))}

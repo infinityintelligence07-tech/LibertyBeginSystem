@@ -19,7 +19,7 @@ const MERGEABLE = [
   "dietary_restriction","company_segment","company_address","business_description","company_instagram",
   "business_age","employees_count","monthly_revenue","profit_margin","would_buy_self","financial_control",
   "uses_dre","costs_expenses","financial_challenge","challenge_2026","dream_2026","program_expectation",
-  "main_pain","vision_6_months","sector_to_develop","admin_note","business_story","leaders_count",
+  "main_pain","vision_6_months","sector_to_develop","business_story","leaders_count",
   "employees_count_num","session_rate","google_calendar_email",
 ];
 
@@ -185,6 +185,7 @@ Deno.serve(async (req) => {
     if (winner.member_tier !== "liberty" && loser.member_tier === "liberty") updates.member_tier = "liberty";
 
     // 2) Reassign bookings & related records (by profile.id)
+    await adminClient.from("profile_admin_notes").update({ profile_id: winner_id }).eq("profile_id", loser_id);
     await adminClient.from("bookings").update({ liberty_id: winner_id }).eq("liberty_id", loser_id);
     await adminClient.from("bookings").update({ mentor_id: winner_id }).eq("mentor_id", loser_id);
     await adminClient.from("nps_responses").update({ mentor_id: winner_id }).eq("mentor_id", loser_id);

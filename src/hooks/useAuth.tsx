@@ -104,7 +104,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     for (let attempt = 0; attempt < 3; attempt++) {
       const { data, error } = await supabase
         .from("profiles")
-        .select("*")
+        .select("id, user_id, full_name, email, phone, avatar_url, google_connected, google_calendar_email, member_tier, is_active, onboarding_completed, birth_date, instagram_personal, city_state, marital_status, dietary_restriction, favorite_chocolate, personal_story, company_name, company_segment, company_address, company_instagram, business_age, business_description, business_story, employees_count, employees_count_num, leaders_count, monthly_revenue, profit_margin, would_buy_self, financial_control, uses_dre, costs_expenses, financial_challenge, challenge_2026, dream_2026, program_expectation, sector_to_develop, vision_6_months, main_pain, program_start_date, program_end_date, session_rate, is_ranking_featured, featured_position, courtesy_reschedules_left, created_at, updated_at")
         .eq("user_id", userId)
         .order("created_at", { ascending: true })
         .limit(1)

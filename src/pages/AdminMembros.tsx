@@ -1343,7 +1343,7 @@ const AdminMembrosPage = () => {
                 </tr>
                 <tr className="border-b border-border">
                   <td colSpan={colSpan} className="p-0">
-                    <div className="px-4 py-2">
+                    <div className="max-w-md min-w-0 overflow-hidden px-4 py-2">
                       <AdminMemberNote
                         memberId={member.id}
                         notes={notesByMember.get(member.id) ?? []}
