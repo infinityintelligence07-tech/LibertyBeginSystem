@@ -440,6 +440,7 @@ export const useMentors = () => {
             session_name: b.sessions?.name,
             is_kickoff: b.sessions?.is_kickoff,
             duration_minutes: b.sessions?.duration_minutes,
+            scheduled_date: b.scheduled_date,
           },
           feeRates,
         );

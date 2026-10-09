@@ -315,15 +315,21 @@ const MentorDashboardPage = () => {
   );
 
   // Mapeamento do Negócio (3h) = valor de kickoff; mesma regra do admin
-  const feeOf = (b: { session_id: string }) => {
+  const feeOf = (b: { session_id: string; scheduled_date?: string | null }) => {
     const s = sessionInfoMap[b.session_id];
     return sessionFee(
       rate,
-      { session_name: s?.name, is_kickoff: s?.is_kickoff, duration_minutes: s?.duration_minutes },
+      {
+        session_name: s?.name,
+        is_kickoff: s?.is_kickoff,
+        duration_minutes: s?.duration_minutes,
+        scheduled_date: b.scheduled_date,
+      },
       feeRates,
     );
   };
-  const sumFees = (list: { session_id: string }[]) => list.reduce((acc, b) => acc + feeOf(b), 0);
+  const sumFees = (list: { session_id: string; scheduled_date?: string | null }[]) =>
+    list.reduce((acc, b) => acc + feeOf(b), 0);
 
   const payable = (b: { payout_excluded?: boolean | null }) => b.payout_excluded !== true;
   const earnedThisPeriod = sumFees(realized.filter(payable));

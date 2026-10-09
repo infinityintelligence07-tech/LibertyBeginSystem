@@ -10,7 +10,7 @@ import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from "@
 import { Button } from "@/components/ui/button";
 import { downloadMentorReportPdf, formatBRL, payoutCategoryOf, type MentorReportSession } from "@/lib/mentorReportPdf";
 import { toast } from "sonner";
-import { kickoffFeeForRate, kickoffFeeRatio } from "@/lib/mentorFees";
+import { kickoffFeeForRate, KICKOFF_VALUE_BEFORE_CHANGE } from "@/lib/mentorFees";
 import { PENDING_CONFIRMATION_HINT } from "@/lib/bookingStatus";
 import {
   PageContainer,
@@ -42,7 +42,6 @@ const AdminFinanceiroPage = () => {
     () => ({ sessionValue: defaultRate, kickoffValue: kickoffRate }),
     [defaultRate, kickoffRate],
   );
-  const kickoffRatio = kickoffFeeRatio(feeRates);
   const filterKey = mode === "month" ? monthKey : null;
 
   const [detailMentorId, setDetailMentorId] = useState<string | null>(null);
@@ -110,14 +109,20 @@ const AdminFinanceiroPage = () => {
       const scheduled = pick(m.total_scheduled, m.monthly_scheduled);
       const pendingConfirmation = pick(m.total_pending_confirmation, m.monthly_pending_confirmation);
       const rate = m.session_rate ?? defaultRate;
-      const mentorKickoff = kickoffFeeForRate(rate, feeRates);
       const total = completed + scheduled + pendingConfirmation;
-      // Mapeamento do Negócio (3h) = valor de kickoff (padrão R$ 600)
       const kCompleted = pick(m.total_kickoff_completed, m.monthly_kickoff_completed);
       const kScheduled = pick(m.total_kickoff_scheduled, m.monthly_kickoff_scheduled);
       const kPending = pick(m.total_kickoff_pending_confirmation, m.monthly_kickoff_pending_confirmation);
       const kTotal = kCompleted + kScheduled + kPending;
-      const extra = kickoffRatio - 1;
+      const periodSessions = m.sessions.filter((s) => !filterKey || s.date.startsWith(filterKey));
+      const isDone = (status: string) => status === "completed" || status === "awaiting_report";
+      const isProjected = (status: string) => isDone(status) || status === "scheduled" || status === "pending_confirmation";
+      const sumValue = (list: MentorSessionDetail[]) => list.reduce((sum, s) => sum + rate * s.fee_multiplier, 0);
+      const kickoffRates = [...new Set(
+        periodSessions
+          .filter((s) => s.fee_multiplier > 1 && isProjected(s.status))
+          .map((s) => rate * s.fee_multiplier),
+      )].sort((a, b) => b - a);
       return {
         mentor: m,
         id: m.id,
@@ -129,15 +134,15 @@ const AdminFinanceiroPage = () => {
         pendingConfirmation,
         total,
         rate,
-        kickoffRate: mentorKickoff,
+        kickoffRate: kickoffRates[0] ?? kickoffFeeForRate(rate, feeRates),
+        kickoffRates,
         usesDefaultRate: m.session_rate == null,
         kickoffCount: kTotal,
-        revenueDone: (completed + kCompleted * extra) * rate,
-        // Projeção = a pagar + agendadas + a confirmar
-        revenueProjected: (total + kTotal * extra) * rate,
+        revenueDone: sumValue(periodSessions.filter((s) => isDone(s.status))),
+        revenueProjected: sumValue(periodSessions.filter((s) => isProjected(s.status))),
       };
     }).sort((a, b) => b.total - a.total);
-  }, [activeMentors, filterKey, defaultRate, feeRates, kickoffRatio]);
+  }, [activeMentors, filterKey, defaultRate, feeRates]);
 
   const totalCompleted = mentorRows.reduce((s, r) => s + r.completed, 0);
   const totalAwaiting = mentorRows.reduce((s, r) => s + r.awaiting, 0);
@@ -170,7 +175,7 @@ const AdminFinanceiroPage = () => {
       {row.usesDefaultRate && <span className="block text-[11px] text-muted-foreground">valor padrão</span>}
       {row.kickoffCount > 0 && (
         <span className="block text-[11px] text-muted-foreground tabular-nums">
-          {row.kickoffCount}× Mapeamento · {formatBRL(row.kickoffRate)}
+          {row.kickoffCount}× Mapeamento · {row.kickoffRates.map((value) => formatBRL(value)).join(" · ")}
         </span>
       )}
     </div>
@@ -181,7 +186,7 @@ const AdminFinanceiroPage = () => {
       <PageContainer variant="wide">
         <PageHeader
           title="Financeiro"
-          description={`Sessão normal: ${formatBRL(defaultRate)} · Mapeamento (3h): ${formatBRL(kickoffRate)} · A pagar = realizadas · Projeção = realizadas + agendadas + a confirmar`}
+          description={`Sessão normal: ${formatBRL(defaultRate)} · Mapeamento até setembro/2026: ${formatBRL(KICKOFF_VALUE_BEFORE_CHANGE)} · Mapeamento a partir de outubro/2026: ${formatBRL(kickoffRate)} · A pagar = realizadas · Projeção = realizadas + agendadas + a confirmar`}
           actions={<AdminMonthFilter />}
         />
 
@@ -410,7 +415,7 @@ const AdminFinanceiroPage = () => {
                 {detailRow.usesDefaultRate && " (padrão)"}
               </span>
               {detailRow.kickoffCount > 0 && (
-                <span className="tabular-nums">{detailRow.kickoffCount}× Mapeamento · {formatBRL(detailRow.kickoffRate)}</span>
+                <span className="tabular-nums">{detailRow.kickoffCount}× Mapeamento · {detailRow.kickoffRates.map((value) => formatBRL(value)).join(" · ")}</span>
               )}
             </div>
 
