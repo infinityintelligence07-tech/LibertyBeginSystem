@@ -3,7 +3,7 @@ import { useParams, useNavigate, useLocation } from "react-router-dom";
 import {
   Pencil, MessageCircle, CalendarDays, ChevronDown,
   Building2, DollarSign, Instagram, Target, AlertCircle, BookOpen,
-  CheckCircle2, Clock, Plus, Users, Crown, StickyNote, TrendingUp, MessageSquare,
+  CheckCircle2, Clock, Plus, Users, Crown, TrendingUp, MessageSquare,
 } from "lucide-react";
 import { AppLayout } from "@/components/AppLayout";
 import { supabase } from "@/integrations/supabase/client";
@@ -616,14 +616,7 @@ const AdminMembroDetalhesPage = () => {
               <Stat label="Disponíveis" value={availableJourneyCount} icon={Target} hint="Vagas na jornada" />
             </div>
 
-            {/* Observação do administrador: visível no topo para mentor e admin */}
-            {isAdminUser ? (
-              <AdminMemberNote memberId={profile.id} initialNote={profile.admin_note ?? null} />
-            ) : profile.admin_note ? (
-              <Callout tone="warning" icon={StickyNote} title="Observação da coordenação">
-                <span className="whitespace-pre-wrap">{profile.admin_note}</span>
-              </Callout>
-            ) : null}
+            <AdminMemberNote memberId={profile.id} canWrite={isAdminUser} />
 
             {/* Quick facts */}
             {quickFacts.length > 0 && (
