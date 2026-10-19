@@ -860,6 +860,51 @@ export type Database = {
           },
         ]
       }
+      member_reschedule_events: {
+        Row: {
+          booking_id: string | null
+          charge_cents: number | null
+          charge_settled_at: string | null
+          created_at: string
+          created_by_name: string | null
+          created_by_profile_id: string | null
+          id: string
+          kind: string
+          new_date: string | null
+          previous_date: string | null
+          profile_id: string
+          session_name: string | null
+        }
+        Insert: {
+          booking_id?: string | null
+          charge_cents?: number | null
+          charge_settled_at?: string | null
+          created_at?: string
+          created_by_name?: string | null
+          created_by_profile_id?: string | null
+          id?: string
+          kind: string
+          new_date?: string | null
+          previous_date?: string | null
+          profile_id: string
+          session_name?: string | null
+        }
+        Update: {
+          booking_id?: string | null
+          charge_cents?: number | null
+          charge_settled_at?: string | null
+          created_at?: string
+          created_by_name?: string | null
+          created_by_profile_id?: string | null
+          id?: string
+          kind?: string
+          new_date?: string | null
+          previous_date?: string | null
+          profile_id?: string
+          session_name?: string | null
+        }
+        Relationships: []
+      }
       profile_admin_notes: {
         Row: {
           author_name: string | null
@@ -1025,6 +1070,7 @@ export type Database = {
           program_end_date: string | null
           program_expectation: string | null
           program_start_date: string | null
+          reschedule_scheduling_locked: boolean
           sector_to_develop: string | null
           session_rate: number | null
           updated_at: string
@@ -1077,6 +1123,7 @@ export type Database = {
           program_end_date?: string | null
           program_expectation?: string | null
           program_start_date?: string | null
+          reschedule_scheduling_locked?: boolean
           sector_to_develop?: string | null
           session_rate?: number | null
           updated_at?: string
@@ -1129,6 +1176,7 @@ export type Database = {
           program_end_date?: string | null
           program_expectation?: string | null
           program_start_date?: string | null
+          reschedule_scheduling_locked?: boolean
           sector_to_develop?: string | null
           session_rate?: number | null
           updated_at?: string
@@ -1662,6 +1710,20 @@ export type Database = {
           id: string
           full_name: string
         }[]
+      }
+      register_student_unavailability: {
+        Args: {
+          _profile_id: string
+          _booking_id?: string | null
+          _session_name?: string | null
+          _previous_date?: string | null
+          _new_date?: string | null
+        }
+        Returns: Json
+      }
+      settle_reschedule_charge: {
+        Args: { _profile_id: string }
+        Returns: undefined
       }
       list_tool_members: {
         Args: never

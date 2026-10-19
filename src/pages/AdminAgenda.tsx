@@ -42,6 +42,7 @@ import {
   PENDING_CONFIRMATION_HINT,
 } from "@/lib/bookingStatus";
 import { bookingRuleErrorMessage } from "@/lib/bookingRules";
+import { registerStudentUnavailability, rescheduleResultMessage } from "@/lib/rescheduleCredits";
 import { whatsappHref, copyText, invokeProvisionMeeting, friendlyMeetError, buildMeetingWhatsAppTexts, invokeEndMeeting, plainMeetUrl } from "@/lib/meetingWhatsApp";
 import { UserAvatar } from "@/components/UserAvatar";
 import { Button } from "@/components/ui/button";
@@ -323,6 +324,7 @@ const AdminAgendaPage = () => {
   // Date change form
   const [newDate, setNewDate] = useState("");
   const [newTime, setNewTime] = useState("09:00");
+  const [rescheduleReason, setRescheduleReason] = useState<"student" | "other">("other");
 
   // Inline availability editing (directly on the calendar)
   type SlotRef = { id: string; mentor_id: string; date: string; start_time: string; end_time: string; is_recurring: boolean };
@@ -905,6 +907,20 @@ const AdminAgendaPage = () => {
     }).eq("id", selectedBooking.id);
 
     if (error) { toast.error(translateBookingError(error, "Erro ao remarcar")); return; }
+    if (rescheduleReason === "student" && selectedBooking.liberty_id) {
+      try {
+        const result = await registerStudentUnavailability({
+          profileId: selectedBooking.liberty_id,
+          bookingId: selectedBooking.id,
+          sessionName: selectedBooking.sessions?.name ?? null,
+          previousDate: selectedBooking.scheduled_date,
+          newDate: targetDate,
+        });
+        toast.success(rescheduleResultMessage(result));
+      } catch {
+        toast.error("A sessão foi remarcada, mas o crédito de reagendamento não entrou no histórico.");
+      }
+    }
     if (!selectedBooking.is_retroactive) {
       void invokeProvisionMeeting(selectedBooking.id, { force: true }).then((r) => {
         if (r && !r.ok) {
@@ -2162,6 +2178,19 @@ const AdminAgendaPage = () => {
                     hint={`Duração: ${formatDuration(selectedBooking.sessions?.duration_minutes)}${newTime ? ` · fim às ${computeEndTime(newTime, selectedBooking.sessions?.duration_minutes)}` : ""}`}
                   />
                 </div>
+                <SelectField
+                  label="Motivo"
+                  value={rescheduleReason}
+                  onChange={(e) => setRescheduleReason(e.target.value === "student" ? "student" : "other")}
+                >
+                  <option value="other">Outro motivo</option>
+                  <option value="student">Indisponibilidade do aluno</option>
+                </SelectField>
+                {rescheduleReason === "student" ? (
+                  <p className="text-xs text-muted-foreground">
+                    Os 3 primeiros não têm custo. A partir do quarto, a cobrança é de R$ 1.000 e o aluno não agenda até a coordenação liberar.
+                  </p>
+                ) : null}
                 <Button className="w-full" onClick={handleDateTimeChange}>
                   <RefreshCw className="h-4 w-4" /> Confirmar alteração
                 </Button>

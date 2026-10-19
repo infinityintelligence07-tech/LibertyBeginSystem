@@ -137,6 +137,7 @@ const AgendarSessaoPage = () => {
   const [confirmed, setConfirmed] = useState(false);
   const [showLimitModal, setShowLimitModal] = useState(false);
   const [showJourneyLimitModal, setShowJourneyLimitModal] = useState(false);
+  const [showRescheduleLock, setShowRescheduleLock] = useState(false);
   const [monthlyOverride, setMonthlyOverride] = useState(false);
   const [calendarMonth, setCalendarMonth] = useState(new Date());
 
@@ -385,6 +386,20 @@ const AgendarSessaoPage = () => {
       return;
     }
 
+    const { data: lockRow, error: lockError } = await supabase
+      .from("profiles")
+      .select("reschedule_scheduling_locked")
+      .eq("id", profile.id)
+      .maybeSingle();
+    if (lockError) {
+      toast.error("Não foi possível confirmar seus créditos de reagendamento. Tente de novo.");
+      return;
+    }
+    if (lockRow?.reschedule_scheduling_locked) {
+      setShowRescheduleLock(true);
+      return;
+    }
+
     setIsConfirming(true);
     setConfirmStep(0);
     setConfirmSteps(isSameDayBooking ? confirmStepsPending : confirmStepsScheduled);
@@ -439,6 +454,8 @@ const AgendarSessaoPage = () => {
       } else if (isDuplicateSessionError(error)) {
         toast.error("Você já tem essa sessão agendada ou realizada. Escolha outra sessão da jornada.");
         setStep(1);
+      } else if (String(error.message || "").includes("RESCHEDULE_CREDITS_LOCKED")) {
+        setShowRescheduleLock(true);
       } else if (error.code === "23505") {
         // Índice único de horário do mentor: alguém reservou esse horário primeiro.
         toast.error("Esse horário acabou de ser reservado. Escolha outro horário.");
@@ -989,6 +1006,16 @@ const AgendarSessaoPage = () => {
           confirmLabel="Entendi"
           cancelLabel="Fechar"
           onConfirm={() => setShowJourneyLimitModal(false)}
+        />
+
+        <ConfirmDialog
+          open={showRescheduleLock}
+          onOpenChange={setShowRescheduleLock}
+          title="Agendamento pausado"
+          description="Seus 3 reagendamentos por indisponibilidade já foram usados. A coordenação libera o próximo agendamento depois da cobrança de R$ 1.000."
+          confirmLabel="Entendi"
+          cancelLabel="Fechar"
+          onConfirm={() => setShowRescheduleLock(false)}
         />
       </div>
       </PageContainer>

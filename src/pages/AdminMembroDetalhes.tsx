@@ -25,6 +25,7 @@ import { MemberBookingsManager } from "@/components/MemberBookingsManager";
 import { SendNpsButton } from "@/components/SendNpsButton";
 import { MemberQuickMessages } from "@/components/MemberQuickMessages";
 import { AdminMemberNote } from "@/components/AdminMemberNote";
+import { MemberRescheduleHistory } from "@/components/MemberRescheduleHistory";
 import { TaskChecklist } from "@/components/TaskChecklist";
 import { Button } from "@/components/ui/button";
 import {
@@ -617,6 +618,7 @@ const AdminMembroDetalhesPage = () => {
             </div>
 
             <AdminMemberNote memberId={profile.id} canWrite={isAdminUser} />
+            <MemberRescheduleHistory memberId={profile.id} canWrite={isAdminUser} />
 
             {/* Quick facts */}
             {quickFacts.length > 0 && (

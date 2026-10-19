@@ -12,7 +12,6 @@ import {
 } from "lucide-react";
 import { PENDING_CONFIRMATION_HINT } from "@/lib/bookingStatus";
 import { MemberSessionEditor } from "@/components/MemberSessionEditor";
-import { AdminMemberNote, fetchAllMemberNotes, MEMBER_NOTES_KEY, type MemberAdminNote } from "@/components/AdminMemberNote";
 import { LibertyMark } from "@/components/LibertyMark";
 import { UserAvatar } from "@/components/UserAvatar";
 import { AvatarUpload } from "@/components/AvatarUpload";
@@ -229,19 +228,6 @@ const AdminMembrosPage = () => {
   const { data: sessions } = useSessionCatalog();
   const { mode, monthKey } = useAdminFilter();
   const queryClient = useQueryClient();
-  const { data: memberNotes = [], isLoading: notesLoading } = useQuery({
-    queryKey: [...MEMBER_NOTES_KEY, "all"],
-    queryFn: fetchAllMemberNotes,
-  });
-  const notesByMember = useMemo(() => {
-    const map = new Map<string, MemberAdminNote[]>();
-    for (const note of memberNotes) {
-      const list = map.get(note.profile_id);
-      if (list) list.push(note);
-      else map.set(note.profile_id, [note]);
-    }
-    return map;
-  }, [memberNotes]);
   const [searchParams] = useSearchParams();
   const [search, setSearch] = useState("");
   const [expandedId, setExpandedId] = useState<string | null>(null);
@@ -1341,22 +1327,15 @@ const AdminMembrosPage = () => {
                     </div>
                   </td>
                 </tr>
-                <tr className="border-b border-border">
-                  <td colSpan={colSpan} className="p-0">
-                    <div className="max-w-md min-w-0 overflow-hidden px-4 py-2">
-                      <AdminMemberNote
-                        memberId={member.id}
-                        notes={notesByMember.get(member.id) ?? []}
-                        notesLoading={notesLoading}
-                      />
-                    </div>
-                    {isExpanded && (
-                      <div className="px-4 pb-5 pt-2 border-t border-border">
+                {isExpanded && (
+                  <tr className="border-b border-border">
+                    <td colSpan={colSpan} className="p-0">
+                      <div className="px-4 pb-5 pt-2">
                         {renderExpanded(member)}
                       </div>
-                    )}
-                  </td>
-                </tr>
+                    </td>
+                  </tr>
+                )}
               </Fragment>
             );
           })}
@@ -1413,11 +1392,6 @@ const AdminMembrosPage = () => {
                   <ProgressBar value={member.total_completed} max={12} tone={isComplete ? "success" : "brand"} className="flex-1 min-w-[120px]" label={`${member.total_completed} de 12 sessões`} />
                   {renderActions(member)}
                 </div>
-                <AdminMemberNote
-                  memberId={member.id}
-                  notes={notesByMember.get(member.id) ?? []}
-                  notesLoading={notesLoading}
-                />
                 {renderExpanded(member)}
               </div>
             )}
