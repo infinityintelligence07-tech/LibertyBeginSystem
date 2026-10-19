@@ -1058,6 +1058,7 @@ export type Database = {
           instagram_personal: string | null
           is_active: boolean
           is_ranking_featured: boolean
+          journey_restart_on: string | null
           leaders_count: number | null
           main_pain: string | null
           marital_status: string | null
@@ -1111,6 +1112,7 @@ export type Database = {
           instagram_personal?: string | null
           is_active?: boolean
           is_ranking_featured?: boolean
+          journey_restart_on?: string | null
           leaders_count?: number | null
           main_pain?: string | null
           marital_status?: string | null
@@ -1164,6 +1166,7 @@ export type Database = {
           instagram_personal?: string | null
           is_active?: boolean
           is_ranking_featured?: boolean
+          journey_restart_on?: string | null
           leaders_count?: number | null
           main_pain?: string | null
           marital_status?: string | null

@@ -259,20 +259,29 @@ const AgendaOverviewPage = () => {
     [previewMode, bookings, demoBookings]
   );
 
+  const journeyRestartOn = profile?.journey_restart_on ?? null;
+  const cycleBookings = useMemo(
+    () =>
+      journeyRestartOn && !previewMode
+        ? effectiveBookings.filter((b) => b.scheduled_date >= journeyRestartOn)
+        : effectiveBookings,
+    [effectiveBookings, journeyRestartOn, previewMode]
+  );
+
   const progress = useMemo(
-    () => buildSessionProgress(sessions, effectiveBookings),
-    [sessions, effectiveBookings]
+    () => buildSessionProgress(sessions, cycleBookings),
+    [sessions, cycleBookings]
   );
   const { journeySessions, statusMap: sessionStatusMap, scheduledCount, availableCount } = progress;
 
   // Sessões que passaram do horário e o mentor ainda não confirmou (ocupam a vaga, não contam como realizadas).
   const pendingConfirmationCount = useMemo(
-    () => effectiveBookings.filter((b) => getEffectiveBookingStatus(b) === "pending_confirmation").length,
-    [effectiveBookings]
+    () => cycleBookings.filter((b) => getEffectiveBookingStatus(b) === "pending_confirmation").length,
+    [cycleBookings]
   );
 
   // Regra do Mapeamento do Negócio: só pode ser agendado até a 3ª sessão realizada.
-  const kickoffAllowed = useMemo(() => canScheduleKickoff(sessions, effectiveBookings), [sessions, effectiveBookings]);
+  const kickoffAllowed = useMemo(() => canScheduleKickoff(sessions, cycleBookings), [sessions, cycleBookings]);
   const sessionMap = useMemo(() => new Map(sessions.map((s) => [s.id, s])), [sessions]);
   const mentorMap = useMemo(() => {
     const m = new Map(mentorProfiles.map((p) => [p.id, p.full_name]));

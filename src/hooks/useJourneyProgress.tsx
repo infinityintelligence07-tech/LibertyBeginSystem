@@ -103,7 +103,15 @@ export const useJourneyProgress = () => {
   });
 
   const realSessions = sessionsQuery.data ?? EMPTY_SESSIONS;
-  const realBookings = bookingsQuery.data ?? EMPTY_BOOKINGS;
+  const journeyRestartOn = profile?.journey_restart_on ?? null;
+  const fetchedBookings = bookingsQuery.data ?? EMPTY_BOOKINGS;
+  const realBookings = useMemo(
+    () =>
+      journeyRestartOn
+        ? fetchedBookings.filter((booking) => booking.scheduled_date >= journeyRestartOn)
+        : fetchedBookings,
+    [fetchedBookings, journeyRestartOn],
+  );
 
   const demoBookings = useMemo<JourneyBooking[]>(
     () => (demoEnabled && profileId ? demoBookingsForMember(profileId) : []),
