@@ -12,6 +12,8 @@ import {
 } from "lucide-react";
 import { PENDING_CONFIRMATION_HINT } from "@/lib/bookingStatus";
 import { MemberSessionEditor } from "@/components/MemberSessionEditor";
+import { AdminMemberNote } from "@/components/AdminMemberNote";
+import { MemberRescheduleHistory } from "@/components/MemberRescheduleHistory";
 import { LibertyMark } from "@/components/LibertyMark";
 import { UserAvatar } from "@/components/UserAvatar";
 import { AvatarUpload } from "@/components/AvatarUpload";
@@ -1142,6 +1144,11 @@ const AdminMembrosPage = () => {
           </div>
         ))}
       </dl>
+
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 items-start">
+        <AdminMemberNote memberId={member.id} />
+        <MemberRescheduleHistory memberId={member.id} canWrite />
+      </div>
 
       {(member.pending_confirmation_sessions?.length ?? 0) > 0 && (
         <div className="space-y-2">
