@@ -35,6 +35,7 @@ import { useAuth } from "@/hooks/useAuth";
 import { bookingRequiresReport, getEffectiveBookingStatus, isBookingPast } from "@/lib/bookingStatus";
 import { mentorAiReportEnabled } from "@/lib/mentorAiReport";
 import { StudentTools } from "@/components/StudentTools";
+import { MappingPdfAttach } from "@/components/MappingPdfAttach";
 import { SessionDeliverableDialog } from "@/components/SessionDeliverableDialog";
 import {
   invalidateMentorBookingQueries,
@@ -905,6 +906,18 @@ const MentorRelatorioPage = () => {
         </section>
 
         {/* Ferramentas anexadas a esta sessão */}
+        {libertyProfile?.id && bookingId && sessionInfo?.is_kickoff && (
+          <MappingPdfAttach
+            libertyId={libertyProfile.id}
+            bookingId={bookingId}
+            memberName={libertyProfile.full_name || "Aluno"}
+            companyName={libertyProfile.company_name}
+            mentorName={profile?.full_name}
+            sessionDate={booking?.scheduled_date}
+            toolsBasePath={layoutRole === "admin" ? "/admin/ferramentas" : "/mentor/ferramentas"}
+          />
+        )}
+
         {libertyProfile?.id && bookingId && (
           <div>
             <StudentTools libertyId={libertyProfile.id} bookingId={bookingId} />

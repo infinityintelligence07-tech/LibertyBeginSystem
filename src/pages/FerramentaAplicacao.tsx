@@ -3,7 +3,9 @@ import { useLocation, useNavigate, useParams } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
-import { FileQuestion } from "lucide-react";
+import { Download, FileQuestion, Loader2 } from "lucide-react";
+import { useAuth } from "@/hooks/useAuth";
+import { diagnosticPdfFileName, downloadBlob, generateDiagnosticPdf } from "@/lib/diagnosticPdf";
 import { AppLayout } from "@/components/AppLayout";
 import { Button } from "@/components/ui/button";
 import { EmptyState, LoadingState, PageContainer } from "@/components/ds";
@@ -19,6 +21,8 @@ const FerramentaAplicacaoPage = ({ role = "mentor" }: { role?: "mentor" | "admin
   const [answers, setAnswers] = useState<Answers>({});
   const [saving, setSaving] = useState(false);
   const [dirty, setDirty] = useState(false);
+  const [downloading, setDownloading] = useState(false);
+  const { profile } = useAuth();
   const loaded = useRef(false);
   const answersRef = useRef<Answers>({});
   answersRef.current = answers;
@@ -123,6 +127,26 @@ const FerramentaAplicacaoPage = ({ role = "mentor" }: { role?: "mentor" | "admin
 
   const isFinal = application.phase === "final";
 
+  const downloadPdf = async () => {
+    setDownloading(true);
+    try {
+      const memberName = member?.full_name || "Aluno";
+      const blob = await generateDiagnosticPdf({
+        memberName,
+        companyName: member?.company_name,
+        mentorName: profile?.full_name,
+        date: application.completed_at || application.updated_at,
+        phaseLabel: isFinal ? "Diagnóstico final" : "Diagnóstico inicial",
+        answers: answersRef.current,
+      });
+      downloadBlob(blob, diagnosticPdfFileName(memberName));
+    } catch {
+      toast.error("Não foi possível gerar o PDF");
+    } finally {
+      setDownloading(false);
+    }
+  };
+
   return (
     <ToolWizard
       title={`Mapeamento do Negócio · ${shortName(member?.full_name || "Aluno")}`}
@@ -142,6 +166,12 @@ const FerramentaAplicacaoPage = ({ role = "mentor" }: { role?: "mentor" | "admin
       }}
       onFinish={() => persist({ complete: true, silent: true })}
       onExit={() => navigate(backPath)}
+      resultAction={
+        <Button variant="outline" size="lg" className="w-full" onClick={downloadPdf} disabled={downloading}>
+          {downloading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
+          Baixar PDF do Mapeamento
+        </Button>
+      }
     />
   );
 };

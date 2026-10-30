@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { TrailPath } from "@/components/tools/TrailPath";
 import { DiagnosticRadar } from "@/components/tools/DiagnosticRadar";
@@ -104,6 +104,7 @@ interface Props {
   startAtTrail?: boolean;
   saving?: boolean;
   onSaveStep?: () => void;
+  resultAction?: ReactNode;
 }
 
 export const ToolWizard = ({
@@ -120,6 +121,7 @@ export const ToolWizard = ({
   startAtTrail = false,
   saving = false,
   onSaveStep,
+  resultAction,
 }: Props) => {
   const { theme, toggleTheme } = useTheme();
   const [view, setView] = useState<View>(startAtResult ? "result" : startAtTrail ? "trail" : "cover");
@@ -579,6 +581,8 @@ export const ToolWizard = ({
                 </div>
                 <DiagnosticRadar scores={scores} label={resultLabel} />
               </SectionCard>
+
+              {resultAction}
 
               <Button size="lg" className="w-full" onClick={() => { setView("map"); window.scrollTo({ top: 0 }); }}>
                 Próxima etapa <ArrowRight className="h-4 w-4" aria-hidden />

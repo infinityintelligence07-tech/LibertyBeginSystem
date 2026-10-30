@@ -199,24 +199,36 @@ const MentorSessoesPage = () => {
     [bookings, monthStartStr, monthEndStr],
   );
 
+  const byDateAsc = (a: BookingRow, b: BookingRow) =>
+    `${a.scheduled_date} ${a.start_time ?? ""}`.localeCompare(`${b.scheduled_date} ${b.start_time ?? ""}`);
+  const upcomingBookings = useMemo(
+    () => bookings.filter(isFutureScheduledBooking).sort(byDateAsc),
+    [bookings],
+  );
+  const pendingBookings = useMemo(
+    () =>
+      bookings
+        .filter((b) => {
+          const s = getEffectiveBookingStatus(b);
+          return s === "pending_approval" || s === "pending_confirmation";
+        })
+        .sort(byDateAsc),
+    [bookings],
+  );
+  const monthless = activeTab === "upcoming" || activeTab === "pending";
+
   const filtered = useMemo(() => {
-    if (activeTab === "upcoming") return monthBookings.filter(isFutureScheduledBooking);
-    if (activeTab === "pending") return monthBookings.filter((b) => {
-      const s = getEffectiveBookingStatus(b);
-      return s === "pending_approval" || s === "pending_confirmation";
-    });
+    if (activeTab === "upcoming") return upcomingBookings;
+    if (activeTab === "pending") return pendingBookings;
     if (activeTab === "completed") return sortByScheduledDateDesc(monthBookings.filter(isRealizedSessionBooking));
     if (activeTab === "not_realized") return monthBookings.filter((b) => getEffectiveBookingStatus(b) === "not_realized");
     if (activeTab === "cancelled") return monthBookings.filter((b) => getEffectiveBookingStatus(b) === "cancelled");
     return monthBookings;
-  }, [monthBookings, activeTab]);
+  }, [monthBookings, activeTab, upcomingBookings, pendingBookings]);
 
   const completedCount = monthBookings.filter(isRealizedSessionBooking).length;
-  const scheduledCount = monthBookings.filter(isFutureScheduledBooking).length;
-  const pendingCount = monthBookings.filter((b) => {
-    const s = getEffectiveBookingStatus(b);
-    return s === "pending_approval" || s === "pending_confirmation";
-  }).length;
+  const scheduledCount = upcomingBookings.length;
+  const pendingCount = pendingBookings.length;
   const notRealizedCount = monthBookings.filter((b) => getEffectiveBookingStatus(b) === "not_realized").length;
   const cancelledCount = monthBookings.filter((b) => getEffectiveBookingStatus(b) === "cancelled").length;
 
@@ -284,7 +296,12 @@ const MentorSessoesPage = () => {
     await invalidateMentorBookingQueries(queryClient);
   };
 
-  const emptyCopy = { title: "Nenhuma sessão neste período", description: "Tente avançar para o próximo mês ou trocar o filtro acima." };
+  const emptyCopy = monthless
+    ? {
+        title: activeTab === "upcoming" ? "Nenhuma sessão agendada" : "Nada aguardando você",
+        description: activeTab === "upcoming" ? "Quando um aluno agendar com você, a sessão aparece aqui." : "Pedidos e sessões a confirmar aparecem aqui.",
+      }
+    : { title: "Nenhuma sessão neste período", description: "Tente avançar para o próximo mês ou trocar o filtro acima." };
 
   const detailBooking = detailBookingId ? bookings.find((b) => b.id === detailBookingId) ?? null : null;
   const memberNameOf = (b: BookingRow) => shortName((b.liberty_id ? libertyMap[b.liberty_id] : b.guest_name) || "Membro");
@@ -308,7 +325,7 @@ const MentorSessoesPage = () => {
           <PageHeader
             title="Minha agenda"
             description="Acompanhe e feche suas sessões de mentoria"
-            actions={
+            actions={monthless ? undefined : (
               <div className="flex items-center gap-1">
                 <IconButton aria-label="Mês anterior" size="sm" variant="outline" onClick={() => setCurrentMonth(subMonths(currentMonth, 1))}>
                   <ChevronLeft className="h-4 w-4" />
@@ -320,7 +337,7 @@ const MentorSessoesPage = () => {
                   <ChevronRight className="h-4 w-4" />
                 </IconButton>
               </div>
-            }
+            )}
           />
         </div>
 
