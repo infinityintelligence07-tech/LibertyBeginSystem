@@ -139,6 +139,20 @@ const MentorRelatorioPage = () => {
     enabled: !!booking?.liberty_id,
   });
 
+  const { data: savedTasks = [] } = useQuery({
+    queryKey: ["report-session-tasks", bookingId],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("session_tasks")
+        .select("id, description")
+        .eq("booking_id", bookingId!)
+        .order("created_at");
+      if (error) throw error;
+      return (data || []) as { id: string; description: string }[];
+    },
+    enabled: !!bookingId,
+  });
+
   const { data: sessionInfo } = useQuery({
     queryKey: ["session-info", booking?.session_id],
     queryFn: async () => {
@@ -423,13 +437,25 @@ const MentorRelatorioPage = () => {
   const sessionEnded = !!booking && isBookingPast(booking);
   const requiresReport = !!booking && bookingRequiresReport(booking);
   const effectiveStatus = booking ? getEffectiveBookingStatus(booking, { hasReport: !!existingReport }) : null;
-  const canSave = summary.trim().length > 0 && sessionEnded && canEdit;
+  const approvedTaskCount = suggestions.filter((s) => s.approved && s.text.trim()).length;
+  const missingFields = requiresReport
+    ? [
+        !summary.trim() && "Resumo da sessão",
+        !delivered.trim() && "O que foi entregue",
+        !nextSteps.trim() && "Próximos passos",
+        savedTasks.length + approvedTaskCount === 0 && "Tarefas para o aluno",
+      ].filter((label): label is string => Boolean(label))
+    : summary.trim()
+      ? []
+      : ["Resumo da sessão"];
+  const canSave = missingFields.length === 0 && sessionEnded && canEdit;
 
   const saveMutation = useMutation({
     mutationFn: async () => {
       if (!bookingId || !booking) throw new Error("Sessão não encontrada.");
       if (!canEdit) throw new Error("Você não tem permissão para editar o relatório desta sessão.");
       if (!isBookingPast(booking)) throw new Error("COMPLETION_BEFORE_SESSION_END");
+      if (missingFields.length) throw new Error(`Preencha: ${missingFields.join(", ")}.`);
       const reportData = {
         booking_id: bookingId,
         summary: summary.trim(),
@@ -476,6 +502,7 @@ const MentorRelatorioPage = () => {
       await invalidateMentorBookingQueries(queryClient);
       queryClient.invalidateQueries({ queryKey: ["booking-report", bookingId] });
       queryClient.invalidateQueries({ queryKey: ["booking-detail", bookingId] });
+      queryClient.invalidateQueries({ queryKey: ["report-session-tasks", bookingId] });
     },
     onError: (error: { message?: string; details?: string }) =>
       toast.error(translateBookingError(error, "Erro ao salvar relatório.")),
@@ -550,12 +577,14 @@ const MentorRelatorioPage = () => {
     );
   }
 
-  const approvedCount = suggestions.filter((s) => s.approved && s.text.trim()).length;
+  const approvedCount = approvedTaskCount;
   const saveHint = !sessionEnded
     ? "O relatório só pode ser enviado depois do horário da sessão."
     : !canEdit
       ? "Somente o mentor responsável pode editar."
-      : undefined;
+      : missingFields.length
+        ? `Falta preencher: ${missingFields.join(", ")}.`
+        : undefined;
 
   return (
     <AppLayout role={layoutRole}>
@@ -795,9 +824,9 @@ const MentorRelatorioPage = () => {
         <section>
           <SectionCard className="space-y-4">
             <SectionHeader as="h3" title="Relatório" description="O que o aluno vai ler." />
-            <TextAreaField label="Resumo" required value={summary} onChange={(e) => setSummary(e.target.value)} placeholder="Panorama da sessão..." className="min-h-[120px] resize-y" />
-            <TextAreaField label="O que foi entregue" value={delivered} onChange={(e) => setDelivered(e.target.value)} placeholder="O que foi efetivamente trabalhado..." className="min-h-[96px] resize-y" />
-            <TextAreaField label="Próximos passos" value={nextSteps} onChange={(e) => setNextSteps(e.target.value)} placeholder="Encaminhamentos combinados..." className="min-h-[96px] resize-y" />
+            <TextAreaField label="Resumo da sessão" required value={summary} onChange={(e) => setSummary(e.target.value)} placeholder="O que foi abordado na mentoria..." className="min-h-[120px] resize-y" />
+            <TextAreaField label="O que foi entregue" required={requiresReport} value={delivered} onChange={(e) => setDelivered(e.target.value)} placeholder="Orientações, ferramentas e direcionamentos..." className="min-h-[96px] resize-y" />
+            <TextAreaField label="Próximos passos" required={requiresReport} value={nextSteps} onChange={(e) => setNextSteps(e.target.value)} placeholder="Ações combinadas para a continuidade..." className="min-h-[96px] resize-y" />
           </SectionCard>
         </section>
 
@@ -832,12 +861,14 @@ const MentorRelatorioPage = () => {
           <SectionCard className="space-y-4">
             <SectionHeader
               as="h3"
-              title="Tarefas para o aluno"
+              title={requiresReport ? "Tarefas para o aluno *" : "Tarefas para o aluno"}
               description={
                 suggestions.length === 0
                   ? aiReportOn
                     ? "As sugestões da IA aparecem aqui depois de organizar a transcrição. Você também pode adicionar tarefas manualmente."
-                    : "Adicione as tarefas que o aluno deve fazer até a próxima sessão."
+                    : requiresReport && savedTasks.length === 0
+                      ? "Adicione pelo menos uma tarefa que o aluno deve fazer até a próxima sessão."
+                      : "Adicione as tarefas que o aluno deve fazer até a próxima sessão."
                   : `${approvedCount} de ${suggestions.length} serão enviadas ao checklist do aluno ao salvar. Toque na caixa para aprovar ou rejeitar.`
               }
               actions={
@@ -850,6 +881,19 @@ const MentorRelatorioPage = () => {
                 </Button>
               }
             />
+            {savedTasks.length > 0 && (
+              <div className="space-y-1">
+                <p className="text-xs font-medium text-muted-foreground">Já enviadas ao aluno</p>
+                <ul className="space-y-1">
+                  {savedTasks.map((task) => (
+                    <li key={task.id} className="flex items-start gap-2 text-sm text-foreground">
+                      <Check className="h-4 w-4 mt-0.5 shrink-0 text-muted-foreground" aria-hidden />
+                      <span className="min-w-0 break-words">{task.description}</span>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
             {suggestions.length > 0 && (
               <ul className="divide-y divide-border -mx-4 sm:-mx-6">
                 {suggestions.map((s) => (
@@ -964,7 +1008,10 @@ const MentorRelatorioPage = () => {
               <ul className="space-y-2 text-sm">
                 {[
                   { ok: sessionEnded, label: "Horário da sessão encerrado" },
-                  { ok: summary.trim().length > 0, label: "Resumo preenchido" },
+                  { ok: summary.trim().length > 0, label: "Resumo da sessão" },
+                  { ok: delivered.trim().length > 0, label: "O que foi entregue" },
+                  { ok: nextSteps.trim().length > 0, label: "Próximos passos" },
+                  { ok: savedTasks.length + approvedTaskCount > 0, label: "Pelo menos uma tarefa para o aluno" },
                   { ok: hasTool, label: "Ferramenta anexada (recomendado)" },
                 ].map((item) => (
                   <li key={item.label} className={cn("flex items-center gap-2", item.ok ? "text-foreground" : "text-muted-foreground")}>
@@ -984,7 +1031,7 @@ const MentorRelatorioPage = () => {
                   : "O botão de realizada libera depois do horário de término."
                 : !sessionEnded
                   ? "O relatório só pode ser enviado depois do horário da sessão."
-                  : "A sessão é marcada como realizada ao salvar o relatório com o resumo preenchido. A ferramenta é recomendada, mas não obrigatória."}
+                  : "A sessão é marcada como realizada ao salvar o relatório com resumo, entregas, próximos passos e tarefas. A ferramenta é recomendada, mas não obrigatória."}
             </p>
           </SectionCard>
         </section>

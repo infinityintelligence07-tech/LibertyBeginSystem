@@ -249,6 +249,14 @@ const AdminMembroDetalhesPage = () => {
   const pendingConfirmationCount = memberBookings.filter((b) => isPendingConfirmationBooking(b) && isJourneyBooking(b)).length;
   const lastSession = completedBookings.find((b) => memberReports[b.id]?.summary) || completedBookings[0];
   const lastReport = lastSession ? memberReports[lastSession.id] : null;
+  const npsSessionOptions = [...completedBookings]
+    .sort((a, b) => `${b.scheduled_date} ${b.start_time ?? ""}`.localeCompare(`${a.scheduled_date} ${a.start_time ?? ""}`))
+    .map((b) => ({
+      bookingId: b.id,
+      sessionName: sessionNames[b.session_id] || b.sessions?.name || "Sessão",
+      mentorName: (b.mentor_id && mentorNames[b.mentor_id]) || "Mentor",
+      date: b.scheduled_date,
+    }));
   const nextSession = useMemo(() => {
     const now = Date.now();
     const upcoming = memberBookings
@@ -586,8 +594,7 @@ const AdminMembroDetalhesPage = () => {
                     <SendNpsButton
                       libertyProfileId={profile.id}
                       libertyName={profile.full_name}
-                      sessionName={lastSession ? sessionNames[lastSession.session_id] : null}
-                      bookingId={lastSession?.id ?? null}
+                      sessions={npsSessionOptions}
                       phone={(profile as any)?.phone ?? null}
                     />
                   )}

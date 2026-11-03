@@ -983,13 +983,25 @@ const AdminAgendaPage = () => {
       .not("status", "in", "(cancelled,not_realized)");
     if (sameDayErr) console.warn("Conflito: não foi possível checar a agenda do mentor", sameDayErr);
 
-    const newStart = manualTime;
-    const newEnd = endTime;
+    const toMin = (t: string) => {
+      const [h, m] = t.slice(0, 5).split(":").map(Number);
+      return h * 60 + (m || 0);
+    };
+    const occupiedUntil = (start: string, end: string | null) =>
+      Math.max(end ? toMin(end) : 0, toMin(start) + 120);
+    const newStart = toMin(manualTime);
+    const newEnd = occupiedUntil(manualTime, endTime);
     const overlap = (sameDay || []).find((b) => {
-      const bs = (b.start_time || "").slice(0, 5);
-      const be = (b.end_time || "").slice(0, 5);
-      return bs < newEnd && newStart < be;
+      if (!b.start_time) return false;
+      return toMin(b.start_time) < newEnd && newStart < occupiedUntil(b.start_time, b.end_time);
     });
+    if (overlap && !isRetroactive) {
+      setSubmittingBook(false);
+      setManualConflict(
+        `Este mentor já tem uma sessão às ${(overlap.start_time || "").slice(0, 5)} neste dia. Cada sessão ocupa pelo menos 2 horas da agenda, então escolha outro horário ou outro mentor.`
+      );
+      return;
+    }
     if (overlap && !manualConflict) {
       setSubmittingBook(false);
       setManualConflict(
@@ -2423,7 +2435,7 @@ const AdminAgendaPage = () => {
             <Button variant="ghost" onClick={() => setShowManualModal(false)} disabled={submittingBook}>Cancelar</Button>
             <Button
               onClick={handleManualBook}
-              variant={manualConflict ? "destructive" : "default"}
+              variant={manualConflict && manualStatus === "completed" ? "destructive" : "default"}
               disabled={
                 submittingBook ||
                 (manualIsGuest
@@ -2435,7 +2447,7 @@ const AdminAgendaPage = () => {
                 !manualDate
               }
             >
-              {submittingBook ? "Agendando" : manualConflict ? "Forçar mesmo assim" : "Criar agendamento"}
+              {submittingBook ? "Agendando" : manualConflict && manualStatus === "completed" ? "Forçar mesmo assim" : "Criar agendamento"}
             </Button>
           </>
         }

@@ -1714,6 +1714,15 @@ export type Database = {
           full_name: string
         }[]
       }
+      mentor_busy_slots: {
+        Args: { _from: string; _to: string }
+        Returns: {
+          mentor_id: string
+          scheduled_date: string
+          start_time: string
+          end_time: string | null
+        }[]
+      }
       register_student_unavailability: {
         Args: {
           _profile_id: string

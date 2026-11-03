@@ -52,6 +52,7 @@ export const MEMBER_BOOKING_QUERY_PREFIXES = [
   "overview-bookings",
   "overview-availability-all",
   "mentor-availability-all",
+  "mentor-busy-slots",
   "liberty-availability-count",
   "pending-nps",
 ] as const;

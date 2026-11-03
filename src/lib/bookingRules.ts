@@ -35,8 +35,13 @@ export const isProtectedColumnError = (error: BackendError) => {
  * (triggers `enforce_member_booking_rules`, `prevent_premature_completion`, índices únicos, RLS).
  * Devolve `null` quando o erro não é de regra (o chamador decide o fallback).
  */
+export const isMentorTimeConflictError = (error: BackendError) =>
+  errorText(error).includes("MENTOR_TIME_CONFLICT");
+
 export const bookingRuleErrorMessage = (error: BackendError) => {
   if (isKickoffNotAllowedError(error)) return KICKOFF_NOT_ALLOWED_MESSAGE;
+  if (isMentorTimeConflictError(error)) return "O mentor já tem uma sessão nesse horário. Cada sessão ocupa pelo menos 2 horas da agenda dele.";
+  if (errorText(error).includes("REPORT_INCOMPLETE")) return "Preencha resumo, o que foi entregue, próximos passos e ao menos uma tarefa antes de concluir a sessão.";
   if (isJourneyBookingLimitError(error)) return "Este membro já utilizou todas as sessões da jornada.";
   if (isCompletionBeforeEndError(error)) return "A sessão só pode ser marcada como realizada depois do horário de término.";
   if (isMonthlyBookingLimitError(error)) return "Este membro já possui duas sessões contabilizadas neste mês.";

@@ -79,6 +79,32 @@ const endTimeFor = (startTime: string, minutes: number) => {
   return `${String(Math.floor(total / 60) % 24).padStart(2, "0")}:${String(total % 60).padStart(2, "0")}`;
 };
 
+/** Cada sessão ocupa a agenda do mentor por pelo menos 2h, mesmo que dure menos. */
+const MIN_BLOCK_MINUTES = 120;
+
+type BusySlot = { mentor_id: string; scheduled_date: string; start_time: string; end_time: string | null };
+
+const blockEnd = (start: string, end: string | null) =>
+  Math.max(end ? toMinutes(end) : 0, toMinutes(start) + MIN_BLOCK_MINUTES);
+
+const isMentorBusy = (
+  busy: BusySlot[],
+  mentorId: string,
+  date: string,
+  startTime: string,
+  minutes: number,
+) => {
+  const start = toMinutes(startTime);
+  const end = start + Math.max(minutes, MIN_BLOCK_MINUTES);
+  return busy.some(
+    (b) =>
+      b.mentor_id === mentorId &&
+      b.scheduled_date === date &&
+      start < blockEnd(b.start_time, b.end_time) &&
+      toMinutes(b.start_time) < end,
+  );
+};
+
 /** Um slot serve a sessão se tiver tamanho compatível: >= 3h só para o Mapeamento; < 3h para as demais. */
 const slotFitsSession = (
   slot: { start_time: string; end_time: string },
@@ -198,6 +224,18 @@ const AgendarSessaoPage = () => {
     },
   });
 
+  // Sessões já marcadas dos mentores (sem dados do aluno), para não oferecer horário sobreposto.
+  const { data: busySlots = [] } = useQuery({
+    queryKey: ["mentor-busy-slots"],
+    queryFn: async () => {
+      const from = format(new Date(), "yyyy-MM-dd");
+      const to = format(addDays(new Date(), 60), "yyyy-MM-dd");
+      const { data, error } = await supabase.rpc("mentor_busy_slots", { _from: from, _to: to });
+      if (error) throw error;
+      return (data || []) as BusySlot[];
+    },
+  });
+
   // Generate available dates from mentor availability for the next 30 days
   const availabilityForSession = useMemo(() => {
     if (!selectedSessionId) return [];
@@ -205,8 +243,11 @@ const AgendarSessaoPage = () => {
 
     // Um slot só serve esta sessão se tiver tamanho compatível (2h vs 3h do Mapeamento).
     const selectedSession = sessions.find((s) => s.id === selectedSessionId);
+    const minutes = sessionMinutes(selectedSession);
 
     const slots: { date: Date; startTime: string; endTime: string }[] = [];
+    const isFree = (mentorId: string, date: Date, startTime: string) =>
+      !isMentorBusy(busySlots, mentorId, format(date, "yyyy-MM-dd"), startTime, minutes);
     const now = new Date();
     // Horários de hoje que já passaram não podem ser oferecidos (comparação no fuso da plataforma).
     const isStillAhead = (date: Date, startTime: string) => {
@@ -222,7 +263,7 @@ const AgendarSessaoPage = () => {
 
       if (av.specific_date) {
         const d = new Date(av.specific_date + "T00:00:00");
-        if ((!isBefore(d, now) || isToday(d)) && isStillAhead(d, startTime)) {
+        if ((!isBefore(d, now) || isToday(d)) && isStillAhead(d, startTime) && isFree(av.mentor_id, d, startTime)) {
           slots.push({ date: d, startTime, endTime });
         }
       } else if (av.is_recurring) {
@@ -232,7 +273,12 @@ const AgendarSessaoPage = () => {
           for (let d = 0; d < 7; d++) {
             const candidate = addDays(baseDate, d);
             const dow = getDay(candidate); // 0=Sun, 1=Mon...
-            if (dow === av.day_of_week && (!isBefore(candidate, now) || isToday(candidate)) && isStillAhead(candidate, startTime)) {
+            if (
+              dow === av.day_of_week &&
+              (!isBefore(candidate, now) || isToday(candidate)) &&
+              isStillAhead(candidate, startTime) &&
+              isFree(av.mentor_id, candidate, startTime)
+            ) {
               slots.push({ date: candidate, startTime, endTime });
             }
           }
@@ -241,7 +287,7 @@ const AgendarSessaoPage = () => {
     });
 
     return slots;
-  }, [selectedSessionId, allAvailability, selectedSessionMentorIds, sessions]);
+  }, [selectedSessionId, allAvailability, selectedSessionMentorIds, sessions, busySlots]);
 
   // Auto-select session from URL param (sessionId=uuid), and optionally date/time (skip to step 4).
   // Roda uma única vez, depois que sessões e agendamentos carregaram (senão a regra do
@@ -409,6 +455,7 @@ const AgendarSessaoPage = () => {
       if (!selectedSessionMentorIds.has(av.mentor_id)) return false;
       if (!slotFitsSession(av, sessionToBook)) return false;
       if (av.start_time.slice(0, 5) !== selectedSlot.startTime) return false;
+      if (isMentorBusy(busySlots, av.mentor_id, dateStr, selectedSlot.startTime, sessionMinutes(sessionToBook))) return false;
       if (av.specific_date === dateStr) return true;
       return Boolean(av.is_recurring) && getDay(selectedDate) === av.day_of_week;
     });
@@ -456,8 +503,8 @@ const AgendarSessaoPage = () => {
         setStep(1);
       } else if (String(error.message || "").includes("RESCHEDULE_CREDITS_LOCKED")) {
         setShowRescheduleLock(true);
-      } else if (error.code === "23505") {
-        // Índice único de horário do mentor: alguém reservou esse horário primeiro.
+      } else if (error.code === "23505" || String(error.message || "").includes("MENTOR_TIME_CONFLICT")) {
+        // Horário do mentor já ocupado (mesmo início ou sobreposição): alguém reservou primeiro.
         toast.error("Esse horário acabou de ser reservado. Escolha outro horário.");
         setSelectedSlot(null);
         setStep(3);
