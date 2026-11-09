@@ -1,4 +1,4 @@
-import { forwardRef, useId, type InputHTMLAttributes, type ReactNode, type SelectHTMLAttributes, type TextareaHTMLAttributes } from "react";
+import { forwardRef, useId, type ChangeEvent, type InputHTMLAttributes, type ReactNode, type SelectHTMLAttributes, type TextareaHTMLAttributes } from "react";
 import { cn } from "@/lib/utils";
 
 interface FieldShellProps {
@@ -48,6 +48,17 @@ export const TextField = forwardRef<HTMLInputElement, TextFieldProps>(
   ({ label, hint, error, containerClassName, className, id, required, leading, trailing, ...props }, ref) => {
     const autoId = useId();
     const fieldId = id ?? autoId;
+    const isDate = props.type === "date";
+    const dateProps = isDate
+      ? {
+          min: props.min ?? "1900-01-01",
+          max: props.max ?? "2100-12-31",
+          onChange: (e: ChangeEvent<HTMLInputElement>) => {
+            if (/^\d{5,}-/.test(e.target.value)) return;
+            props.onChange?.(e);
+          },
+        }
+      : {};
     const input = (
       <input
         ref={ref}
@@ -56,6 +67,7 @@ export const TextField = forwardRef<HTMLInputElement, TextFieldProps>(
         aria-invalid={error ? true : undefined}
         className={cn("input-begin", leading && "pl-10", trailing && "pr-12", className)}
         {...props}
+        {...dateProps}
       />
     );
     const adorned = leading || trailing ? (

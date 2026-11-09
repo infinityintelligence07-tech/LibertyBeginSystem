@@ -37,7 +37,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { invokeEndMeeting, meetEntryUrl } from "@/lib/meetingWhatsApp";
 import { mentorAiReportEnabled } from "@/lib/mentorAiReport";
-import { format, startOfMonth, addMonths, subMonths, parseISO } from "date-fns";
+import { format, startOfMonth, addMonths, subMonths, parseISO, isValid } from "date-fns";
 import { ptBR } from "date-fns/locale";
 import { shortName } from "@/lib/formatName";
 import { useNavigate } from "react-router-dom";
@@ -413,6 +413,7 @@ const MentorDashboardPage = () => {
         if (!p || p.is_active === false || !p.program_end_date) return null;
         if (p.program_end_date < today) return null;
         const end = parseISO(p.program_end_date);
+        if (!isValid(end)) return null;
         const days = differenceInDays(end, now);
         if (days < 0 || days > 30) return null;
         return {
@@ -463,7 +464,8 @@ const MentorDashboardPage = () => {
         if (!current || b.scheduled_date < current) {
           nextIso.set(b.liberty_id, b.scheduled_date);
           const entry = byStudent.get(b.liberty_id);
-          if (entry) entry.nextDate = format(parseISO(b.scheduled_date), "dd/MM");
+          const next = parseISO(b.scheduled_date);
+          if (entry && isValid(next)) entry.nextDate = format(next, "dd/MM");
         }
       }
     });

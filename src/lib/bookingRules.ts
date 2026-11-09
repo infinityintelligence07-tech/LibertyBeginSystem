@@ -40,6 +40,7 @@ export const isMentorTimeConflictError = (error: BackendError) =>
 
 export const bookingRuleErrorMessage = (error: BackendError) => {
   if (isKickoffNotAllowedError(error)) return KICKOFF_NOT_ALLOWED_MESSAGE;
+  if (errorText(error).includes("_date_sane")) return "Data inválida. Confira o ano digitado.";
   if (isMentorTimeConflictError(error)) return "O mentor já tem uma sessão nesse horário. Cada sessão ocupa pelo menos 2 horas da agenda dele.";
   if (errorText(error).includes("REPORT_INCOMPLETE")) return "Preencha resumo, o que foi entregue, próximos passos e ao menos uma tarefa antes de concluir a sessão.";
   if (isJourneyBookingLimitError(error)) return "Este membro já utilizou todas as sessões da jornada.";
