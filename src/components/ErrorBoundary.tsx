@@ -4,6 +4,7 @@ import { Button } from "@/components/ui/button";
 import { Logo } from "@/components/Logo";
 import { PageContainer, SectionCard } from "@/components/ds";
 import { clearAppCaches, clearReloadLock } from "@/lib/appReload";
+import { reportClientError } from "@/lib/reportClientError";
 
 interface Props {
   children: ReactNode;
@@ -59,8 +60,9 @@ export class ErrorBoundary extends Component<Props, State> {
     return { error };
   }
 
-  componentDidCatch(error: Error, info: unknown) {
+  componentDidCatch(error: Error, info: { componentStack?: string | null }) {
     console.error("[ErrorBoundary]", error, info);
+    void reportClientError(error, info?.componentStack);
 
     const isTdz =
       /before initialization|Cannot access .+ before/i.test(error?.message ?? "") ||
@@ -114,6 +116,7 @@ export class ErrorBoundary extends Component<Props, State> {
 
     const stuck = Number(sessionStorage.getItem(RELOAD_COUNT) ?? 0) >= MAX_HARD_RELOADS;
     const detail = this.state.error?.message || "Erro inesperado";
+    const newVersion = this.state.error ? isChunkError(this.state.error) : false;
 
     return (
       <div className="min-h-[100dvh] bg-background flex items-center justify-center py-10">
@@ -123,20 +126,20 @@ export class ErrorBoundary extends Component<Props, State> {
             <RefreshCw className="mx-auto h-5 w-5 text-muted-foreground" aria-hidden />
             <div className="space-y-2">
               <h1 className="text-[22px] font-semibold text-foreground">
-                {stuck ? "Não foi possível carregar" : "Nova versão disponível"}
+                {stuck ? "Não foi possível carregar" : newVersion ? "Nova versão disponível" : "Algo deu errado nesta tela"}
               </h1>
               <p className="text-sm text-muted-foreground leading-relaxed">
                 {stuck
-                  ? "Limpe o cache ou abra em janela anônima. Se continuar, fale com o suporte."
-                  : "Atualize para carregar a versão nova (isso limpa o cache)."}
+                  ? "O erro já foi registrado para a equipe. Tente abrir em janela anônima ou sem extensões do navegador."
+                  : newVersion
+                    ? "Atualize para carregar a versão nova (isso limpa o cache)."
+                    : "O erro já foi registrado para a equipe corrigir. Tente recarregar."}
               </p>
-              {stuck && (
-                <p className="text-xs text-muted-foreground break-words font-mono">{detail}</p>
-              )}
+              <p className="text-xs text-muted-foreground break-words font-mono">{detail}</p>
             </div>
             <div className="flex flex-col gap-2">
               <Button type="button" size="lg" onClick={this.handleReload} className="w-full">
-                {stuck ? "Ir para o login (limpo)" : "Atualizar"}
+                {stuck ? "Ir para o login (limpo)" : newVersion ? "Atualizar" : "Recarregar"}
               </Button>
               {stuck && (
                 <Button type="button" size="lg" variant="outline" onClick={this.handleGoHome} className="w-full">
