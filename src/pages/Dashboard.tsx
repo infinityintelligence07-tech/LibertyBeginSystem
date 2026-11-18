@@ -12,6 +12,7 @@ import { ptBR } from "date-fns/locale";
 import { demoBookingsForMember, demoTasksForBookings, demoMentorProfiles, demoProfileFill } from "@/lib/demoForUser";
 import { getEffectiveBookingStatus, PENDING_CONFIRMATION_HINT, sortByScheduledDateAsc, todayPlatformDate } from "@/lib/bookingStatus";
 import { fetchMentorNames } from "@/lib/mentorNames";
+import { fetchFreeMentorAvailability } from "@/lib/mentorAvailability";
 import { UrgencyBookingCard } from "@/components/UrgencyBookingCard";
 import { PendingNpsCard } from "@/components/PendingNpsCard";
 import { MemberTimeline } from "@/components/MemberTimeline";
@@ -121,20 +122,20 @@ const DashboardPage = () => {
     queryKey: ["liberty-availability-count"],
     queryFn: async () => {
       // Data de hoje no fuso da plataforma (não no fuso do navegador).
-      const today = parseISO(todayPlatformDate());
-      const { data, error } = await supabase
-        .from("mentor_availability")
-        .select("specific_date, day_of_week, is_recurring, is_booked")
-        .eq("is_booked", false);
-      if (error) throw error;
-      if (!data) return 0;
+      const todayStr = todayPlatformDate();
+      const today = parseISO(todayStr + "T00:00:00");
+      const toStr = fmtDate(addDays(today, 20), "yyyy-MM-dd");
+      const data = await fetchFreeMentorAvailability({
+        fromDate: todayStr,
+        toDate: toStr,
+      });
       const days = new Set<string>();
       for (let i = 0; i < 21; i++) {
         const d = addDays(today, i);
         const dow = d.getDay();
         const ds = fmtDate(d, "yyyy-MM-dd");
         const has = data.some((a) =>
-          a.is_recurring ? a.day_of_week === dow : a.specific_date === ds
+          a.specific_date ? a.specific_date === ds : Boolean(a.is_recurring) && a.day_of_week === dow
         );
         if (has) days.add(ds);
       }

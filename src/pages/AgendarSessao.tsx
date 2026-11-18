@@ -23,6 +23,7 @@ import { Link, useSearchParams } from "react-router-dom";
 import { canScheduleKickoff, isJourneySession, KICKOFF_NOT_ALLOWED_MESSAGE } from "@/lib/sessionProgress";
 import { isMonthlyBookingLimitError, isJourneyBookingLimitError } from "@/lib/bookingRules";
 import { parsePlatformDateTime, PENDING_CONFIRMATION_HINT } from "@/lib/bookingStatus";
+import { fetchFreeMentorAvailability } from "@/lib/mentorAvailability";
 import { invalidateMemberBookingQueries, useJourneyProgress, type JourneySession } from "@/hooks/useJourneyProgress";
 import { invokeProvisionMeeting } from "@/lib/meetingWhatsApp";
 import { Button } from "@/components/ui/button";
@@ -211,16 +212,13 @@ const AgendarSessaoPage = () => {
     [mentorSessions, selectedSessionId]
   );
 
-  // ── Fetch mentor availability (real data) ──
+  // ── Fetch mentor availability (paginated past the 1000-row API cap) ──
   const { data: allAvailability = [] } = useQuery({
     queryKey: ["mentor-availability-all"],
     queryFn: async () => {
-      const { data, error } = await supabase
-        .from("mentor_availability")
-        .select("*")
-        .eq("is_booked", false);
-      if (error) throw error;
-      return data || [];
+      const from = format(new Date(), "yyyy-MM-dd");
+      const to = format(addDays(new Date(), 60), "yyyy-MM-dd");
+      return fetchFreeMentorAvailability({ fromDate: from, toDate: to });
     },
   });
 

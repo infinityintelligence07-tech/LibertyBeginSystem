@@ -15,6 +15,7 @@ import {
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
+import { fetchFreeMentorAvailability } from "@/lib/mentorAvailability";
 import {
   Callout,
   Chip,
@@ -352,12 +353,14 @@ const AgendaOverviewPage = () => {
     queryKey: ["overview-availability-all", relevantMentorIds.sort().join("|")],
     queryFn: async () => {
       if (relevantMentorIds.length === 0) return [];
-      const { data } = await supabase
-        .from("mentor_availability")
-        .select("id, mentor_id, day_of_week, start_time, end_time, specific_date, is_recurring, is_booked")
-        .eq("is_booked", false)
-        .in("mentor_id", relevantMentorIds);
-      return data || [];
+      const from = format(new Date(), "yyyy-MM-dd");
+      const to = format(addDays(new Date(), 60), "yyyy-MM-dd");
+      const data = await fetchFreeMentorAvailability({
+        fromDate: from,
+        toDate: to,
+        mentorIds: relevantMentorIds,
+      });
+      return data as AvailabilityRow[];
     },
     enabled: relevantMentorIds.length > 0,
   });

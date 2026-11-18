@@ -42,6 +42,7 @@ import {
   PENDING_CONFIRMATION_HINT,
 } from "@/lib/bookingStatus";
 import { bookingRuleErrorMessage } from "@/lib/bookingRules";
+import { fetchFreeMentorAvailability } from "@/lib/mentorAvailability";
 import { registerStudentUnavailability, rescheduleResultMessage } from "@/lib/rescheduleCredits";
 import { whatsappHref, copyText, invokeProvisionMeeting, friendlyMeetError, buildMeetingWhatsAppTexts, invokeEndMeeting, plainMeetUrl } from "@/lib/meetingWhatsApp";
 import { UserAvatar } from "@/components/UserAvatar";
@@ -589,29 +590,27 @@ const AdminAgendaPage = () => {
     [_bookings, demoAdminBks, demoEnabled]
   );
 
-  // Fetch ALL availability and expand within current range
+  // Free slots for the visible calendar window (paginated — past the 1000-row API cap).
   const { data: allAvailability = [] } = useQuery({
-    queryKey: ["agenda-all-availability"],
-    queryFn: async () => {
-      const { data, error } = await supabase
-        .from("mentor_availability")
-        .select("*")
-        .eq("is_booked", false);
-      if (error) throw error;
-      return data || [];
-    },
+    queryKey: ["agenda-all-availability", dateRange.start, dateRange.end],
+    queryFn: () =>
+      fetchFreeMentorAvailability({
+        fromDate: dateRange.start,
+        toDate: dateRange.end,
+      }),
+    enabled: Boolean(dateRange.start && dateRange.end),
   });
 
   // Expand availability for visible date range
   const expandedAvailability = useMemo(() => {
     if (!dateRange.start || !dateRange.end) return [];
-    const start = parseISO(dateRange.start);
-    const end = parseISO(dateRange.end);
+    const start = parseISO(dateRange.start + "T00:00:00");
+    const end = parseISO(dateRange.end + "T00:00:00");
     const result: SlotRef[] = [];
     allAvailability.forEach((av) => {
       if (av.specific_date) {
-        const d = parseISO(av.specific_date);
-        if (d >= start && d <= end) {
+        // Compare as calendar dates (YYYY-MM-DD) to avoid UTC parseISO off-by-one.
+        if (av.specific_date >= dateRange.start && av.specific_date <= dateRange.end) {
           result.push({ id: av.id, mentor_id: av.mentor_id, date: av.specific_date, start_time: av.start_time, end_time: av.end_time, is_recurring: false });
         }
       } else if (av.is_recurring) {
