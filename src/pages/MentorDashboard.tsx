@@ -50,6 +50,7 @@ import {
   getEffectiveBookingStatus,
   getMentorPendingAction,
   isFutureScheduledBooking,
+  isPendingConfirmationBooking,
   isRealizedSessionBooking,
   isSessionHappeningNow,
   isVisibleSessionBooking,
@@ -332,8 +333,11 @@ const MentorDashboardPage = () => {
     list.reduce((acc, b) => acc + feeOf(b), 0);
 
   const payable = (b: { payout_excluded?: boolean | null }) => b.payout_excluded !== true;
+  // Sessões que já passaram e aguardam confirmação continuam no previsto (mesma regra do Admin Financeiro).
+  // Sem isso o "Previsto no mês" cai R$ 300 (ou o valor da sessão) toda vez que o horário termina.
+  const pendingConfirm = bookingsAll.filter(isPendingConfirmationBooking);
   const earnedThisPeriod = sumFees(realized.filter(payable));
-  const projectedThisPeriod = sumFees([...realized, ...scheduled].filter(payable));
+  const projectedThisPeriod = sumFees([...realized, ...scheduled, ...pendingConfirm].filter(payable));
   const allTimeRealized = useMemo(() => allVisible.filter((b) => isRealizedSessionBooking(b) && payable(b)), [allVisible]);
   const totalEarnedAllTime = sumFees(allTimeRealized);
 
