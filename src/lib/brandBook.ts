@@ -36,19 +36,112 @@ export interface BrandBookData {
   plano: string[];
 }
 
-export const ARCHETYPES: { name: string; desc: string }[] = [
-  { name: "Inocente", desc: "Otimismo, simplicidade e confiança" },
-  { name: "Explorador", desc: "Liberdade, descoberta e autenticidade" },
-  { name: "Sábio", desc: "Conhecimento, clareza e verdade" },
-  { name: "Herói", desc: "Coragem, superação e conquista" },
-  { name: "Fora da lei", desc: "Ruptura, rebeldia e mudança" },
-  { name: "Mago", desc: "Transformação e realização de sonhos" },
-  { name: "Cara comum", desc: "Pertencimento, empatia e proximidade" },
-  { name: "Amante", desc: "Paixão, prazer e conexão" },
-  { name: "Bobo da corte", desc: "Leveza, humor e diversão" },
-  { name: "Cuidador", desc: "Proteção, acolhimento e serviço" },
-  { name: "Criador", desc: "Inovação, imaginação e expressão" },
-  { name: "Governante", desc: "Liderança, controle e excelência" },
+export interface Archetype {
+  name: string;
+  desc: string;
+  transmite: string;
+  voz: string;
+  exemplos: string;
+  cuidado: string;
+}
+
+export const ARCHETYPES: Archetype[] = [
+  {
+    name: "Inocente",
+    desc: "Otimismo, simplicidade e confiança",
+    transmite: "Pureza, honestidade e bem-estar. A marca promete um mundo mais simples e feliz, sem complicação.",
+    voz: "Leve, positiva e transparente.",
+    exemplos: "Dove, Coca-Cola",
+    cuidado: "Pode soar ingênua ou superficial se não tiver substância.",
+  },
+  {
+    name: "Explorador",
+    desc: "Liberdade, descoberta e autenticidade",
+    transmite: "Liberdade, aventura e autonomia. A marca convida o cliente a sair do comum e descobrir algo novo.",
+    voz: "Inspiradora, aberta e autêntica.",
+    exemplos: "Jeep, The North Face",
+    cuidado: "Pode parecer sem foco ou distante do dia a dia.",
+  },
+  {
+    name: "Sábio",
+    desc: "Conhecimento, clareza e verdade",
+    transmite: "Autoridade, conhecimento e confiança técnica. A marca ajuda o cliente a entender e decidir melhor.",
+    voz: "Clara, didática e embasada.",
+    exemplos: "Google, TED",
+    cuidado: "Pode soar fria ou arrogante se esquecer a emoção.",
+  },
+  {
+    name: "Herói",
+    desc: "Coragem, superação e conquista",
+    transmite: "Força, determinação e performance. A marca desafia o cliente a superar limites e vencer.",
+    voz: "Direta, motivadora e enérgica.",
+    exemplos: "Nike, Gatorade",
+    cuidado: "Pode pressionar demais ou parecer arrogante.",
+  },
+  {
+    name: "Fora da lei",
+    desc: "Ruptura, rebeldia e mudança",
+    transmite: "Rebeldia, coragem de quebrar regras e liberdade. A marca se posiciona contra o jeito antigo de fazer as coisas.",
+    voz: "Ousada, provocativa e sem filtro.",
+    exemplos: "Harley-Davidson, Nubank no início",
+    cuidado: "Pode afastar públicos mais conservadores.",
+  },
+  {
+    name: "Mago",
+    desc: "Transformação e realização de sonhos",
+    transmite: "Encantamento e transformação. A marca promete fazer acontecer o que parecia impossível.",
+    voz: "Visionária, envolvente e surpreendente.",
+    exemplos: "Disney, Red Bull",
+    cuidado: "Pode prometer mais do que entrega.",
+  },
+  {
+    name: "Cara comum",
+    desc: "Pertencimento, empatia e proximidade",
+    transmite: "Proximidade, igualdade e pertencimento. A marca é gente como a gente, sem pose.",
+    voz: "Simples, próxima e bem-humorada.",
+    exemplos: "Magalu, IKEA",
+    cuidado: "Pode parecer genérica e sem diferencial.",
+  },
+  {
+    name: "Amante",
+    desc: "Paixão, prazer e conexão",
+    transmite: "Desejo, beleza e prazer dos sentidos. A marca faz o cliente se sentir especial e desejado.",
+    voz: "Sensorial, elegante e envolvente.",
+    exemplos: "Chanel, Häagen-Dazs",
+    cuidado: "Pode ficar só na aparência, sem conteúdo.",
+  },
+  {
+    name: "Bobo da corte",
+    desc: "Leveza, humor e diversão",
+    transmite: "Alegria, irreverência e leveza. A marca deixa a vida mais divertida e não se leva tão a sério.",
+    voz: "Divertida, espontânea e irreverente.",
+    exemplos: "M&M's, Fanta",
+    cuidado: "Pode não ser levada a sério em decisões importantes.",
+  },
+  {
+    name: "Cuidador",
+    desc: "Proteção, acolhimento e serviço",
+    transmite: "Cuidado, proteção e acolhimento. A marca existe para servir e fazer o cliente se sentir seguro.",
+    voz: "Calorosa, gentil e protetora.",
+    exemplos: "Johnson's Baby, Volvo",
+    cuidado: "Pode soar paternalista ou sem energia.",
+  },
+  {
+    name: "Criador",
+    desc: "Inovação, imaginação e expressão",
+    transmite: "Criatividade, originalidade e expressão. A marca dá ao cliente ferramentas para criar algo dele.",
+    voz: "Inventiva, estética e inspiradora.",
+    exemplos: "LEGO, Adobe",
+    cuidado: "Pode ficar perfeccionista ou difícil de entender.",
+  },
+  {
+    name: "Governante",
+    desc: "Liderança, controle e excelência",
+    transmite: "Status, liderança e excelência. A marca é referência e transmite segurança, ordem e prestígio.",
+    voz: "Segura, sofisticada e assertiva.",
+    exemplos: "Rolex, Mercedes-Benz",
+    cuidado: "Pode parecer distante ou inacessível.",
+  },
 ];
 
 export const SENSES: { key: keyof Omit<BrandExperience, "momentos">; label: string; hint: string }[] = [

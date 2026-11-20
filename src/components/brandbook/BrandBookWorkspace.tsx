@@ -1,5 +1,5 @@
 import { useState, type ReactNode } from "react";
-import { ArrowLeft, Check, Copy, Link2, Loader2, Moon, Send, Sparkles, Sun } from "lucide-react";
+import { ArrowLeft, Check, Copy, Link2, Loader2, Moon, Presentation, Send, Sparkles, Sun } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { BottomSheet, ConfirmDialog, IconButton } from "@/components/ds";
@@ -9,6 +9,7 @@ import { copyText } from "@/lib/meetingWhatsApp";
 import { BOARD_ORDER, buildBrandPrompt, filledCount, type BrandBookData } from "@/lib/brandBook";
 import { BoardCanvas } from "./BoardCanvas";
 import { BrandBookBoard } from "./BrandBookBoard";
+import { BrandIntro } from "./BrandIntro";
 
 export type BrandBookMode = "edit" | "member" | "public";
 
@@ -48,6 +49,7 @@ export const BrandBookWorkspace = ({
 }: Props) => {
   const { theme, toggleTheme } = useTheme();
   const [promptOpen, setPromptOpen] = useState(false);
+  const [introOpen, setIntroOpen] = useState(false);
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [promptCopied, setPromptCopied] = useState(false);
   const readOnly = mode !== "edit";
@@ -102,6 +104,11 @@ export const BrandBookWorkspace = ({
             {theme === "dark" ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
           </IconButton>
 
+          <Button variant="outline" onClick={() => setIntroOpen(true)} className="h-11 gap-2 sm:h-10" aria-label="Apresentar o que é branding">
+            <Presentation className="h-4 w-4" />
+            <span className="hidden lg:inline">O que é branding</span>
+          </Button>
+
           {shareUrl && (
             <Button variant="outline" onClick={copyLink} className="h-11 gap-2 sm:h-10" aria-label="Copiar link do Brand Book">
               <Link2 className="h-4 w-4" />
@@ -128,8 +135,10 @@ export const BrandBookWorkspace = ({
       </header>
 
       <BoardCanvas topInset={TOP + (banner ? 48 : 0)}>
-        <BrandBookBoard data={data} readOnly={readOnly} onPatch={onPatch} showPlan={mode !== "public"} ownerLabel={ownerLabel} />
+        <BrandBookBoard data={data} readOnly={readOnly} onPatch={onPatch} showPlan={mode !== "public"} ownerLabel={ownerLabel} onPresent={() => setIntroOpen(true)} />
       </BoardCanvas>
+
+      <BrandIntro open={introOpen} onClose={() => setIntroOpen(false)} />
 
       <BottomSheet
         open={promptOpen}

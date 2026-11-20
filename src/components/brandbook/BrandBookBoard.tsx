@@ -1,5 +1,6 @@
 import { useLayoutEffect, useRef, useState, type ReactNode } from "react";
-import { Check, Copy, Pipette, Plus, X } from "lucide-react";
+import { Check, Copy, Info, Pipette, Play, Plus, X } from "lucide-react";
+import { BottomSheet } from "@/components/ds";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import { copyText } from "@/lib/meetingWhatsApp";
@@ -13,6 +14,7 @@ import {
   readableOn,
   rgbToHex,
   sectionText,
+  type Archetype,
   type BrandBookData,
   type BrandColor,
   type BrandSectionKey,
@@ -27,6 +29,7 @@ interface BoardProps {
   /** Mostra o quadro "Plano de ação" ao lado. */
   showPlan: boolean;
   ownerLabel?: string;
+  onPresent?: () => void;
 }
 
 const useCopy = () => {
@@ -410,8 +413,9 @@ const ColorSwatch = ({
 
 /* ---------- Quadro ---------- */
 
-export const BrandBookBoard = ({ data, readOnly, onPatch, showPlan, ownerLabel }: BoardProps) => {
+export const BrandBookBoard = ({ data, readOnly, onPatch, showPlan, ownerLabel, onPresent }: BoardProps) => {
   const { copied, copy } = useCopy();
+  const [infoArchetype, setInfoArchetype] = useState<Archetype | null>(null);
   const set = <K extends keyof BrandBookData>(k: K, v: BrandBookData[K]) => onPatch?.((d) => ({ ...d, [k]: v }));
   const setExp = (k: keyof BrandBookData["experiencia"], v: string | string[]) =>
     onPatch?.((d) => ({ ...d, experiencia: { ...d.experiencia, [k]: v } }));
@@ -448,6 +452,21 @@ export const BrandBookBoard = ({ data, readOnly, onPatch, showPlan, ownerLabel }
             )}
             {ownerLabel && <p className="mt-2 text-base text-muted-foreground">{ownerLabel}</p>}
           </div>
+          {onPresent && (
+            <button
+              type="button"
+              onClick={onPresent}
+              className="group flex shrink-0 items-center gap-4 rounded-ds-xl border border-border bg-card py-3 pl-3 pr-6 text-left shadow-sm transition-colors hover:border-primary"
+            >
+              <span className="grid h-14 w-14 place-items-center rounded-ds-lg bg-primary text-primary-foreground transition-transform group-hover:scale-105">
+                <Play className="h-6 w-6 translate-x-0.5" />
+              </span>
+              <span>
+                <span className="block text-lg font-semibold text-foreground">O que é branding</span>
+                <span className="block text-sm text-muted-foreground">Apresentação para abrir a sessão</span>
+              </span>
+            </button>
+          )}
         </div>
 
         <div className="grid grid-cols-4 gap-6">
@@ -497,24 +516,49 @@ export const BrandBookBoard = ({ data, readOnly, onPatch, showPlan, ownerLabel }
                 {shownArchetypes.map((a) => {
                   const on = data.arquetipos.includes(a.name);
                   const order = data.arquetipos.indexOf(a.name);
-                  const Tag = readOnly ? "div" : "button";
+                  const body = (
+                    <>
+                      <span className="flex items-center gap-1.5 text-sm font-semibold text-foreground">
+                        {on && (
+                          <span className="grid h-5 w-5 shrink-0 place-items-center rounded-full bg-primary text-[11px] font-bold text-primary-foreground">
+                            {order + 1}
+                          </span>
+                        )}
+                        {a.name}
+                      </span>
+                      <span className="mt-0.5 block text-xs leading-snug text-muted-foreground">{a.desc}</span>
+                    </>
+                  );
                   return (
-                    <Tag
+                    <div
                       key={a.name}
-                      {...(readOnly ? {} : { type: "button" as const, onClick: () => toggleArchetype(a.name), "aria-pressed": on })}
                       className={cn(
-                        "relative rounded-ds-lg border px-3 py-2.5 text-left transition-colors",
+                        "relative rounded-ds-lg border transition-colors",
                         on ? "border-primary bg-primary/10 ring-1 ring-primary" : "border-border bg-background hover:border-primary/50",
                       )}
                     >
-                      <span className="block text-sm font-semibold text-foreground">{a.name}</span>
-                      <span className="mt-0.5 block text-xs leading-snug text-muted-foreground">{a.desc}</span>
-                      {on && (
-                        <span className="absolute right-2 top-2 grid h-5 w-5 place-items-center rounded-full bg-primary text-[11px] font-bold text-primary-foreground">
-                          {order + 1}
-                        </span>
+                      {readOnly ? (
+                        <div className="py-2.5 pl-3 pr-11">{body}</div>
+                      ) : (
+                        <button
+                          type="button"
+                          onClick={() => toggleArchetype(a.name)}
+                          aria-pressed={on}
+                          className="block w-full rounded-ds-lg py-2.5 pl-3 pr-11 text-left"
+                        >
+                          {body}
+                        </button>
                       )}
-                    </Tag>
+                      <button
+                        type="button"
+                        onClick={() => setInfoArchetype(a)}
+                        className="absolute right-1 top-1 grid h-9 w-9 place-items-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground"
+                        aria-label={`O que o arquétipo ${a.name} transmite`}
+                        title="Ver explicação"
+                      >
+                        <Info className="h-4 w-4" />
+                      </button>
+                    </div>
                   );
                 })}
               </div>
@@ -695,6 +739,41 @@ export const BrandBookBoard = ({ data, readOnly, onPatch, showPlan, ownerLabel }
           </BoardCard>
         </div>
       )}
+
+      <BottomSheet
+        open={!!infoArchetype}
+        onOpenChange={(o) => !o && setInfoArchetype(null)}
+        title={infoArchetype ? `Arquétipo ${infoArchetype.name}` : "Arquétipo"}
+        description={infoArchetype?.desc}
+      >
+        {infoArchetype && (
+          <dl className="space-y-4">
+            {[
+              ["O que transmite", infoArchetype.transmite],
+              ["Tom de voz", infoArchetype.voz],
+              ["Marcas que usam", infoArchetype.exemplos],
+              ["Cuidado", infoArchetype.cuidado],
+            ].map(([k, v]) => (
+              <div key={k}>
+                <dt className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">{k}</dt>
+                <dd className="mt-1 text-base leading-relaxed text-foreground">{v}</dd>
+              </div>
+            ))}
+            {!readOnly && (
+              <button
+                type="button"
+                onClick={() => {
+                  toggleArchetype(infoArchetype.name);
+                  setInfoArchetype(null);
+                }}
+                className="mt-2 h-11 w-full rounded-ds-lg bg-primary text-sm font-semibold text-primary-foreground hover:bg-primary/90"
+              >
+                {data.arquetipos.includes(infoArchetype.name) ? "Remover da marca" : "Escolher para a marca"}
+              </button>
+            )}
+          </dl>
+        )}
+      </BottomSheet>
     </div>
   );
 };
