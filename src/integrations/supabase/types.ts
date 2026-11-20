@@ -1470,6 +1470,7 @@ export type Database = {
         Row: {
           answers: Json
           applied_by: string | null
+          booking_id: string | null
           completed_at: string | null
           created_at: string
           id: string
@@ -1477,6 +1478,7 @@ export type Database = {
           notes: string | null
           phase: string
           scores: Json
+          share_token: string
           status: string
           template_id: string
           updated_at: string
@@ -1484,6 +1486,7 @@ export type Database = {
         Insert: {
           answers?: Json
           applied_by?: string | null
+          booking_id?: string | null
           completed_at?: string | null
           created_at?: string
           id?: string
@@ -1491,6 +1494,7 @@ export type Database = {
           notes?: string | null
           phase?: string
           scores?: Json
+          share_token?: string
           status?: string
           template_id: string
           updated_at?: string
@@ -1498,6 +1502,7 @@ export type Database = {
         Update: {
           answers?: Json
           applied_by?: string | null
+          booking_id?: string | null
           completed_at?: string | null
           created_at?: string
           id?: string
@@ -1505,6 +1510,7 @@ export type Database = {
           notes?: string | null
           phase?: string
           scores?: Json
+          share_token?: string
           status?: string
           template_id?: string
           updated_at?: string
@@ -1677,6 +1683,14 @@ export type Database = {
       }
     }
     Functions: {
+      complete_brand_book: {
+        Args: { _application_id: string }
+        Returns: undefined
+      }
+      get_shared_brand_book: {
+        Args: { _token: string }
+        Returns: Json
+      }
       _notif_user_id: { Args: { _profile_id: string }; Returns: string }
       dispatch_availability_nudges: { Args: never; Returns: undefined }
       dispatch_booking_reminders: { Args: never; Returns: undefined }

@@ -9,6 +9,7 @@ import { Button } from "@/components/ui/button";
 import { SectionCard, SectionHeader } from "@/components/ds";
 import type { Answers } from "@/lib/diagnosticoBegin";
 import { diagnosticPdfFileName, downloadBlob, generateDiagnosticPdf } from "@/lib/diagnosticPdf";
+import { DIAGNOSTIC_SLUG } from "@/lib/brandBook";
 
 type Props = {
   libertyId: string;
@@ -39,7 +40,8 @@ export const MappingPdfAttach = ({
     queryFn: async () => {
       const { data, error } = await supabase
         .from("tool_applications")
-        .select("id, answers, phase, status, completed_at, updated_at")
+        .select("id, answers, phase, status, completed_at, updated_at, tool_templates!inner(slug)")
+        .eq("tool_templates.slug", DIAGNOSTIC_SLUG)
         .eq("member_id", libertyId)
         .order("updated_at", { ascending: false })
         .limit(5);

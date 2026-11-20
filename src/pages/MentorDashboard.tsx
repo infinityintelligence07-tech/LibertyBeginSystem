@@ -3,7 +3,7 @@ import { sessionFee, DEFAULT_SESSION_VALUE, DEFAULT_KICKOFF_SESSION_VALUE } from
 import type { MentorFeeRates } from "@/lib/mentorFees";
 import { AppLayout } from "@/components/AppLayout";
 import { GoogleCalendarBanner } from "@/components/GoogleCalendarBanner";
-import { Calendar, ClipboardList, AlertTriangle, Copy, ExternalLink, ChevronLeft, ChevronRight, ChevronDown, FileText, DollarSign, TrendingUp, Wallet, CalendarDays, PhoneOff, Video } from "lucide-react";
+import { Calendar, ClipboardList, AlertTriangle, Copy, ExternalLink, ChevronLeft, ChevronRight, ChevronDown, FileText, DollarSign, TrendingUp, Wallet, CalendarDays, PhoneOff, Video, Palette } from "lucide-react";
 import { MentorClosingSoon, type ClosingStudent } from "@/components/mentor/MentorClosingSoon";
 import { MentorActiveStudents, type ActiveStudent } from "@/components/mentor/MentorActiveStudents";
 import { Button } from "@/components/ui/button";
@@ -37,6 +37,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { APP_ORIGIN_DEFAULT, copyText, invokeEndMeeting, meetEntryUrl } from "@/lib/meetingWhatsApp";
 import { mentorAiReportEnabled } from "@/lib/mentorAiReport";
+import { ensureBrandBook, isBrandingSession } from "@/lib/brandBookSession";
 import { format, startOfMonth, addMonths, subMonths, parseISO, isValid } from "date-fns";
 import { ptBR } from "date-fns/locale";
 import { shortName } from "@/lib/formatName";
@@ -633,6 +634,23 @@ const MentorDashboardPage = () => {
                           title="Copia o link da pesquisa de satisfação desta sessão"
                         >
                           <Copy /> Link do NPS
+                        </Button>
+                      )}
+                      {b.liberty_id && isBrandingSession(sessionName(b.session_id)) && (
+                        <Button
+                          size="default"
+                          variant="outline"
+                          onClick={async () => {
+                            try {
+                              const id = await ensureBrandBook({ memberId: b.liberty_id!, bookingId: b.id, appliedBy: profile?.id });
+                              navigate(`/mentor/ferramentas/${id}`);
+                            } catch (e) {
+                              toast.error("Não foi possível abrir o Brand Book", { description: e instanceof Error ? e.message : undefined });
+                            }
+                          }}
+                          title="Abre o quadro de branding desta sessão"
+                        >
+                          <Palette /> Abrir Brand Book
                         </Button>
                       )}
                       <Button

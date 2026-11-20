@@ -1,7 +1,7 @@
 import { useState, useEffect } from "react";
 import { AlertCircle, Eye, EyeOff } from "lucide-react";
 import { Logo } from "@/components/Logo";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import { useAuth } from "@/hooks/useAuth";
 import { supabase } from "@/integrations/supabase/client";
 import { FORGOT_PASSWORD_NEUTRAL_MESSAGE, SUPPORT_WHATSAPP_URL, translateAuthError } from "@/lib/authErrors";
@@ -19,16 +19,20 @@ const LoginPage = () => {
   const [mode, setMode] = useState<"login" | "forgot">("login");
   const [formError, setFormError] = useState<string | null>(null);
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
+  const rawNext = searchParams.get("next") || "";
+  const nextPath = rawNext.startsWith("/marca/") ? rawNext : "";
   const { signIn, signOut, user, roles, rolesLoaded, rolesError, loading: authLoading } = useAuth();
 
   // Redirect if already logged in
   useEffect(() => {
     if (!authLoading && user && rolesLoaded && roles.length > 0) {
-      if (roles.includes("admin") || roles.includes("super_admin")) navigate("/admin/dashboard", { replace: true });
+      if (nextPath) navigate(nextPath, { replace: true });
+      else if (roles.includes("admin") || roles.includes("super_admin")) navigate("/admin/dashboard", { replace: true });
       else if (roles.includes("mentor")) navigate("/mentor/dashboard", { replace: true });
       else navigate("/dashboard", { replace: true });
     }
-  }, [user, roles, rolesLoaded, authLoading, navigate]);
+  }, [user, roles, rolesLoaded, authLoading, navigate, nextPath]);
 
   // Autenticado mas sem papel: não deixar o usuário preso no Login sem feedback.
   const authenticatedWithoutRole = !authLoading && !!user && rolesLoaded && roles.length === 0;

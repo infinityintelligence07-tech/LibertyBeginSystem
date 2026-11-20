@@ -13,6 +13,7 @@ import {
   pillarScore,
   type Answers,
 } from "@/lib/diagnosticoBegin";
+import { DIAGNOSTIC_SLUG } from "@/lib/brandBook";
 
 interface Props {
   libertyId: string;
@@ -28,7 +29,8 @@ export const MemberDiagnosticCard = ({ libertyId }: Props) => {
     queryFn: async () => {
       const { data } = await supabase
         .from("tool_applications")
-        .select("*")
+        .select("*, tool_templates!inner(slug)")
+        .eq("tool_templates.slug", DIAGNOSTIC_SLUG)
         .eq("member_id", libertyId)
         .order("created_at", { ascending: true });
       return data || [];

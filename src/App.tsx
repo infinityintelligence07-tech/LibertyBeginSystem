@@ -44,6 +44,8 @@ import MentorAlunosPage from "./pages/MentorAlunos";
 import MentorFerramentasPage from "./pages/MentorFerramentas";
 import FerramentaModeloPage from "./pages/FerramentaModelo";
 import FerramentaAplicacaoPage from "./pages/FerramentaAplicacao";
+import BrandBookMembroPage from "./pages/BrandBookMembro";
+import BrandBookPublicoPage from "./pages/BrandBookPublico";
 import AgendaOverviewPage from "./pages/AgendaOverview";
 import ProfilePage from "./pages/Profile";
 import NpsFormPage from "./pages/NpsForm";
@@ -91,6 +93,7 @@ const App = () => {
               {/* Public */}
               <Route path="/" element={<LoginPage />} />
               <Route path="/login" element={<LoginPage />} />
+              <Route path="/marca/:token" element={<BrandBookPublicoPage />} />
               <Route path="/reset-password" element={<ResetPasswordPage />} />
               <Route path="/termos" element={<TermsPage />} />
               <Route path="/privacidade" element={<PrivacyPage />} />
@@ -105,6 +108,7 @@ const App = () => {
               <Route path="/agenda/overview" element={<ProtectedRoute allowedRoles={["liberty"]}><AgendaOverviewPage /></ProtectedRoute>} />
               <Route path="/conteudos" element={<ProtectedRoute allowedRoles={["liberty"]}><ConteudosPage /></ProtectedRoute>} />
               <Route path="/ferramentas" element={<ProtectedRoute allowedRoles={["liberty"]}><FerramentasPage /></ProtectedRoute>} />
+              <Route path="/ferramentas/brand-book/:id" element={<ProtectedRoute allowedRoles={["liberty"]}><BrandBookMembroPage /></ProtectedRoute>} />
               <Route path="/eventos" element={<ProtectedRoute allowedRoles={["liberty"]}><EventosPage /></ProtectedRoute>} />
               <Route path="/perfil" element={<ProtectedRoute allowedRoles={["liberty"]}><ProfilePage role="liberty" /></ProtectedRoute>} />
               <Route path="/suporte" element={<ProtectedRoute allowedRoles={["liberty"]}><SupportPage /></ProtectedRoute>} />

@@ -8,7 +8,8 @@ import { toast } from "sonner";
 import { shortName } from "@/lib/formatName";
 import { cn } from "@/lib/utils";
 import { DIAGNOSTICO_BEGIN_PILLARS, overallScore } from "@/lib/diagnosticoBegin";
-import { Radar as RadarIcon, Plus, Search, ChevronRight, ChevronDown, Loader2, Wrench, Trash2 } from "lucide-react";
+import { BOARD_ORDER, BRAND_BOOK_SLUG } from "@/lib/brandBook";
+import { Radar as RadarIcon, Palette, Plus, Search, ChevronRight, ChevronDown, Loader2, Wrench, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { UserAvatar } from "@/components/UserAvatar";
 import {
@@ -85,6 +86,13 @@ const MentorFerramentasPage = ({ role = "mentor" }: { role?: "mentor" | "admin" 
     },
   });
 
+  const slugByTemplate = useMemo(() => {
+    const m = new Map<string, string>();
+    templates.forEach((t: any) => m.set(t.id, t.slug));
+    return m;
+  }, [templates]);
+  const isBrandBook = (templateIdValue: string) => slugByTemplate.get(templateIdValue) === BRAND_BOOK_SLUG;
+
   const memberById = useMemo(() => {
     const m = new Map<string, any>();
     members.forEach((x: any) => m.set(x.id, x));
@@ -139,13 +147,17 @@ const MentorFerramentasPage = ({ role = "mentor" }: { role?: "mentor" | "admin" 
   const create = useMutation({
     mutationFn: async () => {
       if (!memberId || !templateId) throw new Error("Selecione a ferramenta e o aluno.");
+      if (isBrandBook(templateId)) {
+        const existing = applications.find((a: any) => a.template_id === templateId && a.member_id === memberId);
+        if (existing) return { id: existing.id as string };
+      }
       const { data, error } = await supabase
         .from("tool_applications")
         .insert({
           template_id: templateId,
           member_id: memberId,
           applied_by: profile?.id ?? null,
-          phase,
+          phase: isBrandBook(templateId) ? "inicial" : phase,
           status: "in_progress",
           answers: {},
           scores: {},
@@ -177,8 +189,8 @@ const MentorFerramentasPage = ({ role = "mentor" }: { role?: "mentor" | "admin" 
     onError: (e: any) => toast.error(e.message || "Não foi possível excluir."),
   });
 
-  const openNew = () => {
-    setTemplateId(templates[0]?.id || "");
+  const openNew = (presetTemplateId?: string) => {
+    setTemplateId(presetTemplateId || templates[0]?.id || "");
     setPhase("inicial");
     setMemberSearch("");
     setOpen(true);
@@ -201,12 +213,12 @@ const MentorFerramentasPage = ({ role = "mentor" }: { role?: "mentor" | "admin" 
             title="Ferramentas"
             description={
               isAdmin
-                ? "Acompanhe os diagnósticos aplicados pelos mentores."
+                ? "Acompanhe as ferramentas aplicadas pelos mentores."
                 : "Aplique uma ferramenta junto com o aluno durante a sessão."
             }
             actions={
               !isAdmin ? (
-                <Button onClick={openNew}>
+                <Button onClick={() => openNew()}>
                   <Plus /> Aplicar ferramenta
                 </Button>
               ) : undefined
@@ -216,21 +228,23 @@ const MentorFerramentasPage = ({ role = "mentor" }: { role?: "mentor" | "admin" 
 
         {/* Catálogo de ferramentas */}
         <section className="space-y-3">
-          <SectionHeader title="Catálogo" description="Toque para ver o modelo completo e os pilares avaliados." />
+          <SectionHeader title="Catálogo" description="Toque no Mapeamento para ver o modelo. Toque no Brand Book para começar com um aluno." />
           <div className="grid gap-3">
             {templates.map((t: any) => {
               const count = applications.filter((a: any) => a.template_id === t.id).length;
               const done = applications.filter((a: any) => a.template_id === t.id && a.status === "completed").length;
+              const brand = t.slug === BRAND_BOOK_SLUG;
+              const Icon = brand ? Palette : RadarIcon;
               return (
                 <SectionCard
                   key={t.id}
                   as="button"
                   interactive
-                  onClick={() => navigate(`${base}/modelo`)}
+                  onClick={() => (brand ? !isAdmin && openNew(t.id) : navigate(`${base}/modelo`))}
                   className="text-left"
                 >
                   <div className="flex flex-col sm:flex-row sm:items-center gap-4 sm:gap-5">
-                    <RadarIcon className="h-5 w-5 text-muted-foreground shrink-0" aria-hidden />
+                    <Icon className="h-5 w-5 text-muted-foreground shrink-0" aria-hidden />
                     <div className="min-w-0 flex-1">
                       <p className="text-xs font-medium text-muted-foreground mb-0.5">Ferramenta</p>
                       <p className="text-base font-semibold text-foreground leading-tight">{t.name}</p>
@@ -239,7 +253,11 @@ const MentorFerramentasPage = ({ role = "mentor" }: { role?: "mentor" | "admin" 
                     <div className="flex items-center gap-5 sm:gap-6 sm:border-l sm:border-border sm:pl-6 shrink-0">
                       <Stat size="sm" label="Aplicações" value={count} />
                       <Stat size="sm" label="Concluídas" value={done} />
-                      <Stat size="sm" label="Pilares" value={DIAGNOSTICO_BEGIN_PILLARS.length} />
+                      {brand ? (
+                        <Stat size="sm" label="Etapas" value={BOARD_ORDER.length} />
+                      ) : (
+                        <Stat size="sm" label="Pilares" value={DIAGNOSTICO_BEGIN_PILLARS.length} />
+                      )}
                       <ChevronRight className="h-5 w-5 text-muted-foreground hidden sm:block" aria-hidden />
                     </div>
                   </div>
@@ -301,7 +319,7 @@ const MentorFerramentasPage = ({ role = "mentor" }: { role?: "mentor" | "admin" 
                     Limpar filtros
                   </Button>
                 ) : !isAdmin ? (
-                  <Button size="sm" variant="outline" onClick={openNew}><Plus /> Aplicar ferramenta</Button>
+                  <Button size="sm" variant="outline" onClick={() => openNew()}><Plus /> Aplicar ferramenta</Button>
                 ) : undefined
               }
             />
@@ -338,20 +356,23 @@ const MentorFerramentasPage = ({ role = "mentor" }: { role?: "mentor" | "admin" 
                   <ul className="border-t border-border">
                     {g.items.map((a: any, idx: number) => {
                       const done = a.status === "completed";
-                      const total = overallScore(a.scores || {});
+                      const brand = isBrandBook(a.template_id);
+                      const total = brand ? 0 : overallScore(a.scores || {});
                       return (
                         <li key={a.id} className="flex items-center gap-1 pr-2">
                           <div className="min-w-0 flex-1">
                             <ListRow
-                              title={a.phase === "final" ? "Diagnóstico final" : "Diagnóstico inicial"}
+                              title={brand ? "Brand Book" : a.phase === "final" ? "Diagnóstico final" : "Diagnóstico inicial"}
                               subtitle={
                                 <span className="flex flex-col gap-1.5">
                                   <span>{new Date(a.created_at).toLocaleDateString("pt-BR")}</span>
-                                  {done && <ProgressBar value={total} max={5} tone="success" className="max-w-[160px]" />}
+                                  {done && !brand && <ProgressBar value={total} max={5} tone="success" className="max-w-[160px]" />}
                                 </span>
                               }
                               trailing={
-                                done ? (
+                                done && brand ? (
+                                  <StatusPill tone="success">Enviado ao aluno</StatusPill>
+                                ) : done ? (
                                   <StatusPill tone="success">Concluído · {total.toFixed(1)}/5</StatusPill>
                                 ) : (
                                   <StatusPill tone="neutral">Em preenchimento</StatusPill>
@@ -456,10 +477,16 @@ const MentorFerramentasPage = ({ role = "mentor" }: { role?: "mentor" | "admin" 
               </div>
             )}
           </div>
-          <SelectField label="Momento" value={phase} onChange={(e) => setPhase(e.target.value as "inicial" | "final")}>
-            <option value="inicial">Diagnóstico inicial (kickoff)</option>
-            <option value="final">Diagnóstico final (encerramento)</option>
-          </SelectField>
+          {isBrandBook(templateId) ? (
+            <p className="text-sm text-muted-foreground">
+              Cada aluno tem um Brand Book. Se ele já tiver um, o quadro existente abre para continuar.
+            </p>
+          ) : (
+            <SelectField label="Momento" value={phase} onChange={(e) => setPhase(e.target.value as "inicial" | "final")}>
+              <option value="inicial">Diagnóstico inicial (kickoff)</option>
+              <option value="final">Diagnóstico final (encerramento)</option>
+            </SelectField>
+          )}
         </div>
       </BottomSheet>
     </AppLayout>

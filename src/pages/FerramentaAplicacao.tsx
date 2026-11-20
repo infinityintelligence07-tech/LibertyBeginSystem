@@ -12,6 +12,8 @@ import { EmptyState, LoadingState, PageContainer } from "@/components/ds";
 import { ToolWizard } from "@/components/tools/ToolWizard";
 import { shortName } from "@/lib/formatName";
 import { computeScores, type Answers } from "@/lib/diagnosticoBegin";
+import { BRAND_BOOK_SLUG } from "@/lib/brandBook";
+import { BrandBookEditor } from "@/components/brandbook/BrandBookEditor";
 
 const FerramentaAplicacaoPage = ({ role = "mentor" }: { role?: "mentor" | "admin" }) => {
   const { id } = useParams<{ id: string }>();
@@ -33,7 +35,7 @@ const FerramentaAplicacaoPage = ({ role = "mentor" }: { role?: "mentor" | "admin
     queryFn: async () => {
       const { data, error } = await supabase
         .from("tool_applications")
-        .select("*")
+        .select("*, tool_templates(slug)")
         .eq("id", id)
         .maybeSingle();
       if (error) throw error;
@@ -115,7 +117,7 @@ const FerramentaAplicacaoPage = ({ role = "mentor" }: { role?: "mentor" | "admin
           <EmptyState
             icon={FileQuestion}
             title="Aplicação não encontrada"
-            description="O diagnóstico pode ter sido removido ou o link está incorreto."
+            description="A ferramenta pode ter sido removida ou o link está incorreto."
             action={
               <Button variant="outline" onClick={() => navigate(backPath)}>Voltar para ferramentas</Button>
             }
@@ -123,6 +125,10 @@ const FerramentaAplicacaoPage = ({ role = "mentor" }: { role?: "mentor" | "admin
         </PageContainer>
       </AppLayout>
     );
+  }
+
+  if ((application.tool_templates as { slug?: string } | null)?.slug === BRAND_BOOK_SLUG) {
+    return <BrandBookEditor application={application} member={member ?? null} backPath={backPath} />;
   }
 
   const isFinal = application.phase === "final";

@@ -1,6 +1,7 @@
 import { useState } from "react";
+import { useNavigate } from "react-router-dom";
 import { AppLayout } from "@/components/AppLayout";
-import { Wrench, ExternalLink, Lock, Radar as RadarIcon, FileText } from "lucide-react";
+import { Wrench, ExternalLink, Lock, Radar as RadarIcon, FileText, Palette } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { EmptyState, LoadingState, PageContainer, PageHeader, SectionCard, SectionHeader, StatusPill } from "@/components/ds";
 import { supabase } from "@/integrations/supabase/client";
@@ -14,11 +15,13 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/u
 import { DIAGNOSTICO_BEGIN_PILLARS, diagnosticPillarsForAnswers } from "@/lib/diagnosticoBegin";
 import { useDemoData } from "@/contexts/DemoDataContext";
 import { demoContentTools, demoDiagnosticApplications, demoProfileFill } from "@/lib/demoForUser";
+import { BRAND_BOOK_SLUG, DIAGNOSTIC_SLUG, normalizeBrandBook } from "@/lib/brandBook";
 
 const FerramentasPage = () => {
   const [openSheet, setOpenSheet] = useState(false);
   const [selected, setSelected] = useState<string | null>(null);
 
+  const navigate = useNavigate();
   const { profile: _profile } = useAuth();
   const { demoEnabled } = useDemoData();
   const profile = demoEnabled ? demoProfileFill(_profile as any) : _profile;
@@ -76,10 +79,26 @@ const FerramentasPage = () => {
     queryFn: async () => {
       const { data } = await supabase
         .from("tool_applications")
-        .select("*")
+        .select("*, tool_templates!inner(slug)")
+        .eq("tool_templates.slug", DIAGNOSTIC_SLUG)
         .eq("member_id", profile!.id)
         .eq("status", "completed")
         .order("completed_at", { ascending: true });
+      return data || [];
+    },
+  });
+
+  const { data: brandBooks = [] } = useQuery({
+    queryKey: ["member-brand-books", profile?.id],
+    enabled: !!profile?.id,
+    queryFn: async () => {
+      const { data } = await supabase
+        .from("tool_applications")
+        .select("id, answers, completed_at, tool_templates!inner(slug)")
+        .eq("tool_templates.slug", BRAND_BOOK_SLUG)
+        .eq("member_id", profile!.id)
+        .eq("status", "completed")
+        .order("completed_at", { ascending: false });
       return data || [];
     },
   });
@@ -138,6 +157,36 @@ const FerramentasPage = () => {
           </SectionCard>
           </div>
         )}
+
+        {brandBooks.map((b) => {
+          const bb = normalizeBrandBook(b.answers);
+          return (
+            <SectionCard key={b.id} className="space-y-4">
+              <SectionHeader
+                title={
+                  <span className="inline-flex items-center gap-2">
+                    <Palette className="h-4 w-4 text-muted-foreground" aria-hidden />
+                    Brand Book{bb.nome ? ` · ${bb.nome}` : ""}
+                  </span>
+                }
+                description="O quadro de marca da sua sessão de branding. Copie cada parte ou gere o prompt para alimentar a sua IA."
+                actions={
+                  <Button variant="outline" size="sm" onClick={() => navigate(`/ferramentas/brand-book/${b.id}`)}>
+                    <FileText className="h-3.5 w-3.5" aria-hidden /> Abrir Brand Book
+                  </Button>
+                }
+              />
+              {bb.paleta.length > 0 && (
+                <div className="flex h-10 overflow-hidden rounded-ds-lg border border-border" aria-label="Paleta de cores">
+                  {bb.paleta.map((c) => (
+                    <span key={c.id} className="flex-1" style={{ backgroundColor: c.hex }} title={`${c.name || ""} ${c.hex}`.trim()} />
+                  ))}
+                </div>
+              )}
+              {bb.promessa && <p className="text-base font-medium leading-snug text-foreground">{bb.promessa}</p>}
+            </SectionCard>
+          );
+        })}
 
         <Dialog open={openSheet} onOpenChange={(o) => { setOpenSheet(o); if (!o) setSelected(null); }}>
           <DialogContent className="max-w-5xl max-h-[90vh] overflow-y-auto p-4 sm:p-6">
@@ -212,7 +261,7 @@ const FerramentasPage = () => {
               })}
             </div>
           </section>
-        ) : !hasSessionTools ? (
+        ) : !hasSessionTools && brandBooks.length === 0 && !base ? (
           <EmptyState
             icon={Wrench}
             title="Nenhuma ferramenta disponível"
