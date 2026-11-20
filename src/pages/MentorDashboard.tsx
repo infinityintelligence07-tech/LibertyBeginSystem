@@ -3,7 +3,7 @@ import { sessionFee, DEFAULT_SESSION_VALUE, DEFAULT_KICKOFF_SESSION_VALUE } from
 import type { MentorFeeRates } from "@/lib/mentorFees";
 import { AppLayout } from "@/components/AppLayout";
 import { GoogleCalendarBanner } from "@/components/GoogleCalendarBanner";
-import { Calendar, ClipboardList, AlertTriangle, ExternalLink, ChevronLeft, ChevronRight, ChevronDown, FileText, DollarSign, TrendingUp, Wallet, CalendarDays, PhoneOff, Video } from "lucide-react";
+import { Calendar, ClipboardList, AlertTriangle, Copy, ExternalLink, ChevronLeft, ChevronRight, ChevronDown, FileText, DollarSign, TrendingUp, Wallet, CalendarDays, PhoneOff, Video } from "lucide-react";
 import { MentorClosingSoon, type ClosingStudent } from "@/components/mentor/MentorClosingSoon";
 import { MentorActiveStudents, type ActiveStudent } from "@/components/mentor/MentorActiveStudents";
 import { Button } from "@/components/ui/button";
@@ -35,7 +35,7 @@ import { useAuth } from "@/hooks/useAuth";
 import { supabase } from "@/integrations/supabase/client";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { invokeEndMeeting, meetEntryUrl } from "@/lib/meetingWhatsApp";
+import { APP_ORIGIN_DEFAULT, copyText, invokeEndMeeting, meetEntryUrl } from "@/lib/meetingWhatsApp";
 import { mentorAiReportEnabled } from "@/lib/mentorAiReport";
 import { format, startOfMonth, addMonths, subMonths, parseISO, isValid } from "date-fns";
 import { ptBR } from "date-fns/locale";
@@ -332,7 +332,7 @@ const MentorDashboardPage = () => {
   const sumFees = (list: { session_id: string; scheduled_date?: string | null }[]) =>
     list.reduce((acc, b) => acc + feeOf(b), 0);
 
-  const payable = (b: { payout_excluded?: boolean | null }) => b.payout_excluded !== true;
+  const payable = (b: object) => (b as { payout_excluded?: boolean | null }).payout_excluded !== true;
   // Sessões que já passaram e aguardam confirmação continuam no previsto (mesma regra do Admin Financeiro).
   // Sem isso o "Previsto no mês" cai R$ 300 (ou o valor da sessão) toda vez que o horário termina.
   const pendingConfirm = bookingsAll.filter((b) => isPendingConfirmationBooking(b));
@@ -620,6 +620,19 @@ const MentorDashboardPage = () => {
                           <a href={meetEntryUrl(meetUrl, mentorMeetEmail)} target="_blank" rel="noopener noreferrer">
                             <Video /> Entrar no Meet
                           </a>
+                        </Button>
+                      )}
+                      {b.liberty_id && (
+                        <Button
+                          size="default"
+                          variant="outline"
+                          onClick={async () => {
+                            await copyText(`${APP_ORIGIN_DEFAULT}/nps/${b.id}`);
+                            toast.success("Link do NPS copiado. Envie ao aluno no fim da sessão.");
+                          }}
+                          title="Copia o link da pesquisa de satisfação desta sessão"
+                        >
+                          <Copy /> Link do NPS
                         </Button>
                       )}
                       <Button
