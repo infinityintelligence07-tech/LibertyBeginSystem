@@ -95,9 +95,13 @@ export const parsePlatformDateTime = (date?: string | null, time?: string | null
 
 const parseBookingDateTime = parsePlatformDateTime;
 
+/** Callbacks like `.filter(fn)` pass the array index as the 2nd argument; never trust it as a Date. */
+const asNow = (now: unknown): Date =>
+  now instanceof Date && !Number.isNaN(now.getTime()) ? now : new Date();
+
 /** Data de hoje (`YYYY-MM-DD`) no fuso da plataforma. */
 export const todayPlatformDate = (now = new Date()) => {
-  const parts = tzFormatter.formatToParts(now);
+  const parts = tzFormatter.formatToParts(asNow(now));
   const get = (type: string) => parts.find((p) => p.type === type)?.value ?? "";
   return `${get("year")}-${get("month")}-${get("day")}`;
 };
@@ -116,7 +120,7 @@ export const isSessionHappeningNow = (booking: BookingTiming, now = new Date()) 
   const start = getBookingStartDate(booking);
   const end = getBookingEndDate(booking);
   if (!start || !end) return false;
-  const t = now.getTime();
+  const t = asNow(now).getTime();
   const graceBeforeMs = 15 * 60_000;
   const graceAfterMs = 45 * 60_000;
   return t >= start.getTime() - graceBeforeMs && t <= end.getTime() + graceAfterMs;
@@ -124,14 +128,14 @@ export const isSessionHappeningNow = (booking: BookingTiming, now = new Date()) 
 
 export const isBookingPast = (booking: BookingTiming, now = new Date()) => {
   const endDate = getBookingEndDate(booking);
-  return endDate ? endDate.getTime() <= now.getTime() : false;
+  return endDate ? endDate.getTime() <= asNow(now).getTime() : false;
 };
 
 export const getEffectiveBookingStatus = (
   booking: BookingTiming,
   options: { hasReport?: boolean; now?: Date } = {},
 ): EffectiveBookingStatus => {
-  const now = options.now ?? new Date();
+  const now = asNow(options?.now);
   const rawStatus = booking.status || "scheduled";
   if (rawStatus === "cancelled") return "cancelled";
   if (rawStatus === "not_realized") return "not_realized";
@@ -239,7 +243,7 @@ export const isAwaitingReport = (
 export const daysSinceBookingEnd = (booking: BookingTiming, now = new Date()) => {
   const end = getBookingEndDate(booking);
   if (!end) return 0;
-  return Math.max(0, Math.floor((now.getTime() - end.getTime()) / 86_400_000));
+  return Math.max(0, Math.floor((asNow(now).getTime() - end.getTime()) / 86_400_000));
 };
 
 /** "A confirmar" há mais de `PENDING_CONFIRMATION_ALERT_DAYS` dias: o admin precisa ser avisado. */
