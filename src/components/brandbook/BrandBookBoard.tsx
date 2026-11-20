@@ -1,5 +1,5 @@
 import { useLayoutEffect, useRef, useState, type ReactNode } from "react";
-import { Check, Copy, Info, Pipette, Play, Plus, X } from "lucide-react";
+import { Check, Copy, Info, Maximize2, Pipette, Play, Plus, X } from "lucide-react";
 import { BottomSheet } from "@/components/ds";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
@@ -55,20 +55,25 @@ const AutoTextarea = ({
   placeholder,
   className,
   ariaLabel,
+  maxHeight = 320,
 }: {
   value: string;
   onChange: (v: string) => void;
   placeholder?: string;
   className?: string;
   ariaLabel: string;
+  /** Acima disso o campo para de crescer e rola por dentro. */
+  maxHeight?: number;
 }) => {
   const ref = useRef<HTMLTextAreaElement>(null);
   useLayoutEffect(() => {
     const el = ref.current;
     if (!el) return;
     el.style.height = "0px";
-    el.style.height = `${el.scrollHeight}px`;
-  }, [value]);
+    const full = el.scrollHeight;
+    el.style.height = `${Math.min(full, maxHeight)}px`;
+    el.style.overflowY = full > maxHeight ? "auto" : "hidden";
+  }, [value, maxHeight]);
   return (
     <textarea
       ref={ref}
@@ -77,8 +82,9 @@ const AutoTextarea = ({
       placeholder={placeholder}
       aria-label={ariaLabel}
       rows={2}
+      data-board-scroll
       className={cn(
-        "block w-full resize-none overflow-hidden rounded-ds-lg border border-transparent bg-muted/50 px-3 py-2.5 text-base leading-relaxed text-foreground placeholder:text-muted-foreground/70",
+        "block w-full resize-none overflow-hidden overscroll-contain rounded-ds-lg border border-transparent bg-muted/50 px-3 py-2.5 text-base leading-relaxed text-foreground placeholder:text-muted-foreground/70",
         "transition-colors hover:border-border focus:border-primary focus:bg-card focus:outline-none",
         className,
       )}
@@ -230,7 +236,9 @@ const BoardCard = ({
   className,
   copy,
   copied,
+  actions,
 }: {
+  actions?: ReactNode;
   n?: number;
   sectionKey: BrandSectionKey;
   hint?: string;
@@ -254,6 +262,7 @@ const BoardCard = ({
           <h2 className="text-lg font-semibold leading-tight tracking-tight text-foreground">{title}</h2>
           {hint && <p className="mt-1 text-sm leading-snug text-muted-foreground">{hint}</p>}
         </div>
+        {actions}
         <button
           type="button"
           onClick={() => copy(sectionKey, `${title}\n${sectionText(sectionKey, data)}`.trim(), title)}
@@ -416,6 +425,7 @@ const ColorSwatch = ({
 export const BrandBookBoard = ({ data, readOnly, onPatch, showPlan, ownerLabel, onPresent }: BoardProps) => {
   const { copied, copy } = useCopy();
   const [infoArchetype, setInfoArchetype] = useState<Archetype | null>(null);
+  const [storyOpen, setStoryOpen] = useState(false);
   const set = <K extends keyof BrandBookData>(k: K, v: BrandBookData[K]) => onPatch?.((d) => ({ ...d, [k]: v }));
   const setExp = (k: keyof BrandBookData["experiencia"], v: string | string[]) =>
     onPatch?.((d) => ({ ...d, experiencia: { ...d.experiencia, [k]: v } }));
@@ -481,16 +491,35 @@ export const BrandBookBoard = ({ data, readOnly, onPatch, showPlan, ownerLabel, 
             />
           </BoardCard>
 
-          <BoardCard n={2} sectionKey="historia" hint="Como começou, o que move o fundador e qual virada deu origem à marca." className="col-span-2" {...cardProps}>
+          <BoardCard
+            n={2}
+            sectionKey="historia"
+            hint="Como começou, o que move o fundador e qual virada deu origem à marca."
+            className="col-span-2"
+            actions={
+              <button
+                type="button"
+                onClick={() => setStoryOpen(true)}
+                className="inline-flex h-9 shrink-0 items-center gap-1.5 rounded-md border border-border px-2.5 text-xs font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+                aria-label="Ampliar história da marca"
+              >
+                <Maximize2 className="h-3.5 w-3.5" /> Ampliar
+              </button>
+            }
+            {...cardProps}
+          >
             {readOnly ? (
-              <ReadText value={data.historia} />
+              <div data-board-scroll className="max-h-[360px] overflow-y-auto overscroll-contain pr-2">
+                <ReadText value={data.historia} className="text-[15px]" />
+              </div>
             ) : (
               <AutoTextarea
                 value={data.historia}
                 onChange={(v) => set("historia", v)}
                 placeholder="Conte a história da marca como você contaria para um cliente."
                 ariaLabel="História da marca"
-                className="min-h-[160px]"
+                className="min-h-[160px] text-[15px] leading-relaxed"
+                maxHeight={360}
               />
             )}
           </BoardCard>
@@ -739,6 +768,27 @@ export const BrandBookBoard = ({ data, readOnly, onPatch, showPlan, ownerLabel, 
           </BoardCard>
         </div>
       )}
+
+      <BottomSheet
+        open={storyOpen}
+        onOpenChange={setStoryOpen}
+        size="lg"
+        title={SECTION_TITLES.historia}
+        description={readOnly ? undefined : "Tudo o que você escrever aqui já fica salvo no quadro."}
+      >
+        {readOnly ? (
+          <ReadText value={data.historia} className="text-lg leading-relaxed" />
+        ) : (
+          <textarea
+            value={data.historia}
+            onChange={(e) => set("historia", e.target.value)}
+            placeholder="Conte a história da marca como você contaria para um cliente."
+            aria-label="História da marca"
+            autoFocus
+            className="block h-[60vh] w-full resize-none rounded-ds-lg border border-border bg-background p-4 text-lg leading-relaxed text-foreground placeholder:text-muted-foreground/70 focus:border-primary focus:outline-none"
+          />
+        )}
+      </BottomSheet>
 
       <BottomSheet
         open={!!infoArchetype}

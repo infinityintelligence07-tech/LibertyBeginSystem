@@ -91,6 +91,14 @@ export const BoardCanvas = ({ children, className, topInset = 0 }: Props) => {
     const el = viewportRef.current;
     if (!el) return;
     const onWheel = (e: WheelEvent) => {
+      if (!e.ctrlKey && !e.metaKey) {
+        const box = (e.target as HTMLElement | null)?.closest?.("[data-board-scroll]") as HTMLElement | null;
+        if (box && box.scrollHeight > box.clientHeight + 1) {
+          const atTop = box.scrollTop <= 0;
+          const atBottom = box.scrollTop + box.clientHeight >= box.scrollHeight - 1;
+          if ((e.deltaY < 0 && !atTop) || (e.deltaY > 0 && !atBottom)) return;
+        }
+      }
       e.preventDefault();
       const rect = el.getBoundingClientRect();
       if (e.ctrlKey || e.metaKey) {
@@ -158,6 +166,7 @@ export const BoardCanvas = ({ children, className, topInset = 0 }: Props) => {
 
   const onPointerDown = (e: React.PointerEvent) => {
     const target = e.target as HTMLElement;
+    if (!viewportRef.current?.contains(target)) return;
     const interactive = !!target.closest(NO_PAN);
     if (e.pointerType === "mouse" && (e.button !== 0 || interactive)) {
       if (e.button !== 1) return;
@@ -222,7 +231,7 @@ export const BoardCanvas = ({ children, className, topInset = 0 }: Props) => {
   const onFocusCapture = (e: React.FocusEvent) => {
     const vp = viewportRef.current;
     const el = e.target as HTMLElement;
-    if (!vp || !el.getBoundingClientRect) return;
+    if (!vp || !el.getBoundingClientRect || !vp.contains(el)) return;
     const r = el.getBoundingClientRect();
     const v = vp.getBoundingClientRect();
     const margin = 48;
