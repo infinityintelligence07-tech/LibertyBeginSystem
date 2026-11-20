@@ -22,6 +22,7 @@ interface Props {
 }
 
 const ease = [0.22, 1, 0.36, 1] as const;
+const STEPS = [2, 1, 1, 1];
 
 const Reveal = ({ delay = 0, children, className, y = 24 }: { delay?: number; children: ReactNode; className?: string; y?: number }) => {
   const reduce = useReducedMotion();
@@ -41,7 +42,9 @@ const Eyebrow = ({ children }: { children: ReactNode }) => (
   <p className="text-sm font-semibold uppercase tracking-[0.2em] text-primary">{children}</p>
 );
 
-const SlideMarketing = () => (
+const HL = "text-primary underline decoration-primary/30 decoration-[3px] underline-offset-[6px]";
+
+const SlideMarketing = ({ step, onReveal }: { step: number; onReveal: () => void }) => (
   <div className="mx-auto w-full max-w-5xl space-y-6 sm:space-y-8">
     <Reveal>
       <Eyebrow>Antes de começar</Eyebrow>
@@ -51,55 +54,133 @@ const SlideMarketing = () => (
         <Megaphone className="h-8 w-8 text-muted-foreground" aria-hidden />
         <p className="mt-6 text-sm font-semibold uppercase tracking-[0.18em] text-muted-foreground">Marketing</p>
         <p className="mt-2 text-2xl font-semibold leading-snug text-foreground sm:text-4xl">
-          é aquilo que a sua empresa <span className="text-primary underline decoration-primary/30 decoration-[3px] underline-offset-[6px]">fala</span> para as pessoas.
+          é aquilo que a sua empresa <span className={HL}>fala</span> para as pessoas.
         </p>
       </Reveal>
-      <Reveal delay={1.1} className="rounded-ds-xl border-2 border-primary bg-card p-6 sm:p-8">
-        <MessagesSquare className="h-8 w-8 text-primary" aria-hidden />
-        <p className="mt-6 text-sm font-semibold uppercase tracking-[0.18em] text-primary">Branding</p>
-        <p className="mt-2 text-2xl font-semibold leading-snug text-foreground sm:text-4xl">
-          é aquilo que as pessoas <span className="text-primary underline decoration-primary/30 decoration-[3px] underline-offset-[6px]">falam</span> sobre a sua empresa.
-        </p>
-      </Reveal>
+      {step >= 1 ? (
+        <Reveal className="rounded-ds-xl border-2 border-primary bg-card p-6 sm:p-8">
+          <MessagesSquare className="h-8 w-8 text-primary" aria-hidden />
+          <p className="mt-6 text-sm font-semibold uppercase tracking-[0.18em] text-primary">Branding</p>
+          <p className="mt-2 text-2xl font-semibold leading-snug text-foreground sm:text-4xl">
+            é aquilo que as pessoas <span className={HL}>falam</span> sobre a sua empresa.
+          </p>
+        </Reveal>
+      ) : (
+        <button
+          type="button"
+          onClick={onReveal}
+          className="grid min-h-[200px] place-items-center rounded-ds-xl border-2 border-dashed border-border text-base font-medium text-muted-foreground transition-colors hover:border-primary hover:text-foreground"
+        >
+          E o branding?
+        </button>
+      )}
     </div>
-    <Reveal delay={2} className="text-lg text-muted-foreground sm:text-xl">
-      Você controla o que diz. O branding cuida do que fica na cabeça de quem ouve.
-    </Reveal>
+    {step >= 1 && (
+      <Reveal delay={0.9} className="text-lg text-muted-foreground sm:text-xl">
+        Você controla o que diz. O branding cuida do que fica na cabeça de quem ouve.
+      </Reveal>
+    )}
   </div>
 );
 
-const SlidePercepcao = () => (
-  <div className="mx-auto w-full max-w-5xl space-y-6 sm:space-y-8">
-    <Reveal>
-      <Eyebrow>O que é branding</Eyebrow>
-    </Reveal>
-    <Reveal delay={0.2}>
-      <h2 className="text-3xl font-bold leading-tight tracking-tight text-foreground sm:text-5xl">
-        Branding é a ferramenta para <span className="text-primary underline decoration-primary/30 decoration-[3px] underline-offset-[6px]">moldar a percepção</span> das pessoas sobre a sua marca.
-      </h2>
-    </Reveal>
-    <Reveal delay={0.8}>
-      <p className="text-lg font-medium text-muted-foreground">Duas padarias na mesma rua. O mesmo pão francês.</p>
-    </Reveal>
-    <div className="grid gap-4 md:grid-cols-2">
-      <Reveal delay={1.2} className="rounded-ds-xl border border-border bg-card p-6">
-        <p className="text-sm font-semibold uppercase tracking-[0.18em] text-muted-foreground">Padaria A</p>
-        <p className="mt-3 text-xl leading-snug text-foreground">Você pega o pão, paga e vai embora. Ninguém lembra de você.</p>
+const EXAMPLES = [
+  {
+    tab: "Padaria",
+    intro: "Duas padarias na mesma rua. O mesmo pão francês.",
+    a: { label: "Padaria A", text: "Você pega o pão, paga e vai embora. Ninguém lembra de você." },
+    b: { label: "Padaria B", text: "Te chamam pelo nome, o cheiro de pão saindo do forno chega na calçada e o embrulho vem caprichado." },
+    lesson: "O pão é igual. A percepção não.",
+    result: "Na B tem fila, e o pão custa mais.",
+  },
+  {
+    tab: "Café",
+    intro: "Um café na padaria custa R$ 5. Na Starbucks, R$ 18.",
+    a: { label: "Café do balcão", text: "Copo americano, em pé, rapidinho. Cumpre o que promete." },
+    b: { label: "Starbucks", text: "Seu nome escrito no copo, um lugar para ficar horas e a mesma experiência em qualquer cidade do mundo." },
+    lesson: "Não é só café.",
+    result: "É a experiência, e o que ela diz sobre quem toma.",
+  },
+  {
+    tab: "Tênis",
+    intro: "Dois tênis parecidos, às vezes feitos na mesma região.",
+    a: { label: "Sem marca", text: "Confortável, bonito, preço justo. Ninguém comenta." },
+    b: { label: "Nike", text: "\"Just do it\", atletas que superam limites, o símbolo que todo mundo reconhece." },
+    lesson: "O cliente não compra só o tênis.",
+    result: "Compra quem ele quer ser quando calça.",
+  },
+  {
+    tab: "Barbearia",
+    intro: "Duas barbearias. O mesmo corte degradê.",
+    a: { label: "Barbearia A", text: "Cadeira, espelho, corte rápido. Próximo." },
+    b: { label: "Barbearia B", text: "Música boa, bebida gelada, o barbeiro lembra do seu corte e do seu time." },
+    lesson: "O corte é o mesmo.",
+    result: "Na B custa o dobro e a agenda vive cheia.",
+  },
+  {
+    tab: "Água",
+    intro: "Água mineral. Nos dois casos, só água.",
+    a: { label: "Garrafa comum", text: "R$ 2 na geladeira do mercado. Você nem olha o rótulo." },
+    b: { label: "Garrafa de vidro premium", text: "Servida na mesa do restaurante, design limpo, origem contada no rótulo. R$ 15." },
+    lesson: "O produto é o mesmo.",
+    result: "O que muda é o que a marca faz você sentir.",
+  },
+];
+
+const SlidePercepcao = () => {
+  const [ex, setEx] = useState(0);
+  const e = EXAMPLES[ex];
+  return (
+    <div className="mx-auto w-full max-w-5xl space-y-6 sm:space-y-7">
+      <Reveal>
+        <Eyebrow>O que é branding</Eyebrow>
       </Reveal>
-      <Reveal delay={1.7} className="rounded-ds-xl border-2 border-primary bg-card p-6">
-        <p className="text-sm font-semibold uppercase tracking-[0.18em] text-primary">Padaria B</p>
-        <p className="mt-3 text-xl leading-snug text-foreground">
-          Te chamam pelo nome, o cheiro de pão saindo do forno chega na calçada e o embrulho vem caprichado.
-        </p>
+      <Reveal delay={0.2}>
+        <h2 className="text-3xl font-bold leading-tight tracking-tight text-foreground sm:text-5xl">
+          Branding é a ferramenta para <span className={HL}>moldar a percepção</span> das pessoas sobre a sua marca.
+        </h2>
       </Reveal>
+      <Reveal delay={0.6}>
+        <div className="flex flex-wrap gap-2" role="tablist" aria-label="Exemplos">
+          {EXAMPLES.map((x, i) => (
+            <button
+              key={x.tab}
+              type="button"
+              role="tab"
+              aria-selected={ex === i}
+              onClick={() => setEx(i)}
+              className={cn(
+                "h-10 rounded-full border px-4 text-sm font-semibold transition-colors",
+                ex === i ? "border-primary bg-primary text-primary-foreground" : "border-border bg-card text-foreground hover:border-primary",
+              )}
+            >
+              {x.tab}
+            </button>
+          ))}
+        </div>
+      </Reveal>
+      <div key={ex} className="space-y-5">
+        <Reveal delay={ex === 0 ? 0.8 : 0.05} y={12}>
+          <p className="text-lg font-medium text-muted-foreground">{e.intro}</p>
+        </Reveal>
+        <div className="grid gap-4 md:grid-cols-2">
+          <Reveal delay={ex === 0 ? 1.1 : 0.2} className="rounded-ds-xl border border-border bg-card p-6">
+            <p className="text-sm font-semibold uppercase tracking-[0.18em] text-muted-foreground">{e.a.label}</p>
+            <p className="mt-3 text-xl leading-snug text-foreground">{e.a.text}</p>
+          </Reveal>
+          <Reveal delay={ex === 0 ? 1.6 : 0.5} className="rounded-ds-xl border-2 border-primary bg-card p-6">
+            <p className="text-sm font-semibold uppercase tracking-[0.18em] text-primary">{e.b.label}</p>
+            <p className="mt-3 text-xl leading-snug text-foreground">{e.b.text}</p>
+          </Reveal>
+        </div>
+        <Reveal delay={ex === 0 ? 2.2 : 0.9}>
+          <p className="text-xl font-semibold text-foreground sm:text-2xl">
+            {e.lesson} <span className={HL}>{e.result}</span>
+          </p>
+        </Reveal>
+      </div>
     </div>
-    <Reveal delay={2.4}>
-      <p className="text-xl font-semibold text-foreground sm:text-2xl">
-        O pão é igual. A percepção não. <span className="text-primary underline decoration-primary/30 decoration-[3px] underline-offset-[6px]">Na B tem fila, e o pão custa mais.</span>
-      </p>
-    </Reveal>
-  </div>
-);
+  );
+};
 
 const IMPACTS = [
   { icon: TrendingUp, title: "Cobra mais", text: "Valor percebido maior sustenta um preço maior, sem guerra de desconto." },
@@ -168,6 +249,7 @@ const SlideJornada = ({ onStart }: { onStart: () => void }) => (
 export const BrandIntro = ({ open, onClose }: Props) => {
   const [index, setIndex] = useState(0);
   const [dir, setDir] = useState(1);
+  const [step, setStep] = useState(0);
   const reduce = useReducedMotion();
   const total = 4;
 
@@ -176,13 +258,23 @@ export const BrandIntro = ({ open, onClose }: Props) => {
       if (next < 0 || next >= total) return;
       setDir(next > index ? 1 : -1);
       setIndex(next);
+      setStep(next < index ? STEPS[next] - 1 : 0);
     },
     [index],
   );
 
   useEffect(() => {
-    if (open) setIndex(0);
+    if (open) {
+      setIndex(0);
+      setStep(0);
+    }
   }, [open]);
+
+  const advance = useCallback(() => {
+    if (step < STEPS[index] - 1) setStep((v) => v + 1);
+    else if (index === total - 1) onClose();
+    else go(index + 1);
+  }, [step, index, go, onClose]);
 
   useEffect(() => {
     if (!open) return;
@@ -190,8 +282,7 @@ export const BrandIntro = ({ open, onClose }: Props) => {
       if (e.key === "Escape") onClose();
       else if (e.key === "ArrowRight" || e.key === " " || e.key === "PageDown") {
         e.preventDefault();
-        if (index === total - 1) onClose();
-        else go(index + 1);
+        advance();
       } else if (e.key === "ArrowLeft" || e.key === "PageUp") {
         e.preventDefault();
         go(index - 1);
@@ -199,9 +290,9 @@ export const BrandIntro = ({ open, onClose }: Props) => {
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [open, index, go, onClose]);
+  }, [open, index, go, advance, onClose]);
 
-  const slides = [<SlideMarketing key="m" />, <SlidePercepcao key="p" />, <SlideImpactos key="i" />, <SlideJornada key="j" onStart={onClose} />];
+  const slides = [<SlideMarketing key="m" step={step} onReveal={() => setStep(1)} />, <SlidePercepcao key="p" />, <SlideImpactos key="i" />, <SlideJornada key="j" onStart={onClose} />];
 
   return (
     <AnimatePresence>
@@ -270,13 +361,13 @@ export const BrandIntro = ({ open, onClose }: Props) => {
             </span>
             <button
               type="button"
-              onClick={() => (index === total - 1 ? onClose() : go(index + 1))}
+              onClick={advance}
               className={cn(
                 "inline-flex h-11 items-center gap-2 rounded-ds-lg px-4 text-sm font-semibold",
                 "bg-primary text-primary-foreground hover:bg-primary/90",
               )}
             >
-              {index === total - 1 ? "Ir para o quadro" : "Avançar"} <ArrowRight className="h-4 w-4" />
+              {index === total - 1 ? "Ir para o quadro" : index === 0 && step === 0 ? "Revelar branding" : "Avançar"} <ArrowRight className="h-4 w-4" />
             </button>
           </div>
         </motion.div>
