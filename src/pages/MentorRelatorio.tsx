@@ -36,6 +36,7 @@ import { bookingRequiresReport, getEffectiveBookingStatus, isBookingPast } from 
 import { mentorAiReportEnabled } from "@/lib/mentorAiReport";
 import { StudentTools } from "@/components/StudentTools";
 import { MappingPdfAttach } from "@/components/MappingPdfAttach";
+import { PlatformToolAttach } from "@/components/PlatformToolAttach";
 import { SessionDeliverableDialog } from "@/components/SessionDeliverableDialog";
 import {
   invalidateMentorBookingQueries,
@@ -958,6 +959,14 @@ const MentorRelatorioPage = () => {
             companyName={libertyProfile.company_name}
             mentorName={profile?.full_name}
             sessionDate={booking?.scheduled_date}
+            toolsBasePath={layoutRole === "admin" ? "/admin/ferramentas" : "/mentor/ferramentas"}
+          />
+        )}
+
+        {libertyProfile?.id && bookingId && (
+          <PlatformToolAttach
+            libertyId={libertyProfile.id}
+            bookingId={bookingId}
             toolsBasePath={layoutRole === "admin" ? "/admin/ferramentas" : "/mentor/ferramentas"}
           />
         )}
